@@ -1,6 +1,0 @@
-@VfrServer_HostAddress = http://localhost:5191
-
-GET {{VfrServer_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
