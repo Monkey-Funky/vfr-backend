@@ -1,0 +1,10 @@
+﻿global using MediatR;
+global using FluentValidation;
+global using Microsoft.Extensions.Logging;
+global using System.Diagnostics;
+global using Application.Interfaces;
+global using Application.Behaviors;
+global using Microsoft.Extensions.DependencyInjection;
+global using System.Reflection;
+global using Domain.Common;
+global using System.Linq.Expressions;
