@@ -1,6 +1,6 @@
 ﻿namespace API.Middleware;
 
-public class ExceptionHandlingMiddleware
+public sealed class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
@@ -27,62 +27,100 @@ public class ExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
-        _logger.LogError(exception, "An error occurred: {Message}", exception.Message);
+        _logger.LogError(exception,
+            "Unhandled exception | TraceId: {TraceId} | Error: {Message}",
+            context.TraceIdentifier, exception.Message);
 
-        var response = context.Response;
-        response.ContentType = "application/json";
+        var (statusCode, response) = MapException(exception, context.TraceIdentifier);
 
-        var errorResponse = new
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/json";
+
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(response, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+    }
+
+    private static (int StatusCode, ApiErrorResponse Response) MapException(
+        Exception exception,
+        string traceId)
+    {
+        return exception switch
         {
-            IsSuccess = false,
-            Message = "An error occurred while processing your request.",
-            Errors = new List<string>()
+            ValidationException ex => (
+                (int)HttpStatusCode.UnprocessableContent,
+                new ApiErrorResponse
+                {
+                    Code = "VALIDATION_ERROR",
+                    Message = ex.Message,
+                    Details = ex.Errors.SelectMany(e => e.Value),
+                    TraceId = traceId
+                }),
+
+            BusinessRuleException ex => (
+                (int)HttpStatusCode.UnprocessableContent,
+                new ApiErrorResponse
+                {
+                    Code = ex.Code,
+                    Message = ex.Message,
+                    TraceId = traceId
+                }),
+
+            NotFoundException ex => (
+                (int)HttpStatusCode.NotFound,
+                new ApiErrorResponse
+                {
+                    Code = "NOT_FOUND",
+                    Message = ex.Message,
+                    TraceId = traceId
+                }),
+
+            ConflictException ex => (
+                (int)HttpStatusCode.Conflict,
+                new ApiErrorResponse
+                {
+                    Code = "CONFLICT",
+                    Message = ex.Message,
+                    TraceId = traceId
+                }),
+
+            UnauthorizedException ex => (
+                (int)HttpStatusCode.Forbidden,
+                new ApiErrorResponse
+                {
+                    Code = "FORBIDDEN",
+                    Message = ex.Message,
+                    TraceId = traceId
+                }),
+
+            ExternalServiceException ex => (
+                (int)HttpStatusCode.BadGateway,
+                new ApiErrorResponse
+                {
+                    Code = "EXTERNAL_SERVICE_ERROR",
+                    Message = $"External service '{ex.ServiceName}' is unavailable. Please try again.",
+                    TraceId = traceId
+                }),
+
+            UnauthorizedAccessException => (
+                (int)HttpStatusCode.Unauthorized,
+                new ApiErrorResponse
+                {
+                    Code = "UNAUTHORIZED",
+                    Message = "Authentication is required.",
+                    TraceId = traceId
+                }),
+
+            _ => (
+                (int)HttpStatusCode.InternalServerError,
+                new ApiErrorResponse
+                {
+                    Code = "INTERNAL_ERROR",
+                    Message = "An unexpected error occurred.",
+                    TraceId = traceId
+                })
         };
-
-        switch (exception)
-        {
-            case ValidationException validationException:
-                response.StatusCode = (int)HttpStatusCode.BadRequest;
-                errorResponse = new
-                {
-                    IsSuccess = false,
-                    Message = validationException.Message,
-                    Errors = validationException.Errors.SelectMany(e => e.Value).ToList()
-                };
-                break;
-
-            case NotFoundException notFoundException:
-                response.StatusCode = (int)HttpStatusCode.NotFound;
-                errorResponse = new
-                {
-                    IsSuccess = false,
-                    Message = notFoundException.Message,
-                    Errors = new List<string> { notFoundException.Message }
-                };
-                break;
-
-            case UnauthorizedAccessException:
-                response.StatusCode = (int)HttpStatusCode.Unauthorized;
-                errorResponse = new
-                {
-                    IsSuccess = false,
-                    Message = "Unauthorized access.",
-                    Errors = new List<string> { "You are not authorized to perform this action." }
-                };
-                break;
-
-            default:
-                response.StatusCode = (int)HttpStatusCode.InternalServerError;
-                errorResponse = new
-                {
-                    IsSuccess = false,
-                    Message = "An internal server error occurred.",
-                    Errors = new List<string> { exception.Message }
-                };
-                break;
-        }
-
-        var result = JsonSerializer.Serialize(errorResponse);
-        await response.WriteAsync(result);
     }
 }

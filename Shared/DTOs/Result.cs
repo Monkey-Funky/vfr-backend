@@ -2,71 +2,30 @@
 
 public class Result
 {
-    public bool IsSuccess { get; set; }
-    public string Message { get; set; } = string.Empty;
-    public IEnumerable<string> Errors { get; set; } = new List<string>();
+    public bool IsSuccess { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public IEnumerable<string> Errors { get; init; } = [];
 
     public static Result Success(string message = "Operation completed successfully")
-    {
-        return new Result
-        {
-            IsSuccess = true,
-            Message = message
-        };
-    }
+        => new() { IsSuccess = true, Message = message };
 
     public static Result Failure(string message, IEnumerable<string>? errors = null)
-    {
-        return new Result
-        {
-            IsSuccess = false,
-            Message = message,
-            Errors = errors ?? new List<string>()
-        };
-    }
+        => new() { IsSuccess = false, Message = message, Errors = errors ?? [] };
 
     public static Result Failure(string message, string error)
-    {
-        return new Result
-        {
-            IsSuccess = false,
-            Message = message,
-            Errors = new List<string> { error }
-        };
-    }
+        => new() { IsSuccess = false, Message = message, Errors = [error] };
 }
 
-public class Result<T> : Result
+public sealed class Result<T> : Result
 {
-    public T? Data { get; set; }
+    public T? Data { get; init; }
 
     public static Result<T> Success(T data, string message = "Operation completed successfully")
-    {
-        return new Result<T>
-        {
-            IsSuccess = true,
-            Message = message,
-            Data = data
-        };
-    }
+        => new() { IsSuccess = true, Message = message, Data = data };
 
     public new static Result<T> Failure(string message, IEnumerable<string>? errors = null)
-    {
-        return new Result<T>
-        {
-            IsSuccess = false,
-            Message = message,
-            Errors = errors ?? new List<string>()
-        };
-    }
+        => new() { IsSuccess = false, Message = message, Errors = errors ?? [] };
 
     public new static Result<T> Failure(string message, string error)
-    {
-        return new Result<T>
-        {
-            IsSuccess = false,
-            Message = message,
-            Errors = new List<string> { error }
-        };
-    }
+        => new() { IsSuccess = false, Message = message, Errors = [error] };
 }

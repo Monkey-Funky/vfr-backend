@@ -1,54 +1,50 @@
 ﻿
+using Microsoft.EntityFrameworkCore.Storage;
+
 namespace Infrastructure.Persistence;
 
-public class UnitOfWork : IUnitOfWork
+public sealed class UnitOfWork : IUnitOfWork
 {
     private readonly ApplicationDbContext _context;
-    private readonly Dictionary<Type, object> _repositories;
+    private readonly Dictionary<Type, object> _repositories = [];
     private IDbContextTransaction? _transaction;
 
     public UnitOfWork(ApplicationDbContext context)
     {
         _context = context;
-        _repositories = new Dictionary<Type, object>();
     }
 
     public IRepository<T> Repository<T>() where T : BaseEntity
     {
         var type = typeof(T);
 
-        if (!_repositories.ContainsKey(type))
+        if (!_repositories.TryGetValue(type, out var repository))
         {
-            _repositories[type] = new Repository<T>(_context);
+            repository = new Repository<T>(_context);
+            _repositories[type] = repository;
         }
 
-        return (IRepository<T>)_repositories[type];
+        return (IRepository<T>)repository;
     }
 
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
-    {
-        return await _context.SaveChangesAsync(cancellationToken);
-    }
+        => await _context.SaveChangesAsync(cancellationToken);
 
-    public async Task<bool> SaveChangesReturnBoolAsync(CancellationToken cancellationToken = default)
-    {
-        return await _context.SaveChangesAsync(cancellationToken) > 0;
-    }
+    public async Task<bool> SaveChangesReturnBoolAsync(
+        CancellationToken cancellationToken = default)
+        => await _context.SaveChangesAsync(cancellationToken) > 0;
 
     public async Task BeginTransactionAsync(CancellationToken cancellationToken = default)
-    {
-        _transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-    }
+        => _transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
 
     public async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
-            if (_transaction != null)
-            {
+
+            if (_transaction is not null)
                 await _transaction.CommitAsync(cancellationToken);
-            }
         }
         catch
         {
@@ -57,7 +53,7 @@ public class UnitOfWork : IUnitOfWork
         }
         finally
         {
-            if (_transaction != null)
+            if (_transaction is not null)
             {
                 await _transaction.DisposeAsync();
                 _transaction = null;
@@ -67,7 +63,7 @@ public class UnitOfWork : IUnitOfWork
 
     public async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
     {
-        if (_transaction != null)
+        if (_transaction is not null)
         {
             await _transaction.RollbackAsync(cancellationToken);
             await _transaction.DisposeAsync();
@@ -75,9 +71,11 @@ public class UnitOfWork : IUnitOfWork
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _transaction?.Dispose();
-        _context.Dispose();
+        if (_transaction is not null)
+            await _transaction.DisposeAsync();
+
+        await _context.DisposeAsync();
     }
 }

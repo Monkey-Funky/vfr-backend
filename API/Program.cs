@@ -1,32 +1,63 @@
-var builder = WebApplication.CreateBuilder(args);
+﻿var builder = WebApplication.CreateBuilder(args);
 
-// 1. LOGGING CONFIGURATION
+// ── 1. SERILOG ───────────────────────────────────────────────────────────────
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
-    .WriteTo.Console()
-    .WriteTo.File("Logs/log-.txt", rollingInterval: RollingInterval.Day)
+    .WriteTo.Console(outputTemplate:
+        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(
+        path: "Logs/vfr-.log",
+        rollingInterval: RollingInterval.Day,
+        outputTemplate:
+            "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
 builder.Host.UseSerilog();
 
-// 2. CORE SERVICES
+// ── 2. CORE SERVICES ─────────────────────────────────────────────────────────
+builder.Services.AddControllers()
+    .AddJsonOptions(opts =>
+    {
+        opts.JsonSerializerOptions.PropertyNamingPolicy =
+            System.Text.Json.JsonNamingPolicy.CamelCase;
+        opts.JsonSerializerOptions.DefaultIgnoreCondition =
+            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+    });
 
-builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpContextAccessor();
 
-// 3. APPLICATION LAYERS
-
+// ── 3. APPLICATION & INFRASTRUCTURE ─────────────────────────────────────────
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// CurrentUserService lives in API layer — registered here
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
-
-// 4. AUTHENTICATION & AUTHORIZATION
+// ── 4. JWT RS256 AUTHENTICATION ──────────────────────────────────────────────
+// DEVELOPMENT SIMPLIFICATION:
+// RSA keys are auto-generated every time the app starts.
+// No OpenSSL, no user-secrets, no .pem files needed.
+//
+// ⚠ Trade-off: any JWT token you got before a restart will be INVALID
+//   after restart because the key changes. Just log in again to get a
+//   new token. This is perfectly fine during development.
+//
+// When you are ready for production, replace this block with keys
+// loaded from environment variables or Azure Key Vault.
 
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = jwtSettings["Secret"];
+
+// Generate a fresh RSA key pair in memory
+var rsa = RSA.Create(keySizeInBits: 2048);
+
+// Register the RSA instance as a singleton so TokenService (P-012) can
+// use the SAME private key for signing that Program.cs uses for validation.
+// Without this, signing and validation use different keys → 401 on every request.
+builder.Services.AddSingleton(rsa);
+
+var rsaSecurityKey = new RsaSecurityKey(rsa);
 
 builder.Services.AddAuthentication(options =>
 {
@@ -43,48 +74,63 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         ValidIssuer = jwtSettings["Issuer"],
         ValidAudience = jwtSettings["Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey ?? string.Empty)),
+        IssuerSigningKey = rsaSecurityKey,
+        ValidAlgorithms = ["RS256"],
+
+        // Zero clock skew — tokens expire exactly when they should
         ClockSkew = TimeSpan.Zero
     };
 });
 
 builder.Services.AddAuthorization();
 
-
-// 5. RATE LIMITING
-
+// ── 5. RATE LIMITING ─────────────────────────────────────────────────────────
 builder.Services.AddMemoryCache();
-builder.Services.Configure<IpRateLimitOptions>(builder.Configuration.GetSection("IpRateLimiting"));
-builder.Services.Configure<IpRateLimitPolicies>(builder.Configuration.GetSection("IpRateLimitPolicies"));
+builder.Services.Configure<IpRateLimitOptions>(
+    builder.Configuration.GetSection("IpRateLimiting"));
+builder.Services.Configure<IpRateLimitPolicies>(
+    builder.Configuration.GetSection("IpRateLimitPolicies"));
 builder.Services.AddInMemoryRateLimiting();
 builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
 
-// 6. CORS POLICY
-
+// ── 6. CORS ──────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy("VfrCors", policy =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        if (builder.Environment.IsDevelopment())
+        {
+            // Development: allow everything so Swagger / Postman / frontend all work
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        }
+        else
+        {
+            var allowedOrigins = builder.Configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>() ?? [];
+
+            policy.WithOrigins(allowedOrigins)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        }
     });
 });
 
-// 7. SWAGGER DOCUMENTATION
-
+// ── 7. SWAGGER ───────────────────────────────────────────────────────────────
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
     {
-        Title = "Virtual Fitting Room API",
+        Title = "VFR Retailer API",
         Version = "v1",
-        Description = "API for Virtual Fitting Room Application"
+        Description = "Virtual Fitting Room — Retailer Module API"
     });
 
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token.",
+        Description = "Paste your JWT token here. Example: Bearer eyJhbGci...",
         Name = "Authorization",
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
@@ -100,47 +146,58 @@ builder.Services.AddSwaggerGen(c =>
                 Reference = new Microsoft.OpenApi.Models.OpenApiReference
                 {
                     Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
-                    Id = "Bearer"
+                    Id   = "Bearer"
                 }
             },
-            new string[] {}
+            []
         }
     });
 });
 
+// ── 8. BUILD ─────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
+// ── 9. MIDDLEWARE PIPELINE ───────────────────────────────────────────────────
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+app.UseIpRateLimiting();
 
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Virtual Fitting Room API V1");
-        c.RoutePrefix = string.Empty; 
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "VFR Retailer API v1");
+        c.RoutePrefix = string.Empty; // Swagger opens at https://localhost:PORT/
     });
 }
 
-app.UseMiddleware<ExceptionHandlingMiddleware>();
-
-app.UseIpRateLimiting();
+app.UseSerilogRequestLogging(opts =>
+{
+    opts.MessageTemplate =
+        "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000}ms";
+});
 
 app.UseHttpsRedirection();
-app.UseCors("AllowAll");
+app.UseCors("VfrCors");
 
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.UseSerilogRequestLogging();
-
 app.MapControllers();
 
+// ── 10. RUN ──────────────────────────────────────────────────────────────────
 try
 {
-    Log.Information("Starting Virtual Fitting Room API");
-    app.Run();
+    Log.Information("Starting VFR Retailer API — Development mode (auto-generated RSA keys)");
+    await app.RunAsync();
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "Application start-up failed");
+    Log.Fatal(ex, "VFR Retailer API failed to start");
+    throw;
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
 }

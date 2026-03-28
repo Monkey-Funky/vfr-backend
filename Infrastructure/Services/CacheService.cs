@@ -1,6 +1,6 @@
 ﻿namespace Infrastructure.Services;
 
-public class CacheService : ICacheService
+public sealed class CacheService : ICacheService
 {
     private readonly IDistributedCache _cache;
 
@@ -9,38 +9,49 @@ public class CacheService : ICacheService
         _cache = cache;
     }
 
-    public async Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) where T : class
+    public async Task<T?> GetAsync<T>(
+        string key,
+        CancellationToken cancellationToken = default)
+        where T : class
     {
         var cached = await _cache.GetStringAsync(key, cancellationToken);
 
-        if (string.IsNullOrEmpty(cached))
-        {
-            return null;
-        }
-
-        return JsonSerializer.Deserialize<T>(cached);
+        return cached is null
+            ? null
+            : JsonSerializer.Deserialize<T>(cached);
     }
 
-    public async Task SetAsync<T>(string key, T value, TimeSpan? expiry = null, CancellationToken cancellationToken = default) where T : class
+    public async Task SetAsync<T>(
+        string key,
+        T value,
+        TimeSpan? expiry = null,
+        CancellationToken cancellationToken = default)
+        where T : class
     {
-        var serialized = JsonSerializer.Serialize(value);
-
-        var options = new DistributedCacheEntryOptions();
-
-        if (expiry.HasValue)
+        var options = new DistributedCacheEntryOptions
         {
-            options.AbsoluteExpirationRelativeToNow = expiry.Value;
-        }
-        else
-        {
-            options.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
-        }
+            AbsoluteExpirationRelativeToNow = expiry ?? TimeSpan.FromHours(1)
+        };
 
-        await _cache.SetStringAsync(key, serialized, options, cancellationToken);
+        await _cache.SetStringAsync(
+            key,
+            JsonSerializer.Serialize(value),
+            options,
+            cancellationToken);
     }
 
-    public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
+    public async Task RemoveAsync(
+        string key,
+        CancellationToken cancellationToken = default)
+        => await _cache.RemoveAsync(key, cancellationToken);
+
+    public Task RemoveByPrefixAsync(
+        string prefix,
+        CancellationToken cancellationToken = default)
     {
-        await _cache.RemoveAsync(key, cancellationToken);
+        // Note: IDistributedCache has no built-in prefix removal.
+        // If Redis is configured, this can be implemented with IConnectionMultiplexer.
+        // For now this is a no-op stub; P-049 (Polly / resilience) documents the full impl.
+        return Task.CompletedTask;
     }
 }

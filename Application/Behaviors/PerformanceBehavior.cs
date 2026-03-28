@@ -1,15 +1,20 @@
 ﻿namespace Application.Behaviors;
 
-public class PerformanceBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+public sealed class PerformanceBehavior<TRequest, TResponse>
+    : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
-    private readonly ILogger<PerformanceBehavior<TRequest, TResponse>> _logger;
-    private readonly Stopwatch _timer;
+    private const int SlowRequestThresholdMs = 500;
 
-    public PerformanceBehavior(ILogger<PerformanceBehavior<TRequest, TResponse>> logger)
+    private readonly ILogger<PerformanceBehavior<TRequest, TResponse>> _logger;
+    private readonly ICurrentUserService _currentUserService;
+
+    public PerformanceBehavior(
+        ILogger<PerformanceBehavior<TRequest, TResponse>> logger,
+        ICurrentUserService currentUserService)
     {
         _logger = logger;
-        _timer = new Stopwatch();
+        _currentUserService = currentUserService;
     }
 
     public async Task<TResponse> Handle(
@@ -17,21 +22,19 @@ public class PerformanceBehavior<TRequest, TResponse> : IPipelineBehavior<TReque
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
-        _timer.Start();
+        var timer = Stopwatch.StartNew();
 
         var response = await next();
 
-        _timer.Stop();
+        timer.Stop();
 
-        var elapsedMilliseconds = _timer.ElapsedMilliseconds;
-
-        if (elapsedMilliseconds > 500)
+        if (timer.ElapsedMilliseconds > SlowRequestThresholdMs)
         {
-            var requestName = typeof(TRequest).Name;
-
             _logger.LogWarning(
-                "Long Running Request: {RequestName} ({ElapsedMilliseconds} milliseconds)",
-                requestName, elapsedMilliseconds);
+                "Slow request detected: {RequestName} | {ElapsedMs}ms | RetailerId: {RetailerId}",
+                typeof(TRequest).Name,
+                timer.ElapsedMilliseconds,
+                _currentUserService.RetailerId?.ToString() ?? "anonymous");
         }
 
         return response;

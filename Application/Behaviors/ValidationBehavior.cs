@@ -2,7 +2,8 @@
 
 using DomainValidationException = Domain.Exceptions.ValidationException;
 
-public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+public sealed class ValidationBehavior<TRequest, TResponse>
+    : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
     private readonly IEnumerable<IValidator<TRequest>> _validators;
@@ -18,9 +19,7 @@ public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TReques
         CancellationToken cancellationToken)
     {
         if (!_validators.Any())
-        {
             return await next();
-        }
 
         var context = new ValidationContext<TRequest>(request);
 
@@ -29,20 +28,17 @@ public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TReques
 
         var failures = validationResults
             .SelectMany(r => r.Errors)
-            .Where(f => f != null)
+            .Where(f => f is not null)
             .ToList();
 
-        if (failures.Any())
-        {
-            throw new DomainValidationException(
-                failures.GroupBy(e => e.PropertyName)
-                    .ToDictionary(
-                        g => g.Key,
-                        g => g.Select(e => e.ErrorMessage).ToArray()
-                    )
-            );
-        }
+        if (failures.Count is 0)
+            return await next();
 
-        return await next();
+        throw new DomainValidationException(
+            failures
+                .GroupBy(e => e.PropertyName)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(e => e.ErrorMessage).ToArray()));
     }
 }

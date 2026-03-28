@@ -2,47 +2,40 @@
 
 public class Repository<T> : IRepository<T> where T : BaseEntity
 {
-    protected readonly ApplicationDbContext _context;
-    protected readonly DbSet<T> _dbSet;
+    protected readonly ApplicationDbContext Context;
+    protected readonly DbSet<T> DbSet;
 
     public Repository(ApplicationDbContext context)
     {
-        _context = context;
-        _dbSet = context.Set<T>();
+        Context = context;
+        DbSet = context.Set<T>();
     }
 
     public async Task<T?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        return await _dbSet
+        => await DbSet
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
-    }
 
-    public async Task<IReadOnlyList<T>> GetAllAsync(CancellationToken cancellationToken = default)
-    {
-        return await _dbSet
+    public async Task<IReadOnlyList<T>> GetAllAsync(
+        CancellationToken cancellationToken = default)
+        => await DbSet
             .AsNoTracking()
             .ToListAsync(cancellationToken);
-    }
 
     public async Task<IReadOnlyList<T>> FindAsync(
         System.Linq.Expressions.Expression<Func<T, bool>> predicate,
         CancellationToken cancellationToken = default)
-    {
-        return await _dbSet
+        => await DbSet
             .AsNoTracking()
             .Where(predicate)
             .ToListAsync(cancellationToken);
-    }
 
     public async Task<T?> FirstOrDefaultAsync(
         System.Linq.Expressions.Expression<Func<T, bool>> predicate,
         CancellationToken cancellationToken = default)
-    {
-        return await _dbSet
+        => await DbSet
             .AsNoTracking()
             .FirstOrDefaultAsync(predicate, cancellationToken);
-    }
 
     public async Task<(IReadOnlyList<T> Items, int TotalCount)> GetPagedAsync(
         int pageNumber,
@@ -50,14 +43,13 @@ public class Repository<T> : IRepository<T> where T : BaseEntity
         System.Linq.Expressions.Expression<Func<T, bool>>? predicate = null,
         CancellationToken cancellationToken = default)
     {
-        var query = _dbSet.AsNoTracking();
+        var query = DbSet.AsNoTracking();
 
-        if (predicate != null)
-        {
+        if (predicate is not null)
             query = query.Where(predicate);
-        }
 
         var totalCount = await query.CountAsync(cancellationToken);
+
         var items = await query
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
@@ -68,68 +60,60 @@ public class Repository<T> : IRepository<T> where T : BaseEntity
 
     public async Task<T> AddAsync(T entity, CancellationToken cancellationToken = default)
     {
-        await _dbSet.AddAsync(entity, cancellationToken);
+        await DbSet.AddAsync(entity, cancellationToken);
         return entity;
     }
 
-    public async Task<IEnumerable<T>> AddRangeAsync(
+    public async Task AddRangeAsync(
         IEnumerable<T> entities,
         CancellationToken cancellationToken = default)
-    {
-        await _dbSet.AddRangeAsync(entities, cancellationToken);
-        return entities;
-    }
+        => await DbSet.AddRangeAsync(entities, cancellationToken);
 
     public Task UpdateAsync(T entity, CancellationToken cancellationToken = default)
     {
-        _dbSet.Update(entity);
+        DbSet.Update(entity);
         return Task.CompletedTask;
     }
 
     public Task DeleteAsync(T entity, CancellationToken cancellationToken = default)
     {
-        _dbSet.Remove(entity);
+        DbSet.Remove(entity);
         return Task.CompletedTask;
     }
 
-    public Task DeleteRangeAsync(IEnumerable<T> entities, CancellationToken cancellationToken = default)
+    public Task DeleteRangeAsync(
+        IEnumerable<T> entities,
+        CancellationToken cancellationToken = default)
     {
-        _dbSet.RemoveRange(entities);
+        DbSet.RemoveRange(entities);
         return Task.CompletedTask;
     }
 
     public Task SoftDeleteAsync(T entity, CancellationToken cancellationToken = default)
     {
-        entity.IsDeleted = true;
-        _dbSet.Update(entity);
+        // DbContext.SetAuditFields() intercepts EntityState.Deleted and converts
+        // it to a soft delete automatically — no need to set IsDeleted manually here
+        DbSet.Remove(entity);
         return Task.CompletedTask;
     }
 
-    public Task SoftDeleteRangeAsync(IEnumerable<T> entities, CancellationToken cancellationToken = default)
+    public Task SoftDeleteRangeAsync(
+    IEnumerable<T> entities,
+    CancellationToken cancellationToken = default)
     {
-        foreach (var entity in entities)
-        {
-            entity.IsDeleted = true;
-        }
-        _dbSet.UpdateRange(entities);
+        DbSet.RemoveRange(entities);
         return Task.CompletedTask;
     }
 
     public async Task<int> CountAsync(
         System.Linq.Expressions.Expression<Func<T, bool>>? predicate = null,
         CancellationToken cancellationToken = default)
-    {
-        if (predicate == null)
-        {
-            return await _dbSet.CountAsync(cancellationToken);
-        }
-        return await _dbSet.CountAsync(predicate, cancellationToken);
-    }
+        => predicate is null
+            ? await DbSet.CountAsync(cancellationToken)
+            : await DbSet.CountAsync(predicate, cancellationToken);
 
     public async Task<bool> AnyAsync(
         System.Linq.Expressions.Expression<Func<T, bool>> predicate,
         CancellationToken cancellationToken = default)
-    {
-        return await _dbSet.AnyAsync(predicate, cancellationToken);
-    }
+        => await DbSet.AnyAsync(predicate, cancellationToken);
 }

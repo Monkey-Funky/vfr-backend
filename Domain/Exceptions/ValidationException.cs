@@ -1,6 +1,6 @@
 ﻿namespace Domain.Exceptions;
 
-public class ValidationException : DomainException
+public sealed class ValidationException : DomainException
 {
     public IDictionary<string, string[]> Errors { get; }
 
@@ -10,7 +10,8 @@ public class ValidationException : DomainException
         Errors = errors;
     }
 
-    public ValidationException(string message) : base(message)
+    public ValidationException(string message)
+        : base(message)
     {
         Errors = new Dictionary<string, string[]>();
     }

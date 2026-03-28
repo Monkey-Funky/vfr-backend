@@ -1,6 +1,7 @@
 ﻿namespace Application.Behaviors;
 
-public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+public sealed class LoggingBehavior<TRequest, TResponse>
+    : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
     private readonly ILogger<LoggingBehavior<TRequest, TResponse>> _logger;
@@ -20,27 +21,27 @@ public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
         CancellationToken cancellationToken)
     {
         var requestName = typeof(TRequest).Name;
-        var userId = _currentUserService.UserId ?? "Anonymous";
+        var retailerId = _currentUserService.RetailerId?.ToString() ?? "anonymous";
 
         _logger.LogInformation(
-            "Processing request: {RequestName} by User: {UserId} at {DateTime}",
-            requestName, userId, DateTime.UtcNow);
+            "Handling {RequestName} | RetailerId: {RetailerId}",
+            requestName, retailerId);
 
         try
         {
             var response = await next();
 
             _logger.LogInformation(
-                "Completed request: {RequestName} by User: {UserId}",
-                requestName, userId);
+                "Handled {RequestName} | RetailerId: {RetailerId}",
+                requestName, retailerId);
 
             return response;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Request failed: {RequestName} by User: {UserId}. Error: {ErrorMessage}",
-                requestName, userId, ex.Message);
+                "Error handling {RequestName} | RetailerId: {RetailerId} | Error: {ErrorMessage}",
+                requestName, retailerId, ex.Message);
             throw;
         }
     }

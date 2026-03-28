@@ -2,8 +2,19 @@
 
 public static class CacheKeys
 {
-    public const string UserPrefix = "User_";
-    public const string AllUsers = "All_Users";
+    // Subscription plans — invalidated on any plan update
+    public static string SubscriptionPlans(string billingCycle)
+        => $"subscription_plans:{billingCycle.ToLowerInvariant()}";
 
-    public static string GetUserKey(Guid userId) => $"{UserPrefix}{userId}";
+    // Per-retailer dashboard snapshot
+    public static string DashboardSnapshot(Guid retailerId)
+        => $"dashboard:{retailerId}";
+
+    // Per-retailer product count (for plan limit checks)
+    public static string ActiveProductCount(Guid retailerId)
+        => $"product_count:{retailerId}";
+
+    // Auth: refresh token version (for invalidation on logout)
+    public static string RefreshTokenVersion(Guid retailerId)
+        => $"rt_version:{retailerId}";
 }
