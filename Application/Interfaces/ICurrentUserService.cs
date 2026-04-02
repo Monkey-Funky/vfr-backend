@@ -19,4 +19,6 @@ public interface ICurrentUserService
     IEnumerable<string> Roles { get; }
 
     bool IsInRole(string role);
+
+    string? GetRawBearerToken();
 }

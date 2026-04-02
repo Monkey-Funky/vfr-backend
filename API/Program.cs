@@ -1,4 +1,6 @@
-﻿var builder = WebApplication.CreateBuilder(args);
+﻿
+
+var builder = WebApplication.CreateBuilder(args);
 
 // ── 1. SERILOG ───────────────────────────────────────────────────────────────
 Log.Logger = new LoggerConfiguration()
@@ -75,9 +77,7 @@ builder.Services.AddAuthentication(options =>
         ValidIssuer = jwtSettings["Issuer"],
         ValidAudience = jwtSettings["Audience"],
         IssuerSigningKey = rsaSecurityKey,
-        ValidAlgorithms = ["RS256"],
-
-        // Zero clock skew — tokens expire exactly when they should
+        ValidAlgorithms = ["RS256"],   // Explicit algorithm whitelist — prevents alg:none attack
         ClockSkew = TimeSpan.Zero
     };
 });
@@ -121,6 +121,28 @@ builder.Services.AddCors(options =>
 // ── 7. SWAGGER ───────────────────────────────────────────────────────────────
 builder.Services.AddSwaggerGen(c =>
 {
+    c.EnableAnnotations();
+
+    // FIX (F-Swagger-A): IFormFile must be explicitly mapped to a binary schema.
+    // Without this, Swashbuckle 7.x throws an InvalidOperationException during
+    // startup when it encounters IFormFile on RegisterStep2Request.BrandLogoFile.
+    // That exception is caught by ExceptionHandlingMiddleware, which returns
+    // {"code":"INTERNAL_ERROR",...} — a JSON body with no openapi version field —
+    // causing Swagger UI to display "does not specify a valid version field".
+    c.MapType<IFormFile>(() => new Microsoft.OpenApi.Models.OpenApiSchema
+    {
+        Type = "string",
+        Format = "binary"
+    });
+
+    // Safety net: if any action ever exposes Stream in its schema,
+    // map it to a binary file field instead of crashing.
+    c.MapType<Stream>(() => new Microsoft.OpenApi.Models.OpenApiSchema
+    {
+        Type = "string",
+        Format = "binary"
+    });
+
     c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
     {
         Title = "VFR Retailer API",
@@ -160,17 +182,18 @@ var app = builder.Build();
 // ── 9. MIDDLEWARE PIPELINE ───────────────────────────────────────────────────
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
-app.UseIpRateLimiting();
-
+// Swagger FIRST — before rate limiting so /swagger/* is never throttled
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "VFR Retailer API v1");
-        c.RoutePrefix = string.Empty; // Swagger opens at https://localhost:PORT/
+        c.RoutePrefix = string.Empty;
     });
 }
+
+app.UseIpRateLimiting(); // ← after swagger
 
 app.UseSerilogRequestLogging(opts =>
 {
@@ -201,3 +224,5 @@ finally
 {
     await Log.CloseAndFlushAsync();
 }
+
+public partial class Program { }

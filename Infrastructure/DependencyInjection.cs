@@ -1,62 +1,140 @@
-﻿namespace Infrastructure;
-
+﻿using Amazon;
+using Amazon.S3;
+using Infrastructure.Persistence;
+using Infrastructure.Services;
+using Infrastructure.Settings;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Polly;
+using Polly.CircuitBreaker;
+using Polly.Retry;
 
+namespace Infrastructure;
+
+/// <summary>
+/// Infrastructure layer DI registration.
+/// Called from Program.cs: builder.Services.AddInfrastructure(builder.Configuration).
+/// </summary>
 public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // ── Database ─────────────────────────────────────────────────────────
-        // CORRECTED: UseNpgsql replaces the original UseSqlServer.
+        // ── 1. EF Core + PostgreSQL ───────────────────────────────────────────
+        //
+        // UseSnakeCaseNamingConvention() is chained here on DbContextOptionsBuilder.
+        // This is the ONLY correct location — it must NOT be called on ModelBuilder
+        // inside OnModelCreating (that causes a compile error).
+        // Requires NuGet: EFCore.NamingConventions
         services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseNpgsql(
-                configuration.GetConnectionString("DefaultConnection"),
-                npgsql => npgsql
-                    .MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
-                    .EnableRetryOnFailure(
-                        maxRetryCount: 3,
-                        maxRetryDelay: TimeSpan.FromSeconds(5),
-                        errorCodesToAdd: null)));
+            options
+                .UseNpgsql(
+                    configuration.GetConnectionString("DefaultConnection"),
+                    npgsql => npgsql
+                        .MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)
+                        .EnableRetryOnFailure(
+                            maxRetryCount: 5,
+                            maxRetryDelay: TimeSpan.FromSeconds(30),
+                            errorCodesToAdd: null))
+                .UseSnakeCaseNamingConvention());   // ← correct: on DbContextOptionsBuilder
 
-        services.AddScoped<IApplicationDbContext>(provider =>
-            provider.GetRequiredService<ApplicationDbContext>());
+        services.AddScoped<IApplicationDbContext>(sp =>
+            sp.GetRequiredService<ApplicationDbContext>());
 
-        // ── Repository & Unit of Work ─────────────────────────────────────────
+        // ── 2. Options bindings ───────────────────────────────────────────────
+        //
+        // Using the lambda bind form (options => section.Bind(options)) is always
+        // safe regardless of which Configure<T> overload the compiler resolves.
+        // The IConfiguration overload requires Microsoft.Extensions.Options.ConfigurationExtensions;
+        // the lambda form never has that dependency.
+        services.Configure<JwtSettings>(options =>
+    configuration.GetSection("JwtSettings").Bind(options));
+
+        services.Configure<EmailSettings>(options =>
+            configuration.GetSection("Email").Bind(options));
+
+        services.Configure<S3Settings>(options =>
+            configuration.GetSection("S3").Bind(options));
+
+        services.Configure<GoogleSettings>(options =>
+            configuration.GetSection("Google").Bind(options));
+
+        // ── 3. Polly resilience pipelines ─────────────────────────────────────
+
+        services.AddResiliencePipeline("s3", builder =>
+        {
+            builder
+                .AddRetry(new RetryStrategyOptions
+                {
+                    MaxRetryAttempts = 3,
+                    Delay = TimeSpan.FromMilliseconds(500),
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true,
+                })
+                .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+                {
+                    FailureRatio = 0.5,
+                    SamplingDuration = TimeSpan.FromSeconds(30),
+                    MinimumThroughput = 5,
+                    BreakDuration = TimeSpan.FromSeconds(15),
+                });
+        });
+
+        services.AddResiliencePipeline("email", builder =>
+        {
+            builder.AddRetry(new RetryStrategyOptions
+            {
+                MaxRetryAttempts = 2,
+                Delay = TimeSpan.FromSeconds(1),
+                BackoffType = DelayBackoffType.Linear,
+            });
+        });
+
+        // ── 4. AWS S3 client (Singleton — IAmazonS3 is thread-safe) ──────────
+        services.AddSingleton<IAmazonS3>(_ =>
+        {
+            var region = configuration["S3:Region"] ?? "us-east-1";
+            return new AmazonS3Client(RegionEndpoint.GetBySystemName(region));
+        });
+
+        // ── 5. Application services ───────────────────────────────────────────
+        services.AddScoped<ITokenService, TokenService>();
+        services.AddScoped<IEmailService, EmailService>();
+        services.AddScoped<IFileStorageService, FileStorageService>();
+        services.AddScoped<IGoogleAuthService, GoogleAuthService>();
+
+        // ── 6. Repository & Unit of Work ──────────────────────────────────────
+        // These were incorrectly commented out — they are required by all command handlers.
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
-        // ── ASP.NET Core Identity ─────────────────────────────────────────────
-        services.AddIdentityCore<IdentityUser>(options =>
-        {
-            options.Password.RequireDigit = true;
-            options.Password.RequireLowercase = true;
-            options.Password.RequireUppercase = true;
-            options.Password.RequireNonAlphanumeric = true;
-            options.Password.RequiredLength = 8;
-
-            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
-            options.Lockout.MaxFailedAccessAttempts = 5;
-            options.Lockout.AllowedForNewUsers = true;
-
-            options.User.RequireUniqueEmail = true;
-        })
-        .AddRoles<IdentityRole>()
-        .AddEntityFrameworkStores<ApplicationDbContext>()
-        .AddDefaultTokenProviders();
-
-        // ── Redis Cache ───────────────────────────────────────────────────────
+        // ── 7. Redis / Distributed Cache ──────────────────────────────────────
         services.AddStackExchangeRedisCache(options =>
         {
-            options.Configuration = configuration["Redis:Configuration"];
-            options.InstanceName = configuration["Redis:InstanceName"];
+            options.Configuration = configuration["Redis:ConnectionString"];
+            options.InstanceName = "vfr:";
         });
 
         services.AddScoped<ICacheService, CacheService>();
 
-        // ── Utilities ─────────────────────────────────────────────────────────
+        // ── 8. Utilities ──────────────────────────────────────────────────────
         services.AddSingleton<IDateTime, DateTimeService>();
+
+
+        // ── Stripe Configuration ───────────────────────────────────────────────
+        services.Configure<StripeSettings>(
+            configuration.GetSection(StripeSettings.SectionName));
+
+        // ── Application Services ──────────────────────────────────────────────
+
+        // IPaymentGatewayService — Scoped: one instance per HTTP request.
+        // Uses Polly resilience pipeline "stripe" (registered in P-049).
+        services.AddScoped<IPaymentGatewayService, StripePaymentGatewayService>();
+
+        // IEncryptionService — Singleton: stateless, thread-safe AES-256 service.
+        services.AddSingleton<IEncryptionService, AesEncryptionService>();
 
         return services;
     }

@@ -1,4 +1,7 @@
-﻿namespace Infrastructure.Services;
+﻿using Microsoft.Extensions.Caching.Distributed;
+using System.Text.Json;
+
+namespace Infrastructure.Services;
 
 public sealed class CacheService : ICacheService
 {

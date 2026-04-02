@@ -1,142 +1,90 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Domain.Entities.Retailer;
+using Domain.Entities.Subscriptions;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using System.Reflection;
 
 namespace Infrastructure.Persistence;
 
-public class ApplicationDbContext : IdentityDbContext<IdentityUser>, IApplicationDbContext
+/// <summary>
+/// EF Core DbContext for the VFR Retailer module.
+///
+/// CONVENTIONS:
+///   • Snake-case column naming is applied globally via UseSnakeCaseNamingConvention()
+///     on DbContextOptionsBuilder in DependencyInjection.cs — NOT here in OnModelCreating.
+///   • All entity configurations are auto-discovered from this assembly via
+///     ApplyConfigurationsFromAssembly.
+///   • Soft-delete global query filters are set per entity in each
+///     IEntityTypeConfiguration class.
+///   • CreatedAt / UpdatedAt are stamped in SaveChangesAsync using EF Core's
+///     property metadata API (entry.Property(...).CurrentValue) because BaseEntity
+///     exposes only private setters.
+/// </summary>
+public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
 {
-    private readonly IDateTime _dateTime;
-    private readonly ICurrentUserService _currentUserService;
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : base(options) { }
 
-    public ApplicationDbContext(
-        DbContextOptions<ApplicationDbContext> options,
-        IDateTime dateTime,
-        ICurrentUserService currentUserService)
-        : base(options)
-    {
-        _dateTime = dateTime;
-        _currentUserService = currentUserService;
-    }
+    // ── DbSets ────────────────────────────────────────────────────────────────
 
-    // ── DbSet properties are added here as entities are created ──────────────
-    // Example added in P-011:
-    // public DbSet<RetailerAccount> RetailerAccounts => Set<RetailerAccount>();
+    public DbSet<RetailerAccount> RetailerAccounts => Set<RetailerAccount>();
+    public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
 
-    // ── EF Core Model Configuration ───────────────────────────────────────────
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
+
+    public DbSet<SubscriptionPayment> SubscriptionPayments => Set<SubscriptionPayment>();
+
+    public DbSet<SaasEnquiry> SaasEnquiries => Set<SaasEnquiry>();
+
+    public DbSet<PaymentMethod> PaymentMethods => Set<PaymentMethod>();
+
+    // ── Model configuration ───────────────────────────────────────────────────
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // NOTE: UseSnakeCaseNamingConvention() is NOT called here.
+        // It is configured on DbContextOptionsBuilder in DependencyInjection.cs:
+        //   options.UseNpgsql(...).UseSnakeCaseNamingConvention()
+        // Calling it here on ModelBuilder causes a compile error.
+
+        // Auto-discover all IEntityTypeConfiguration<T> classes in this assembly.
+        modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+
         base.OnModelCreating(modelBuilder);
-
-        // All IEntityTypeConfiguration<T> classes in this assembly are applied automatically.
-        // Add configuration files to Infrastructure/Persistence/Configurations/ per prompt.
-        modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
-
-        ApplySoftDeleteGlobalFilter(modelBuilder);
     }
 
-    // ── SaveChanges Overrides ─────────────────────────────────────────────────
+    // ── Audit timestamp stamping ───────────────────────────────────────────────
 
-    public override async Task<int> SaveChangesAsync(
-        CancellationToken cancellationToken = default)
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        SetAuditFields();
-        return await base.SaveChangesAsync(cancellationToken);
-    }
-
-    // Sync override — guards against anyone calling the sync version accidentally
-    public override int SaveChanges()
-    {
-        SetAuditFields();
-        return base.SaveChanges();
-    }
-
-    // ── Private Helpers ───────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Sets CreatedAt/CreatedBy on Added entries and UpdatedAt/UpdatedBy on Modified entries.
-    ///
-    /// KEY DESIGN DECISION:
-    /// We use entry.Property(...).CurrentValue instead of direct property assignment.
-    /// This lets EF Core bypass the C# 'protected set' access modifier using its internal
-    /// reflection mechanism — so BaseEntity.cs requires ZERO changes. The Domain layer
-    /// stays pure. The audit concern belongs entirely to Infrastructure.
-    /// </summary>
-    private void SetAuditFields()
-    {
-        var now = _dateTime.UtcNow;
-        var currentUser = _currentUserService.UserId;
+        // BaseEntity.CreatedAt and UpdatedAt have private setters, so we cannot
+        // write them via normal property assignment (entry.Entity.CreatedAt = ...).
+        //
+        // Instead we use EF Core's property metadata API:
+        //   entry.Property("CreatedAt").CurrentValue = ...
+        // This bypasses the CLR setter entirely and writes the value through EF's
+        // internal state manager — which is exactly how EF Core itself sets
+        // values for shadow properties and value-generated columns.
 
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
             switch (entry.State)
             {
                 case EntityState.Added:
-                    // EF Core sets these through its internal reflection — bypasses 'protected set'
-                    entry.Property(nameof(BaseEntity.CreatedAt)).CurrentValue = now;
-                    entry.Property(nameof(BaseEntity.CreatedBy)).CurrentValue = currentUser;
-
-                    // Ensure these are never accidentally set on a new entity
-                    entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = null;
-                    entry.Property(nameof(BaseEntity.UpdatedBy)).CurrentValue = null;
-
-                    // Ensure soft-delete flag is always false on creation
-                    entry.Property(nameof(BaseEntity.IsDeleted)).CurrentValue = false;
+                    entry.Property(nameof(BaseEntity.CreatedAt)).CurrentValue = DateTime.UtcNow;
+                    entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = DateTime.UtcNow;
                     break;
 
                 case EntityState.Modified:
-                    entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = now;
-                    entry.Property(nameof(BaseEntity.UpdatedBy)).CurrentValue = currentUser;
-
-                    // Prevent any external code from overwriting CreatedAt / CreatedBy
-                    // on an update — these are immutable after creation
-                    entry.Property(nameof(BaseEntity.CreatedAt)).IsModified = false;
-                    entry.Property(nameof(BaseEntity.CreatedBy)).IsModified = false;
-                    break;
-
-                case EntityState.Deleted:
-                    // Convert hard deletes into soft deletes automatically.
-                    // Any call to DbSet.Remove() is intercepted here and turned into
-                    // a soft delete — nothing is ever physically removed unless you
-                    // explicitly call Database.ExecuteSqlRaw().
-                    entry.State = EntityState.Modified;
-                    entry.Property(nameof(BaseEntity.IsDeleted)).CurrentValue = true;
-                    entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = now;
-                    entry.Property(nameof(BaseEntity.UpdatedBy)).CurrentValue = currentUser;
+                    entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = DateTime.UtcNow;
                     break;
             }
         }
-    }
 
-    /// <summary>
-    /// Applies a global query filter on every entity that inherits BaseEntity
-    /// so that soft-deleted records are automatically excluded from all queries.
-    /// You never need to add .Where(e => !e.IsDeleted) manually anywhere.
-    ///
-    /// To intentionally query deleted records use: .IgnoreQueryFilters()
-    /// Example: _context.Products.IgnoreQueryFilters().Where(p => p.IsDeleted)
-    /// </summary>
-    private static void ApplySoftDeleteGlobalFilter(ModelBuilder modelBuilder)
-    {
-        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
-        {
-            if (!typeof(BaseEntity).IsAssignableFrom(entityType.ClrType))
-                continue;
-
-            var parameter = System.Linq.Expressions.Expression
-                .Parameter(entityType.ClrType, "e");
-
-            var property = System.Linq.Expressions.Expression
-                .Property(parameter, nameof(BaseEntity.IsDeleted));
-
-            var falseConstant = System.Linq.Expressions.Expression
-                .Constant(false);
-
-            var filter = System.Linq.Expressions.Expression
-                .Lambda(
-                    System.Linq.Expressions.Expression.Equal(property, falseConstant),
-                    parameter);
-
-            modelBuilder.Entity(entityType.ClrType).HasQueryFilter(filter);
-        }
+        return base.SaveChangesAsync(cancellationToken);
     }
 }

@@ -39,4 +39,22 @@ public sealed class CurrentUserService : ICurrentUserService
 
     public bool IsInRole(string role) =>
         User?.IsInRole(role) ?? false;
+
+    public string? GetRawBearerToken()
+    {
+        var authHeader = _httpContextAccessor.HttpContext?
+            .Request.Headers.Authorization
+            .FirstOrDefault();
+
+        if (authHeader is null)
+            return null;
+
+        // Authorization header format: "Bearer {token}"
+        const string bearerPrefix = "Bearer ";
+        if (!authHeader.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var token = authHeader[bearerPrefix.Length..].Trim();
+        return string.IsNullOrWhiteSpace(token) ? null : token;
+    }
 }

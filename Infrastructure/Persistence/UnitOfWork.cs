@@ -1,18 +1,27 @@
-﻿
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Infrastructure.Persistence;
 
+/// <summary>
+/// Concrete implementation of IUnitOfWork.
+///
+/// CHANGE (P-017 BUG-001): Added GetTrackedByIdAsync{T} — loads an entity WITH
+///   EF Core change tracking so that the xmin concurrency token is included in
+///   subsequent UPDATE statements. This is a purely additive change.
+///   Auth handlers are NOT affected — they only use Repository{T}() and SaveChangesAsync.
+/// </summary>
 public sealed class UnitOfWork : IUnitOfWork
 {
     private readonly ApplicationDbContext _context;
     private readonly Dictionary<Type, object> _repositories = [];
-    private IDbContextTransaction? _transaction;
 
     public UnitOfWork(ApplicationDbContext context)
     {
         _context = context;
     }
+
+    // ── Repository factory ────────────────────────────────────────────────────
 
     public IRepository<T> Repository<T>() where T : BaseEntity
     {
@@ -27,6 +36,20 @@ public sealed class UnitOfWork : IUnitOfWork
         return (IRepository<T>)repository;
     }
 
+    // ── Tracked query for optimistic concurrency (BUG-001 FIX) ───────────────
+
+    /// <inheritdoc />
+    public async Task<T?> GetTrackedByIdAsync<T>(Guid id, CancellationToken ct = default)
+        where T : BaseEntity
+    {
+        // NO AsNoTracking() here — change tracking is REQUIRED so that EF Core
+        // includes the xmin concurrency token value in UPDATE WHERE clauses.
+        // Any concurrent row modification will cause DbUpdateConcurrencyException.
+        return await _context.Set<T>().FirstOrDefaultAsync(e => e.Id == id, ct);
+    }
+
+    // ── Save ──────────────────────────────────────────────────────────────────
+
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         => await _context.SaveChangesAsync(cancellationToken);
 
@@ -34,48 +57,44 @@ public sealed class UnitOfWork : IUnitOfWork
         CancellationToken cancellationToken = default)
         => await _context.SaveChangesAsync(cancellationToken) > 0;
 
-    public async Task BeginTransactionAsync(CancellationToken cancellationToken = default)
-        => _transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+    // ── Transactional execution ───────────────────────────────────────────────
 
-    public async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
+    public async Task ExecuteInTransactionAsync(
+        Func<CancellationToken, Task> operation,
+        CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await _context.SaveChangesAsync(cancellationToken);
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-            if (_transaction is not null)
-                await _transaction.CommitAsync(cancellationToken);
-        }
-        catch
+        await strategy.ExecuteAsync(async ct =>
         {
-            await RollbackTransactionAsync(cancellationToken);
-            throw;
-        }
-        finally
-        {
-            if (_transaction is not null)
+            await using IDbContextTransaction transaction =
+                await _context.Database.BeginTransactionAsync(ct);
+
+            try
             {
-                await _transaction.DisposeAsync();
-                _transaction = null;
+                await operation(ct);
+                await transaction.CommitAsync(ct);
             }
-        }
+            catch
+            {
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                }
+                catch
+                {
+                    // Swallow rollback failure — original exception is more important
+                }
+
+                throw;
+            }
+        }, cancellationToken);
     }
 
-    public async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
-    {
-        if (_transaction is not null)
-        {
-            await _transaction.RollbackAsync(cancellationToken);
-            await _transaction.DisposeAsync();
-            _transaction = null;
-        }
-    }
+    // ── Dispose ───────────────────────────────────────────────────────────────
 
     public async ValueTask DisposeAsync()
     {
-        if (_transaction is not null)
-            await _transaction.DisposeAsync();
-
         await _context.DisposeAsync();
     }
 }
