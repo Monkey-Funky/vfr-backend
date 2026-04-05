@@ -1,6 +1,7 @@
 ﻿using Amazon;
 using Amazon.S3;
 using Infrastructure.Persistence;
+using Infrastructure.Persistence.Repositories;
 using Infrastructure.Services;
 using Infrastructure.Settings;
 using Microsoft.AspNetCore.Identity;
@@ -136,6 +137,9 @@ public static class DependencyInjection
         // IEncryptionService — Singleton: stateless, thread-safe AES-256 service.
         services.AddSingleton<IEncryptionService, AesEncryptionService>();
 
+
+        services.AddScoped<IProductRepository, ProductRepository>();
+        services.AddScoped<ISubscriptionService, SubscriptionService>();
         return services;
     }
 }

@@ -1,4 +1,5 @@
 ﻿using Domain.Entities.Retailer;
+using Domain.Entities.Retailer;
 using Domain.Entities.Subscriptions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -41,6 +42,16 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<SaasEnquiry> SaasEnquiries => Set<SaasEnquiry>();
 
     public DbSet<PaymentMethod> PaymentMethods => Set<PaymentMethod>();
+
+    public DbSet<Category> Categories => Set<Category>();
+    public DbSet<SubCategory> SubCategories => Set<SubCategory>();
+    public DbSet<Product> Products => Set<Product>();
+
+    public DbSet<Offer> Offers => Set<Offer>();
+
+    public DbSet<ProductImage> ProductImages => Set<ProductImage>();
+
+    public DbSet<InventoryRecord> InventoryRecords => Set<InventoryRecord>();
 
     // ── Model configuration ───────────────────────────────────────────────────
 

@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Domain.Entities.Retailer;
+using Microsoft.EntityFrameworkCore;
 
 namespace Application.Interfaces;
 
@@ -23,6 +24,18 @@ public interface IApplicationDbContext
     // ── Payment Methods (added P-016) ─────────────────────────────────────────
     DbSet<PaymentMethod> PaymentMethods { get; }
 
+
+    // ── Categories (P-019) ────────────────────────────────────────────────────
+    DbSet<Category> Categories { get; }
+    DbSet<SubCategory> SubCategories { get; }
+
+    // ── Products (P-019 stub — fully implemented in P-020) ───────────────────
+    DbSet<Product> Products { get; }
+    DbSet<ProductImage> ProductImages { get; }
+    DbSet<InventoryRecord> InventoryRecords { get; }
+
+    // ── Offers (P-019 stub — fully implemented in P-022) ─────────────────────
+    DbSet<Offer> Offers { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
