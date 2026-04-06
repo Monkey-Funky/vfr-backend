@@ -1,4 +1,7 @@
-﻿namespace Application.Features.Auth.Commands.ResetPassword;
+﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+
+namespace Application.Features.Auth.Commands.ResetPassword;
 
 /// <summary>
 /// Handles password reset after OTP verification.

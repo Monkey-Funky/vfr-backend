@@ -17,7 +17,6 @@ global using Shared.DTOs;
 global using Domain.Entities.Subscriptions;
 global using Domain.Enums;
 global using Domain.Events;
-global using Application.Mappings;
 
 // ── Payment Methods (added P-016) ─────────────────────────────────────────
 global using Application.Features.PaymentMethods.Commands.AddPaymentMethod;

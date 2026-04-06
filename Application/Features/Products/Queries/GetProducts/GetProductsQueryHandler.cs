@@ -1,4 +1,7 @@
-﻿namespace Application.Features.Products.Queries.GetProducts;
+﻿using Application.Features.Products.DTOs;
+using Application.Interfaces.Services;
+
+namespace Application.Features.Products.Queries.GetProducts;
 
 
 public sealed class GetProductsQueryHandler

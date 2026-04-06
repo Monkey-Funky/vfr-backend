@@ -1,4 +1,6 @@
-﻿namespace Application.Features.Products.Queries.GetProducts;
+﻿using Application.Features.Products.DTOs;
+
+namespace Application.Features.Products.Queries.GetProducts;
 
 
 /// <summary>

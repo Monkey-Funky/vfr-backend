@@ -1,4 +1,6 @@
-﻿using Domain.Entities.Retailer;
+﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Domain.Entities.Retailer;
 
 namespace Application.Features.PaymentMethods.Commands.RemovePaymentMethod;
 

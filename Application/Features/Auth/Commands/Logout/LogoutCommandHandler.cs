@@ -1,4 +1,7 @@
-﻿namespace Application.Features.Auth.Commands.Logout;
+﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+
+namespace Application.Features.Auth.Commands.Logout;
 
 /// <summary>
 /// Handles retailer logout by revoking the stored refresh token.

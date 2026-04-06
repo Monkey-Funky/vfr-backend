@@ -1,4 +1,7 @@
 ﻿
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+
 namespace Application.Features.Categories.Commands.UpdateSubCategory;
 
 public sealed class UpdateSubCategoryCommandHandler

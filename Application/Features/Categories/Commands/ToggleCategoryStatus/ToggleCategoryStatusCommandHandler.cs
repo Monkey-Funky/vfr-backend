@@ -1,4 +1,7 @@
-﻿using Domain.Entities.Retailer;
+﻿using Application.Features.Categories.DTOs;
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Domain.Entities.Retailer;
 
 namespace Application.Features.Categories.Commands.ToggleCategoryStatus;
 

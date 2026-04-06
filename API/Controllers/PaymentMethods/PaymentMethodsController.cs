@@ -1,8 +1,8 @@
 ﻿using Application.Features.PaymentMethods.Commands.AddPaymentMethod;
 using Application.Features.PaymentMethods.Commands.RemovePaymentMethod;
 using Application.Features.PaymentMethods.Commands.SetDefaultPaymentMethod;
+using Application.Features.PaymentMethods.DTOs;
 using Application.Features.PaymentMethods.Queries.GetPaymentMethods;
-using Application.Mappings;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace API.Controllers.PaymentMethods;

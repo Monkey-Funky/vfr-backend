@@ -1,4 +1,6 @@
-﻿namespace Application.Behaviors;
+﻿using Application.Interfaces.Services;
+
+namespace Application.Behaviors;
 
 public sealed class LoggingBehavior<TRequest, TResponse>
     : IPipelineBehavior<TRequest, TResponse>

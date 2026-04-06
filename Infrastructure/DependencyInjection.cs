@@ -1,8 +1,19 @@
 ﻿using Amazon;
 using Amazon.S3;
+using Application.Interfaces.External;
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Infrastructure.Hubs;
 using Infrastructure.Persistence;
 using Infrastructure.Persistence.Repositories;
-using Infrastructure.Services;
+using Infrastructure.Persistence.Seeders;
+using Infrastructure.Services.Auth;
+using Infrastructure.Services.Communication;
+using Infrastructure.Services.Payment;
+using Infrastructure.Services.Security;
+using Infrastructure.Services.Storage;
+using Infrastructure.Services.Subscription;
+using Infrastructure.Services.System;
 using Infrastructure.Settings;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
@@ -140,6 +151,16 @@ public static class DependencyInjection
 
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<ISubscriptionService, SubscriptionService>();
+
+        services.AddScoped<SubscriptionPlanSeeder>();
+
+        services.AddScoped<IOrderRepository, OrderRepository>();  
+
+        services.AddScoped<IInventoryRepository, InventoryRepository>();
+
+        services.AddSignalR();
+        services.AddScoped<INotificationHub, NotificationHubService>();
+
         return services;
     }
 }

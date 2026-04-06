@@ -1,4 +1,6 @@
 ﻿
+using Application.Features.Products.DTOs;
+
 namespace Application.Features.Products.Commands.UpdateProduct;
 
 

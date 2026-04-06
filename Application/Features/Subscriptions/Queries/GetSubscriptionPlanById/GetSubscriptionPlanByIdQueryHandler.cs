@@ -1,4 +1,5 @@
-﻿using Application.Mappings;
+﻿using Application.Features.Subscriptions.DTOs;
+using Application.Interfaces.Persistence;
 using Domain.Entities.Subscriptions;
 using Microsoft.EntityFrameworkCore;
 

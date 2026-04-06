@@ -1,4 +1,8 @@
-﻿using Domain.Entities.Retailer;
+﻿using Application.Features.Categories.DTOs;
+using Application.Features.Categories.Mappings;
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Domain.Entities.Retailer;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Categories.Queries.GetSubCategories;

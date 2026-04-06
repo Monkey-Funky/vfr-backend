@@ -1,4 +1,6 @@
-﻿namespace API.Services;
+﻿using Application.Interfaces.Services;
+
+namespace API.Services;
 public sealed class CurrentUserService : ICurrentUserService
 {
     private readonly IHttpContextAccessor _httpContextAccessor;

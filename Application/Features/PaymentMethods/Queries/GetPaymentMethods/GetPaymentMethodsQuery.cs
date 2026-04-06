@@ -1,4 +1,6 @@
-﻿namespace Application.Features.PaymentMethods.Queries.GetPaymentMethods;
+﻿using Application.Features.PaymentMethods.DTOs;
+
+namespace Application.Features.PaymentMethods.Queries.GetPaymentMethods;
 
 /// <summary>
 /// Returns all active (non-deleted) payment methods for the authenticated retailer.

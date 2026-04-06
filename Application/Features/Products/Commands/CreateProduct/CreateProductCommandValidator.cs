@@ -1,4 +1,6 @@
-﻿namespace Application.Features.Products.Commands.CreateProduct;
+﻿using Domain.Enums.Product;
+
+namespace Application.Features.Products.Commands.CreateProduct;
 
 public sealed class CreateProductCommandValidator : AbstractValidator<CreateProductCommand>
 {

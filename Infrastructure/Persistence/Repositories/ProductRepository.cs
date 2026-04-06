@@ -1,6 +1,8 @@
 ﻿
+using Application.Features.Products.DTOs;
+using Application.Features.Products.Mappings;
 using Application.Features.Products.Queries.GetProducts;
-using Application.Mappings;
+using Application.Interfaces.Services;
 using System.Linq;
 
 namespace Infrastructure.Persistence.Repositories;

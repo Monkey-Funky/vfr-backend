@@ -1,4 +1,7 @@
-﻿using Domain.Entities.Retailer;
+﻿using Application.Interfaces.Persistence;
+using Domain.Entities.Notifications;
+using Domain.Entities.Orders;
+using Domain.Entities.Retailer;
 using Domain.Entities.Retailer;
 using Domain.Entities.Subscriptions;
 using Microsoft.AspNetCore.Identity;
@@ -52,6 +55,14 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<ProductImage> ProductImages => Set<ProductImage>();
 
     public DbSet<InventoryRecord> InventoryRecords => Set<InventoryRecord>();
+
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<OrderItem> OrderItems => Set<OrderItem>();
+    public DbSet<CommissionRecord> CommissionRecords => Set<CommissionRecord>();
+
+    public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
+
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     // ── Model configuration ───────────────────────────────────────────────────
 

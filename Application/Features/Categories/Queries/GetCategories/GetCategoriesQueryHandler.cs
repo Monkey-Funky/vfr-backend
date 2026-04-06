@@ -1,4 +1,8 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Application.Features.Categories.DTOs;
+using Application.Features.Categories.Mappings;
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Categories.Queries.GetCategories;
 

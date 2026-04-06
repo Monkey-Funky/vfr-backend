@@ -1,4 +1,6 @@
 ﻿
+using Application.Features.Categories.DTOs;
+
 namespace Application.Features.Categories.Commands.ToggleCategoryStatus;
 
 /// <summary>

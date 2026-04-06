@@ -1,4 +1,6 @@
 ﻿
+using Application.Features.Subscriptions.DTOs;
+
 namespace Application.Features.Subscriptions.Queries.GetSubscriptionPlanById;
 
 /// <summary>

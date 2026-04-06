@@ -1,4 +1,6 @@
-﻿namespace Application.Features.Products.Commands.UpdateProduct;
+﻿using Domain.Enums.Product;
+
+namespace Application.Features.Products.Commands.UpdateProduct;
 
 public sealed class UpdateProductCommandValidator : AbstractValidator<UpdateProductCommand>
 {

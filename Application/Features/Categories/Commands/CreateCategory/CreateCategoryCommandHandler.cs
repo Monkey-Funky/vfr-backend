@@ -1,4 +1,6 @@
 ﻿
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 

@@ -1,4 +1,6 @@
-﻿namespace Application.Features.Products.Queries.GetProducts;
+﻿using Domain.Enums.Product;
+
+namespace Application.Features.Products.Queries.GetProducts;
 
 public sealed class GetProductsQueryValidator : AbstractValidator<GetProductsQuery>
 {

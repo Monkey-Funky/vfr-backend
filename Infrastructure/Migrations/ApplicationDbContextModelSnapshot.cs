@@ -22,6 +22,412 @@ namespace Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Domain.Entities.Notifications.Notification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("body");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<bool>("IsRead")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_read");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("read_at");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resource_id");
+
+                    b.Property<Guid>("RetailerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retailer_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("varchar(200)")
+                        .HasColumnName("title");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_notifications");
+
+                    b.HasIndex("RetailerId")
+                        .HasDatabaseName("idx_notifications_retailer_id");
+
+                    b.HasIndex("RetailerId", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("idx_notifications_retailer_createdat");
+
+                    b.HasIndex("RetailerId", "IsRead")
+                        .HasDatabaseName("idx_notifications_retailer_unread")
+                        .HasFilter("is_read = false");
+
+                    b.ToTable("notifications", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_notifications_type", "type IN ('LowStock','OrderStatusChanged','SubscriptionExpiring','PaymentFailed','AccountDeletion')");
+                        });
+                });
+
+            modelBuilder.Entity("Domain.Entities.Orders.CommissionRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("numeric")
+                        .HasColumnName("amount");
+
+                    b.Property<decimal>("CommissionRate")
+                        .HasColumnType("numeric")
+                        .HasColumnName("commission_rate");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<Guid>("RetailerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retailer_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_commission_records");
+
+                    b.ToTable("commission_records", (string)null);
+                });
+
+            modelBuilder.Entity("Domain.Entities.Orders.Order", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("EGP")
+                        .HasColumnName("currency");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_id");
+
+                    b.Property<string>("CustomerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("customer_name");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<DateTime>("OrderDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("order_date");
+
+                    b.Property<Guid>("RetailerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retailer_id");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("row_version");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("NotProcessed")
+                        .HasColumnName("status");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("total_amount");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_orders");
+
+                    b.HasIndex("CustomerId")
+                        .HasDatabaseName("idx_orders_customer_id");
+
+                    b.HasIndex("RetailerId")
+                        .HasDatabaseName("idx_orders_retailer_id");
+
+                    b.HasIndex("RetailerId", "CreatedAt")
+                        .HasDatabaseName("idx_orders_retailer_createdat");
+
+                    b.HasIndex("RetailerId", "Status")
+                        .HasDatabaseName("idx_orders_retailer_status");
+
+                    b.ToTable("orders", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_orders_status", "status IN ('NotProcessed','Processing','Shipped','Delivered','Cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("Domain.Entities.Orders.OrderItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<Guid?>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<string>("ProductName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("product_name");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("quantity");
+
+                    b.Property<decimal>("Total")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("total");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("unit_price");
+
+                    b.HasKey("Id")
+                        .HasName("pk_order_items");
+
+                    b.HasIndex("OrderId")
+                        .HasDatabaseName("idx_order_items_order_id");
+
+                    b.HasIndex("ProductId")
+                        .HasDatabaseName("idx_order_items_product_id");
+
+                    b.ToTable("order_items", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_order_items_quantity_positive", "quantity > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.Category", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CoverImageUrl")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("cover_image_url");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("varchar(200)")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("varchar(150)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("RetailerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retailer_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("Active")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("varchar(200)")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_categories");
+
+                    b.HasIndex("RetailerId")
+                        .HasDatabaseName("ix_categories_retailer_id");
+
+                    b.HasIndex("RetailerId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_categories_retailer_id_name_active")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("categories", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_categories_status", "status IN ('Active', 'Inactive')");
+                        });
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.InventoryRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("CurrentStock")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("current_stock");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<int>("LowStockThreshold")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(10)
+                        .HasColumnName("low_stock_threshold");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<string>("ProductName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("product_name");
+
+                    b.Property<Guid>("RetailerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retailer_id");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("row_version");
+
+                    b.Property<int>("SoldQuantity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("sold_quantity");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("InStock")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_inventory_records");
+
+                    b.HasIndex("ProductId")
+                        .HasDatabaseName("idx_inventory_records_product_id");
+
+                    b.HasIndex("RetailerId")
+                        .HasDatabaseName("idx_inventory_records_retailer_id");
+
+                    b.HasIndex("RetailerId", "ProductId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_inventory_records_retailer_product")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("RetailerId", "SoldQuantity")
+                        .HasDatabaseName("idx_inventory_records_retailer_sold_qty");
+
+                    b.ToTable("inventory_records", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_inventory_records_current_stock_non_negative", "current_stock >= 0");
+
+                            t.HasCheckConstraint("ck_inventory_records_status", "status IN ('InStock','LowStock','OutOfStock')");
+                        });
+                });
+
             modelBuilder.Entity("Domain.Entities.Retailer.NotificationPreference", b =>
                 {
                     b.Property<Guid>("Id")
@@ -50,7 +456,9 @@ namespace Infrastructure.Migrations
                         .HasColumnName("in_app_notifications");
 
                     b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
+                        .HasDefaultValue(false)
                         .HasColumnName("is_deleted");
 
                     b.Property<bool>("LowStockAlerts")
@@ -75,7 +483,7 @@ namespace Infrastructure.Migrations
                         .HasDefaultValue(true)
                         .HasColumnName("subscription_alerts");
 
-                    b.Property<DateTime?>("UpdatedAt")
+                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
@@ -88,9 +496,128 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("RetailerId")
                         .IsUnique()
-                        .HasDatabaseName("ux_notification_preferences_retailer_id");
+                        .HasDatabaseName("uq_notification_preferences_retailer_id");
 
                     b.ToTable("notification_preferences", (string)null);
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.Offer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("category_id");
+
+                    b.Property<string>("CoverImageUrl")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("cover_image_url");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<string>("DiscountType")
+                        .IsRequired()
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("discount_type");
+
+                    b.Property<decimal>("DiscountValue")
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("discount_value");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("end_date");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("OfferType")
+                        .IsRequired()
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("offer_type");
+
+                    b.Property<Guid?>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<Guid>("RetailerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retailer_id");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("start_date");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("Active")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_offers");
+
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("idx_offers_category_id");
+
+                    b.HasIndex("EndDate")
+                        .HasDatabaseName("idx_offers_end_date_active")
+                        .HasFilter("status = 'Active' AND is_deleted = false");
+
+                    b.HasIndex("ProductId")
+                        .HasDatabaseName("idx_offers_product_id");
+
+                    b.HasIndex("RetailerId")
+                        .HasDatabaseName("idx_offers_retailer_id");
+
+                    b.HasIndex("RetailerId", "Status")
+                        .HasDatabaseName("idx_offers_retailer_status");
+
+                    b.ToTable("offers", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_offers_discount_type", "discount_type IN ('Percentage', 'Fixed')");
+
+                            t.HasCheckConstraint("ck_offers_offer_type", "offer_type IN ('Product', 'Category')");
+
+                            t.HasCheckConstraint("ck_offers_status", "status IN ('Active', 'Inactive', 'Expired')");
+
+                            t.HasCheckConstraint("ck_offers_type_target_mutual_exclusivity", "(offer_type = 'Product'   AND product_id  IS NOT NULL AND category_id IS NULL) OR (offer_type = 'Category'  AND category_id IS NOT NULL AND product_id  IS NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.Retailer.PaymentMethod", b =>
@@ -184,6 +711,147 @@ namespace Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Domain.Entities.Retailer.Product", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("barcode");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("category_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("EGP")
+                        .HasColumnName("currency");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<decimal?>("Price")
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("price");
+
+                    b.Property<Guid>("RetailerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retailer_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Draft")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("SubCategoryId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sub_category_id");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_products");
+
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("idx_products_category_id");
+
+                    b.HasIndex("RetailerId")
+                        .HasDatabaseName("idx_products_retailer_id");
+
+                    b.HasIndex("SubCategoryId")
+                        .HasDatabaseName("ix_products_sub_category_id");
+
+                    b.HasIndex("RetailerId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("uidx_products_retailer_name")
+                        .HasFilter("is_deleted = false");
+
+                    b.HasIndex("RetailerId", "Status")
+                        .HasDatabaseName("idx_products_retailer_status");
+
+                    b.ToTable("products", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_products_status", "status IN ('Active', 'Inactive', 'Draft')");
+                        });
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.ProductImage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("DisplayOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("display_order");
+
+                    b.Property<string>("ImageUrl")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("image_url");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_product_images");
+
+                    b.HasIndex("ProductId")
+                        .HasDatabaseName("idx_product_images_product_id");
+
+                    b.ToTable("product_images", (string)null);
+                });
+
             modelBuilder.Entity("Domain.Entities.Retailer.RetailerAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -200,6 +868,15 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
                         .HasColumnName("account_status");
+
+                    b.Property<decimal>("AvailableBalance")
+                        .HasColumnType("numeric")
+                        .HasColumnName("available_balance");
+
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("avatar_url");
 
                     b.Property<string>("BrandLogoUrl")
                         .HasMaxLength(2048)
@@ -271,6 +948,11 @@ namespace Infrastructure.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("password_hash");
 
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("phone_number");
+
                     b.Property<DateTime?>("RefreshTokenExpiresAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("refresh_token_expires_at");
@@ -312,6 +994,119 @@ namespace Infrastructure.Migrations
                     b.ToTable("retailer_accounts", null, t =>
                         {
                             t.HasCheckConstraint("chk_retailer_accounts_status", "account_status IN ('Active','PendingEmailVerification','Suspended','PendingDeletion')");
+                        });
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.StockAdjustment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AdjustedById")
+                        .HasColumnType("uuid")
+                        .HasColumnName("adjusted_by_id");
+
+                    b.Property<string>("AdjustmentType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("adjustment_type");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("adjusted_at");
+
+                    b.Property<Guid>("InventoryRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("inventory_record_id");
+
+                    b.Property<int>("NewQuantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("new_quantity");
+
+                    b.Property<int>("OldQuantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("old_quantity");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.HasKey("Id")
+                        .HasName("pk_stock_adjustments");
+
+                    b.HasIndex("AdjustedById")
+                        .HasDatabaseName("idx_stock_adjustments_adjusted_by_id");
+
+                    b.HasIndex("InventoryRecordId")
+                        .HasDatabaseName("idx_stock_adjustments_inventory_record_id");
+
+                    b.ToTable("stock_adjustments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_stock_adjustments_type", "adjustment_type IN ('ManualIncrease','ManualDecrease','OrderSale','ReturnRestock')");
+                        });
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.SubCategory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("category_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("varchar(150)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("RetailerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retailer_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("Active")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_sub_categories");
+
+                    b.HasIndex("CategoryId")
+                        .HasDatabaseName("ix_sub_categories_category_id");
+
+                    b.HasIndex("RetailerId")
+                        .HasDatabaseName("ix_sub_categories_retailer_id");
+
+                    b.HasIndex("CategoryId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_sub_categories_category_id_name_active")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("sub_categories", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_sub_categories_status", "status IN ('Active', 'Inactive')");
                         });
                 });
 
@@ -675,6 +1470,49 @@ namespace Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Domain.Entities.Orders.OrderItem", b =>
+                {
+                    b.HasOne("Domain.Entities.Orders.Order", null)
+                        .WithMany("Items")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_order_items_orders_order_id");
+
+                    b.HasOne("Domain.Entities.Retailer.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_order_items_products_product_id");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.Category", b =>
+                {
+                    b.HasOne("Domain.Entities.Retailer.RetailerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("RetailerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_categories_retailer_accounts_retailer_id");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.InventoryRecord", b =>
+                {
+                    b.HasOne("Domain.Entities.Retailer.Product", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_inventory_records_products_product_id");
+
+                    b.HasOne("Domain.Entities.Retailer.RetailerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("RetailerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_inventory_records_retailer_accounts_retailer_id");
+                });
+
             modelBuilder.Entity("Domain.Entities.Retailer.NotificationPreference", b =>
                 {
                     b.HasOne("Domain.Entities.Retailer.RetailerAccount", null)
@@ -682,7 +1520,35 @@ namespace Infrastructure.Migrations
                         .HasForeignKey("Domain.Entities.Retailer.NotificationPreference", "RetailerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_notification_preferences_retailer_accounts_retailer_id");
+                        .HasConstraintName("fk_notification_preferences_retailer_accounts");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.Offer", b =>
+                {
+                    b.HasOne("Domain.Entities.Retailer.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_offers_categories_category_id");
+
+                    b.HasOne("Domain.Entities.Retailer.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_offers_products_product_id");
+
+                    b.HasOne("Domain.Entities.Retailer.RetailerAccount", "Retailer")
+                        .WithMany("Offers")
+                        .HasForeignKey("RetailerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_offers_retailer_accounts_retailer_id");
+
+                    b.Navigation("Category");
+
+                    b.Navigation("Product");
+
+                    b.Navigation("Retailer");
                 });
 
             modelBuilder.Entity("Domain.Entities.Retailer.PaymentMethod", b =>
@@ -693,6 +1559,72 @@ namespace Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_payment_methods_retailer_id");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.Product", b =>
+                {
+                    b.HasOne("Domain.Entities.Retailer.Category", null)
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_products_categories_category_id");
+
+                    b.HasOne("Domain.Entities.Retailer.RetailerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("RetailerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_products_retailer_accounts_retailer_id");
+
+                    b.HasOne("Domain.Entities.Retailer.SubCategory", null)
+                        .WithMany()
+                        .HasForeignKey("SubCategoryId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_products_sub_categories_sub_category_id");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.ProductImage", b =>
+                {
+                    b.HasOne("Domain.Entities.Retailer.Product", null)
+                        .WithMany("Images")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_product_images_products_product_id");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.StockAdjustment", b =>
+                {
+                    b.HasOne("Domain.Entities.Retailer.RetailerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("AdjustedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stock_adjustments_retailer_accounts_adjusted_by_id");
+
+                    b.HasOne("Domain.Entities.Retailer.InventoryRecord", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryRecordId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_stock_adjustments_inventory_records_inventory_record_id");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.SubCategory", b =>
+                {
+                    b.HasOne("Domain.Entities.Retailer.Category", null)
+                        .WithMany("SubCategories")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_sub_categories_categories_category_id");
+
+                    b.HasOne("Domain.Entities.Retailer.RetailerAccount", null)
+                        .WithMany()
+                        .HasForeignKey("RetailerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_sub_categories_retailer_accounts_retailer_id");
                 });
 
             modelBuilder.Entity("Domain.Entities.Subscriptions.SaasEnquiry", b =>
@@ -755,6 +1687,26 @@ namespace Infrastructure.Migrations
                         .HasConstraintName("fk_subscription_payments_subscription_plan_id");
 
                     b.Navigation("Plan");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Orders.Order", b =>
+                {
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.Category", b =>
+                {
+                    b.Navigation("SubCategories");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.Product", b =>
+                {
+                    b.Navigation("Images");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Retailer.RetailerAccount", b =>
+                {
+                    b.Navigation("Offers");
                 });
 
             modelBuilder.Entity("Domain.Entities.Subscriptions.SubscriptionPlan", b =>

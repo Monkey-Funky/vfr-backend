@@ -1,6 +1,8 @@
-﻿using Application.Mappings;
+﻿using Application.Features.Subscriptions.DTOs;
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
 using Domain.Entities.Subscriptions;
-using Domain.Enums;
+using Domain.Enums.Subscription;
 using Microsoft.EntityFrameworkCore;
 using Shared.Constants;
 

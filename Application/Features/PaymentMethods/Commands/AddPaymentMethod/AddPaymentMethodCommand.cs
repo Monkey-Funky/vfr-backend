@@ -1,5 +1,4 @@
-﻿using Application.Mappings;
-
+﻿
 namespace Application.Features.PaymentMethods.Commands.AddPaymentMethod;
 
 /// <summary>

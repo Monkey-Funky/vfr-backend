@@ -1,4 +1,6 @@
-﻿namespace Application.Features.Subscriptions.Queries.GetAllSubscriptionPlans;
+﻿using Application.Features.Subscriptions.DTOs;
+
+namespace Application.Features.Subscriptions.Queries.GetAllSubscriptionPlans;
 
 /// <summary>
 /// Returns all active subscription plans, grouped by tier.

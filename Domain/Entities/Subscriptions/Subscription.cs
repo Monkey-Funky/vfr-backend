@@ -1,5 +1,5 @@
 ﻿using Domain.Common;
-using Domain.Enums;
+using Domain.Enums.Subscription;
 using Domain.Exceptions;
 
 namespace Domain.Entities.Subscriptions;

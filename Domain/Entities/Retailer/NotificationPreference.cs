@@ -77,4 +77,33 @@ public sealed class NotificationPreference : BaseEntity
             InAppNotifications = true,
         };
     }
+
+
+    /// <summary>
+    /// Applies a partial update to notification preferences (PATCH semantics).
+    /// Only non-null arguments overwrite their corresponding property.
+    /// If all arguments are null, this method is a no-op — no change is recorded.
+    /// </summary>
+    public void Update(
+        bool? lowStockAlerts,
+        bool? orderStatusAlerts,
+        bool? subscriptionAlerts,
+        bool? emailNotifications,
+        bool? inAppNotifications)
+    {
+        if (lowStockAlerts.HasValue)
+            LowStockAlerts = lowStockAlerts.Value;
+
+        if (orderStatusAlerts.HasValue)
+            OrderStatusAlerts = orderStatusAlerts.Value;
+
+        if (subscriptionAlerts.HasValue)
+            SubscriptionAlerts = subscriptionAlerts.Value;
+
+        if (emailNotifications.HasValue)
+            EmailNotifications = emailNotifications.Value;
+
+        if (inAppNotifications.HasValue)
+            InAppNotifications = inAppNotifications.Value;
+    }
 }

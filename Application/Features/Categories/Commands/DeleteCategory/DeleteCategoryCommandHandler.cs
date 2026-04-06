@@ -1,4 +1,7 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Domain.Enums.Offer;
+using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Categories.Commands.DeleteCategory;
 
@@ -68,7 +71,7 @@ public sealed class DeleteCategoryCommandHandler
                 .Where(o => o.CategoryId == command.CategoryId)
                 .ExecuteUpdateAsync(
                     setters => setters
-                        .SetProperty(o => o.Status, Offer.OfferStatus.Inactive)
+                        .SetProperty(o => o.Status, OfferStatus.Inactive)
                         .SetProperty(o => o.UpdatedAt, now),
                     ct);
 

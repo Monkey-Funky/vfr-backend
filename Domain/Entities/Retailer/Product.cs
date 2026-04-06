@@ -1,4 +1,4 @@
-﻿using Domain.Enums;
+﻿using Domain.Enums.Product;
 using Domain.Exceptions;
 
 namespace Domain.Entities.Retailer;

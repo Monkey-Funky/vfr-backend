@@ -5,10 +5,10 @@ using Application.Features.Categories.Commands.DeleteSubCategory;
 using Application.Features.Categories.Commands.ToggleCategoryStatus;
 using Application.Features.Categories.Commands.UpdateCategory;
 using Application.Features.Categories.Commands.UpdateSubCategory;
+using Application.Features.Categories.DTOs;
 using Application.Features.Categories.Queries.GetCategories;
 using Application.Features.Categories.Queries.GetCategoryById;
 using Application.Features.Categories.Queries.GetSubCategories;
-using Application.Mappings;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace API.Controllers.Categories;

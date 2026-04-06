@@ -4,9 +4,9 @@ using Application.Features.Subscriptions.Commands.StartTrial;
 using Application.Features.Subscriptions.Commands.SubmitSaasEnquiry;
 using Application.Features.Subscriptions.Commands.ToggleRecurringPayment;
 using Application.Features.Subscriptions.Commands.UpgradePlan;
+using Application.Features.Subscriptions.DTOs;
 using Application.Features.Subscriptions.Queries.GetCurrentSubscription;
 using Application.Features.Subscriptions.Queries.GetCurrentSubscriptionDetails;
-using Application.Mappings;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace API.Controllers.Subscriptions;

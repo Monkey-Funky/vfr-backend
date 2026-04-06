@@ -1,6 +1,6 @@
-﻿using Application.Features.Subscriptions.Queries.GetAllSubscriptionPlans;
+﻿using Application.Features.Subscriptions.DTOs;
+using Application.Features.Subscriptions.Queries.GetAllSubscriptionPlans;
 using Application.Features.Subscriptions.Queries.GetSubscriptionPlanById;
-using Application.Mappings;
 using MediatR;
 using Swashbuckle.AspNetCore.Annotations;
 

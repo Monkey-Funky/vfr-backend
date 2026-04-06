@@ -1,4 +1,4 @@
-﻿using Application.Mappings;
+﻿using Application.Features.Subscriptions.DTOs;
 
 namespace Application.Features.Subscriptions.Queries.GetCurrentSubscriptionDetails;
 

@@ -1,4 +1,8 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Application.Features.Products.DTOs;
+using Application.Features.Products.Mappings;
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Products.Queries.GetProductById;
 

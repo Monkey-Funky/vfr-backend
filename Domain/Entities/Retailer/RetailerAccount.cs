@@ -1,4 +1,7 @@
 ﻿// src/Domain/Entities/Retailer/RetailerAccount.cs
+using Domain.Enums.Product;
+using Domain.Exceptions;
+
 namespace Domain.Entities.Retailer;
 
 /// <summary>
@@ -188,11 +191,67 @@ public sealed class RetailerAccount : BaseEntity
     /// </summary>
     public DateTime? LockoutEndAt { get; private set; }
 
+
+    /// <summary>
+    /// Optional contact phone number (max 20 chars, E.164 format preferred).
+    /// Null until the retailer provides one via profile update.
+    /// Purged to null by AccountDeletionJob on GDPR erasure.
+    /// </summary>
+    public string? PhoneNumber { get; private set; }
+
+    /// <summary>
+    /// Full public URL of the retailer's personal avatar image in blob storage.
+    /// Null until the retailer uploads one via profile settings.
+    /// Purged to null by AccountDeletionJob on GDPR erasure.
+    /// </summary>
+    public string? AvatarUrl { get; private set; }
+
     // =========================================================================
     // EF Core Constructor (private — do not call directly)
     // =========================================================================
 
+    /// <summary>
+    /// All promotional offers created by this retailer.
+    /// EF Core navigation — do NOT access directly in handlers; query via IApplicationDbContext.
+    /// </summary>
+    public ICollection<Offer> Offers { get; private set; } = [];
     private RetailerAccount() { }
+
+   
+    /// <summary>
+    /// Current available balance for this retailer account.
+    /// Decremented by the platform commission on each order delivery.
+    /// Default 0 — set via deposit/top-up workflows (out of scope for this feature).
+    /// DB column: available_balance numeric(18,2) NOT NULL DEFAULT 0
+    /// </summary>
+    public decimal AvailableBalance { get; private set; }
+
+    // ─── Append to the domain methods section ──────────────────────────────────
+
+    /// <summary>
+    /// Deducts a commission amount from the retailer's available balance.
+    /// Called exclusively by <see cref="CommissionDeductionHandler"/> inside the
+    /// OrderDeliveredEvent dispatch, within the order status update transaction.
+    /// </summary>
+    /// <param name="commissionAmount">Positive amount to deduct. Must be >= 0.</param>
+    /// <exception cref="BusinessRuleException">
+    /// Thrown with code <c>"INSUFFICIENT_BALANCE"</c> if the balance would go negative.
+    /// </exception>
+    public void DeductCommission(decimal commissionAmount)
+    {
+        if (commissionAmount < 0)
+            throw new ArgumentOutOfRangeException(nameof(commissionAmount),
+                "Commission amount cannot be negative.");
+
+        if (AvailableBalance - commissionAmount < 0)
+            throw new BusinessRuleException(
+                "INSUFFICIENT_BALANCE",
+                $"Retailer available balance ({AvailableBalance:F2}) is insufficient " +
+                $"to cover commission of {commissionAmount:F2}.");
+
+        AvailableBalance -= commissionAmount;
+        SetUpdatedAudit(null, DateTime.UtcNow);
+    }
 
     // =========================================================================
     // Factory Methods
@@ -409,4 +468,67 @@ public sealed class RetailerAccount : BaseEntity
         ArgumentException.ThrowIfNullOrWhiteSpace(newPasswordHash, nameof(newPasswordHash));
         PasswordHash = newPasswordHash;
     }
+
+    /// <summary>
+    /// Applies a partial profile update. Only non-null arguments are applied.
+    /// This mirrors PATCH semantics: the caller only passes the fields it wants changed.
+    /// </summary>
+    /// <param name="fullName">New full name, or null to leave unchanged.</param>
+    /// <param name="phoneNumber">New phone number, or null to leave unchanged.</param>
+    /// <param name="brandName">New brand name (unique constraint verified by handler), or null.</param>
+    /// <param name="businessType">New business type, or null to leave unchanged.</param>
+    public void UpdateProfile(
+        string? fullName,
+        string? phoneNumber,
+        string? brandName,
+        string? businessType)
+    {
+        if (fullName is not null)
+            FullName = fullName.Trim();
+
+        if (phoneNumber is not null)
+            PhoneNumber = string.IsNullOrWhiteSpace(phoneNumber) ? null : phoneNumber.Trim();
+
+        if (brandName is not null)
+            BrandName = brandName.Trim();
+
+        if (businessType is not null)
+            BusinessType = businessType.Trim();
+    }
+
+    /// <summary>
+    /// Changes the account password and immediately invalidates all active sessions.
+    /// Forces re-login on all devices — the caller must issue new tokens.
+    /// </summary>
+    /// <param name="newPasswordHash">
+    ///   BCrypt hash (work factor 12) of the new password.
+    ///   The caller is responsible for hashing before invoking this method.
+    /// </param>
+    public void ChangePassword(string newPasswordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(newPasswordHash, nameof(newPasswordHash));
+        PasswordHash = newPasswordHash;
+        RevokeAllRefreshTokens();
+    }
+
+    /// <summary>
+    /// Sets or clears the retailer's personal avatar URL.
+    /// Pass null to remove the avatar (DeleteAvatar flow).
+    /// </summary>
+    /// <param name="url">Full public URL from blob storage, or null to clear.</param>
+    public void SetAvatarUrl(string? url)
+    {
+        AvatarUrl = url;
+    }
+
+    /// <summary>
+    /// Sets or clears the brand logo URL.
+    /// Pass null to remove the logo (DeleteBrandLogo flow).
+    /// </summary>
+    /// <param name="url">Full public URL from blob storage, or null to clear.</param>
+    public void SetBrandLogoUrl(string? url)
+    {
+        BrandLogoUrl = url;
+    }
+
 }

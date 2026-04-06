@@ -1,5 +1,11 @@
 ﻿
 
+using Application.Interfaces.Services;
+using Infrastructure.Hubs;
+using Infrastructure.Persistence;
+using Infrastructure.Persistence.Seeders;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ── 1. SERILOG ───────────────────────────────────────────────────────────────
@@ -179,6 +185,30 @@ builder.Services.AddSwaggerGen(c =>
 // ── 8. BUILD ─────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
+
+// Seed data : 
+
+// ── 1. Apply pending EF Core migrations automatically ─────────────────────────
+//
+// In production you may prefer to run migrations via a deployment pipeline
+// instead of at startup. If so, remove this block and run:
+//   dotnet ef database update --project Infrastructure --startup-project API
+//
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    await db.Database.MigrateAsync();
+}
+
+// ── 2. Seed reference data ────────────────────────────────────────────────────
+//
+// Runs all seeders registered in DatabaseSeeder.
+// Safe to call on every startup — every seeder is idempotent.
+await DatabaseSeeder.SeedAsync(app.Services);
+
+
+
+
 // ── 9. MIDDLEWARE PIPELINE ───────────────────────────────────────────────────
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
@@ -208,6 +238,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<NotificationHub>("/hubs/notifications");
 
 // ── 10. RUN ──────────────────────────────────────────────────────────────────
 try

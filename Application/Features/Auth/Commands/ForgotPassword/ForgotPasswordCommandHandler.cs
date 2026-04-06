@@ -1,4 +1,6 @@
 ﻿
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
 using System.Security.Cryptography;
 
 namespace Application.Features.Auth.Commands.ForgotPassword;

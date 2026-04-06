@@ -1,5 +1,7 @@
-﻿using Domain.Entities.Subscriptions;
-using Domain.Enums;
+﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Domain.Entities.Subscriptions;
+using Domain.Enums.Subscription;
 
 namespace Application.Features.Subscriptions.Commands.DowngradePlan;
 

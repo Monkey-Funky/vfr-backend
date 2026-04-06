@@ -2,6 +2,8 @@
 
 using Application.Features.Auth.DTOs;
 using Application.Features.Auth.Mappings;
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
 
 namespace Application.Features.Auth.Commands.Login;
 

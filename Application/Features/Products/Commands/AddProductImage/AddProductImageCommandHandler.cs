@@ -1,4 +1,9 @@
-﻿namespace Application.Features.Products.Commands.AddProductImage;
+﻿using Application.Features.Products.DTOs;
+using Application.Features.Products.Mappings;
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+
+namespace Application.Features.Products.Commands.AddProductImage;
 
 public sealed class AddProductImageCommandHandler
     : IRequestHandler<AddProductImageCommand, Result<ProductImageDto>>

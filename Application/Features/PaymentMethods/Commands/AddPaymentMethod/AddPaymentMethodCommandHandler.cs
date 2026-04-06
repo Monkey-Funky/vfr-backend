@@ -1,4 +1,5 @@
-﻿using Application.Interfaces;
+﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
 using Domain.Entities.Retailer;
 
 namespace Application.Features.PaymentMethods.Commands.AddPaymentMethod;

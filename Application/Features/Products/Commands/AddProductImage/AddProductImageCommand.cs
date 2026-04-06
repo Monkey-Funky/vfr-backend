@@ -1,4 +1,5 @@
 ﻿using Application.Common;
+using Application.Features.Products.DTOs;
 
 namespace Application.Features.Products.Commands.AddProductImage;
 

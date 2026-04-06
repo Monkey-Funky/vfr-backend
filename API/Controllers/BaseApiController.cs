@@ -1,4 +1,5 @@
-﻿using MediatR;
+﻿using Application.Interfaces.Services;
+using MediatR;
 
 namespace API.Controllers;
 

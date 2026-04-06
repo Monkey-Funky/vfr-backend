@@ -1,4 +1,6 @@
-﻿namespace Application.Features.Categories.Queries.GetCategories;
+﻿using Application.Features.Categories.DTOs;
+
+namespace Application.Features.Categories.Queries.GetCategories;
 
 
 /// <summary>

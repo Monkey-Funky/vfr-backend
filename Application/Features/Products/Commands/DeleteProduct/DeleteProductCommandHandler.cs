@@ -1,4 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Products.Commands.DeleteProduct;
 

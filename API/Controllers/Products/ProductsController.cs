@@ -6,9 +6,9 @@ using Application.Features.Products.Commands.DeleteProduct;
 using Application.Features.Products.Commands.RemoveProductImage;
 using Application.Features.Products.Commands.ToggleProductStatus;
 using Application.Features.Products.Commands.UpdateProduct;
+using Application.Features.Products.DTOs;
 using Application.Features.Products.Queries.GetProductById;
 using Application.Features.Products.Queries.GetProducts;
-using Application.Mappings;
 using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 

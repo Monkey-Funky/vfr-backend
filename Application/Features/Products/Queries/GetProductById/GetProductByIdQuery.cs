@@ -1,4 +1,6 @@
-﻿namespace Application.Features.Products.Queries.GetProductById;
+﻿using Application.Features.Products.DTOs;
+
+namespace Application.Features.Products.Queries.GetProductById;
 
 
 /// <summary>
