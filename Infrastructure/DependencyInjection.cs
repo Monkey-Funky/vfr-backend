@@ -3,12 +3,14 @@ using Amazon.S3;
 using Application.Interfaces.External;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
+using Infrastructure.BackgroundJobs;
 using Infrastructure.Hubs;
 using Infrastructure.Persistence;
 using Infrastructure.Persistence.Repositories;
 using Infrastructure.Persistence.Seeders;
 using Infrastructure.Services.Auth;
 using Infrastructure.Services.Communication;
+using Infrastructure.Services.Dashboard;
 using Infrastructure.Services.Payment;
 using Infrastructure.Services.Security;
 using Infrastructure.Services.Storage;
@@ -21,6 +23,7 @@ using Microsoft.Extensions.Options;
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Retry;
+using StackExchange.Redis;
 
 namespace Infrastructure;
 
@@ -123,13 +126,19 @@ public static class DependencyInjection
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
         // ── 7. Redis / Distributed Cache ──────────────────────────────────────
+        var redisConnectionString = configuration["Redis:ConnectionString"] ?? "localhost:6379";
+
+        services.AddSingleton<IConnectionMultiplexer>(_ =>
+            ConnectionMultiplexer.Connect(redisConnectionString + ",abortConnect=false"));
+
         services.AddStackExchangeRedisCache(options =>
         {
-            options.Configuration = configuration["Redis:ConnectionString"];
+            options.Configuration = redisConnectionString + ",abortConnect=false";
             options.InstanceName = "vfr:";
         });
 
-        services.AddScoped<ICacheService, CacheService>();
+        services.AddSingleton<ICacheService, CacheService>();
+
 
         // ── 8. Utilities ──────────────────────────────────────────────────────
         services.AddSingleton<IDateTime, DateTimeService>();
@@ -160,6 +169,22 @@ public static class DependencyInjection
 
         services.AddSignalR();
         services.AddScoped<INotificationHub, NotificationHubService>();
+
+
+        // ── Analytics / Dashboard (P-041) ────────────────────────────────────────────
+
+        // IDashboardRepository — scoped (one per request, uses scoped IApplicationDbContext).
+        services.AddScoped<IDashboardRepository, DashboardRepository>();
+
+        // IS3StorageService — scoped (holds no mutable state per request).
+        services.AddScoped<IS3StorageService, S3StorageService>();
+
+        // IReportQueue — singleton (shared Channel between HTTP requests and BackgroundService).
+        services.AddSingleton<IReportQueue, ReportQueue>();
+
+        // ReportGenerationJob — hosted service (singleton, reads from IReportQueue.ReadAllAsync).
+        services.AddHostedService<ReportGenerationJob>();
+
 
         return services;
     }

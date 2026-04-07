@@ -1,16 +1,28 @@
 ﻿using Application.Interfaces.Services;
 using Microsoft.Extensions.Caching.Distributed;
+using StackExchange.Redis;
 using System.Text.Json;
 
 namespace Infrastructure.Services.System;
 
+/// <summary>
+/// Redis-backed implementation of ICacheService.
+///
+/// P-041 CHANGE: Added RemoveByPatternAsync using IConnectionMultiplexer.
+///   IDistributedCache cannot do pattern-based key removal.
+///   IConnectionMultiplexer.GetDatabase() gives direct Redis access for SCAN + DEL.
+/// </summary>
 public sealed class CacheService : ICacheService
 {
     private readonly IDistributedCache _cache;
+    private readonly IConnectionMultiplexer _multiplexer;
 
-    public CacheService(IDistributedCache cache)
+    public CacheService(
+        IDistributedCache cache,
+        IConnectionMultiplexer multiplexer)
     {
         _cache = cache;
+        _multiplexer = multiplexer;
     }
 
     public async Task<T?> GetAsync<T>(
@@ -18,7 +30,7 @@ public sealed class CacheService : ICacheService
         CancellationToken cancellationToken = default)
         where T : class
     {
-        var cached = await _cache.GetStringAsync(key, cancellationToken);
+        string? cached = await _cache.GetStringAsync(key, cancellationToken);
 
         return cached is null
             ? null
@@ -32,7 +44,7 @@ public sealed class CacheService : ICacheService
         CancellationToken cancellationToken = default)
         where T : class
     {
-        var options = new DistributedCacheEntryOptions
+        DistributedCacheEntryOptions options = new()
         {
             AbsoluteExpirationRelativeToNow = expiry ?? TimeSpan.FromHours(1)
         };
@@ -49,13 +61,50 @@ public sealed class CacheService : ICacheService
         CancellationToken cancellationToken = default)
         => await _cache.RemoveAsync(key, cancellationToken);
 
-    public Task RemoveByPrefixAsync(
+    public async Task RemoveByPrefixAsync(
         string prefix,
         CancellationToken cancellationToken = default)
+        => await RemoveByPatternAsync($"{prefix}*", cancellationToken);
+
+    /// <summary>
+    /// Removes all keys matching the given glob pattern using Redis SCAN + DEL.
+    ///
+    /// Implementation:
+    ///   1. SCAN iterates all matching keys in the Redis keyspace in batches of 250.
+    ///      SCAN is non-blocking and O(1) per call — preferable to KEYS which is O(N)
+    ///      and blocks the Redis server for the full scan.
+    ///   2. For each batch of matching keys, execute a pipelined DEL command.
+    ///   3. Continue until SCAN returns cursor = 0 (full iteration complete).
+    ///
+    /// CAUTION: SCAN still iterates the entire keyspace for pattern matching.
+    ///   Call this only in response to meaningful business events, not on every request.
+    /// </summary>
+    public async Task RemoveByPatternAsync(
+        string pattern,
+        CancellationToken cancellationToken = default)
     {
-        // Note: IDistributedCache has no built-in prefix removal.
-        // If Redis is configured, this can be implemented with IConnectionMultiplexer.
-        // For now this is a no-op stub; P-049 (Polly / resilience) documents the full impl.
-        return Task.CompletedTask;
+        IDatabase db = _multiplexer.GetDatabase();
+        IServer server = _multiplexer.GetServer(
+            _multiplexer.GetEndPoints().First());
+
+        // Batch keys for pipelined DEL (avoids N round-trips).
+        List<RedisKey> batch = new(capacity: 250);
+
+        await foreach (RedisKey key in server.KeysAsync(pattern: pattern))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            batch.Add(key);
+
+            if (batch.Count >= 250)
+            {
+                await db.KeyDeleteAsync(batch.ToArray());
+                batch.Clear();
+            }
+        }
+
+        // Delete any remainder.
+        if (batch.Count > 0)
+            await db.KeyDeleteAsync(batch.ToArray());
     }
 }

@@ -1,12 +1,8 @@
 ﻿using Application.Interfaces.Persistence;
+using Domain.Entities.Analytics;
 using Domain.Entities.Notifications;
 using Domain.Entities.Orders;
-using Domain.Entities.Retailer;
-using Domain.Entities.Retailer;
 using Domain.Entities.Subscriptions;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.Reflection;
 
@@ -37,11 +33,8 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
 
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
-
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
-
     public DbSet<SubscriptionPayment> SubscriptionPayments => Set<SubscriptionPayment>();
-
     public DbSet<SaasEnquiry> SaasEnquiries => Set<SaasEnquiry>();
 
     public DbSet<PaymentMethod> PaymentMethods => Set<PaymentMethod>();
@@ -49,12 +42,10 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<SubCategory> SubCategories => Set<SubCategory>();
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<ProductImage> ProductImages => Set<ProductImage>();
+    public DbSet<InventoryRecord> InventoryRecords => Set<InventoryRecord>();
 
     public DbSet<Offer> Offers => Set<Offer>();
-
-    public DbSet<ProductImage> ProductImages => Set<ProductImage>();
-
-    public DbSet<InventoryRecord> InventoryRecords => Set<InventoryRecord>();
 
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
@@ -63,6 +54,14 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
 
     public DbSet<Notification> Notifications => Set<Notification>();
+
+    public DbSet<DashboardSnapshot> DashboardSnapshots => Set<DashboardSnapshot>();
+    public DbSet<ActivityEvent> ActivityEvents => Set<ActivityEvent>();
+    public DbSet<TryOnSession> TryOnSessions => Set<TryOnSession>();
+    public DbSet<VfrEngagementMetric> VfrEngagementMetrics => Set<VfrEngagementMetric>();
+    public DbSet<ReturnReason> ReturnReasons => Set<ReturnReason>();
+    public DbSet<FitAccuracy> FitAccuracies => Set<FitAccuracy>();
+    public DbSet<Report> Reports => Set<Report>();
 
     // ── Model configuration ───────────────────────────────────────────────────
 
@@ -79,7 +78,7 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
         base.OnModelCreating(modelBuilder);
     }
 
-    // ── Audit timestamp stamping ───────────────────────────────────────────────
+    // ── Audit timestamp stamping ──────────────────────────────────────────────
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
@@ -92,7 +91,7 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
         // internal state manager — which is exactly how EF Core itself sets
         // values for shadow properties and value-generated columns.
 
-        foreach (var entry in ChangeTracker.Entries<BaseEntity>())
+        foreach (var entry in ChangeTracker.Entries<BaseEntity>()) // FIX-2: BaseEntity now resolves via Domain.Common
         {
             switch (entry.State)
             {
