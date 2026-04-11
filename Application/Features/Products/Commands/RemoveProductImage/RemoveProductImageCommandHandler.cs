@@ -31,7 +31,7 @@ public sealed class RemoveProductImageCommandHandler
         var retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity claim is missing.");
 
-        // Verify product ownership (IDOR guard)
+        // IDOR guard — verify the product belongs to this retailer.
         var productExists = await _context.Products
             .AnyAsync(
                 p => p.Id == command.ProductId
@@ -42,7 +42,7 @@ public sealed class RemoveProductImageCommandHandler
         if (!productExists)
             throw new NotFoundException(nameof(Product), command.ProductId);
 
-        // Load the image record (not soft-deleted)
+        // Load the image record (not soft-deleted).
         var image = await _context.ProductImages
             .FirstOrDefaultAsync(
                 i => i.Id == command.ImageId
@@ -53,20 +53,20 @@ public sealed class RemoveProductImageCommandHandler
 
         var imageUrl = image.ImageUrl;
 
-        // Soft-delete the DB record first (safe — if S3 delete fails, the image
-        // URL is still orphaned but the DB is consistent)
+        // Soft-delete DB record first — DB is the source of truth.
+        // If S3 delete fails later, the image is already hidden from all responses.
         image.SoftDelete();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // Delete from S3 (best-effort — failure is logged but not re-thrown)
+        // Best-effort S3 delete. Failure is logged but does NOT roll back the DB change.
+        // A scheduled cleanup job reconciles any orphaned S3 objects.
         try
         {
             await _fileStorage.DeleteAsync(imageUrl, cancellationToken);
         }
         catch (ExternalServiceException)
         {
-            // S3 deletion failure is non-fatal. The image is already soft-deleted
-            // in the DB. A scheduled cleanup job can reconcile orphaned S3 objects.
+            // Non-fatal: image is already soft-deleted in DB.
         }
 
         return Result.Success("Image removed successfully.");

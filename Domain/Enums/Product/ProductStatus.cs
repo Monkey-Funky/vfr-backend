@@ -9,9 +9,11 @@ public static class ProductStatus
     public const string Active = "Active";
     public const string Inactive = "Inactive";
     public const string Draft = "Draft";
+    public const string OutOfStock = "OutOfStock";
 
-    public static readonly IReadOnlyList<string> All = [Active, Inactive, Draft];
+    public static readonly IReadOnlyList<string> All =
+        [Active, Inactive, Draft, OutOfStock];
 
     public static bool IsValid(string value) =>
-        value is Active or Inactive or Draft;
+        value is Active or Inactive or Draft or OutOfStock;
 }

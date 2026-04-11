@@ -49,17 +49,15 @@ public sealed class ProductsController : BaseApiController
     // 1. GET /products
     // =========================================================================
 
-    /// <summary>
-    /// Returns a paginated, filtered list of products for the authenticated retailer.
-    /// Supports full-text search via plainto_tsquery on name, description, and barcode.
-    /// </summary>
+    /// <summary>Returns a paginated, filtered product list with optional FTS.</summary>
     [HttpGet]
     [SwaggerOperation(
         Summary = "List products",
         Description = "Returns a paginated list of products for the authenticated retailer. " +
-                      "Supports filtering by category, sub-category, and status. " +
-                      "Full-text search (searchTerm) uses PostgreSQL plainto_tsquery on " +
-                      "name + description + barcode. All results exclude soft-deleted records.")]
+                      "Supports filtering by categoryId, subCategoryId, and status. " +
+                      "Full-text search (searchTerm) uses PostgreSQL plainto_tsquery " +
+                      "on the pre-computed search_vector column (GIN-indexed). " +
+                      "Produces ≤ 2 SQL statements per request.")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<ProductListDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -93,21 +91,15 @@ public sealed class ProductsController : BaseApiController
     // 2. POST /products  (rate-limited: upload)
     // =========================================================================
 
-    /// <summary>
-    /// Creates a new product with an optional initial batch of images.
-    /// Enforces the active product cap from the retailer's subscription plan.
-    /// Images are uploaded to S3 before the database transaction begins.
-    /// </summary>
+    /// <summary>Creates a new product with an optional initial batch of images.</summary>
     [HttpPost]
     [Consumes("multipart/form-data")]
     [EnableRateLimiting("upload")]
     [SwaggerOperation(
-    Summary = "Create product",
-    Description = "Creates a new product and its InventoryRecord in a single atomic transaction. " +
-                  "Optional images are uploaded to S3 first; if the DB transaction fails, " +
-                  "the S3 objects are orphaned and cleaned up by a scheduled job. " +
-                  "Plan limit: throws 422 PRODUCT_LIMIT_EXCEEDED if the active product cap is reached. " +
-                  "Upload rate limit: 20 requests/minute per retailer.")]
+        Summary = "Create product",
+        Description = "Creates a new product and its InventoryRecord in a single atomic transaction. " +
+                      "Plan limit enforced inside the transaction (TOCTOU-safe). " +
+                      "Returns 201 with Location header pointing to GET /products/{productId}.")]
     [ProducesResponseType(typeof(ApiResponse<ProductDetailDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -116,15 +108,14 @@ public sealed class ProductsController : BaseApiController
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> CreateProduct(
-    Guid retailerId,
-    [FromForm] CreateProductRequest request,
-    CancellationToken cancellationToken = default)
+        Guid retailerId,
+        [FromForm] CreateProductRequest request,
+        CancellationToken cancellationToken = default)
     {
         EnsureRetailerOwnership(retailerId);
 
-        // FIX: Map IFormFile[] → FileUploadDto[] here, in the API layer.
-        //      OpenReadStream() is called on each IFormFile; the resulting streams
-        //      are disposed by the handler via "await using var stream = file.Content".
+        // Map IFormFile[] → FileUploadDto[] in the API layer.
+        // OpenReadStream() is called here; handler disposes each stream via "await using".
         var imageUploads = request.Images?
             .Select(f => new FileUploadDto(
                 Content: f.OpenReadStream(),
@@ -144,7 +135,7 @@ public sealed class ProductsController : BaseApiController
                 Barcode: request.Barcode,
                 InitialQuantity: request.InitialQuantity,
                 Status: request.Status,
-                Images: imageUploads),   
+                Images: imageUploads),
             cancellationToken);
 
         return CreatedResponse(
@@ -157,10 +148,7 @@ public sealed class ProductsController : BaseApiController
     // 3. GET /products/{productId}
     // =========================================================================
 
-    /// <summary>
-    /// Returns the full detail DTO for a single product, including all
-    /// non-deleted images and the current inventory summary.
-    /// </summary>
+    /// <summary>Returns the full detail DTO for a single product.</summary>
     [HttpGet("{productId:guid}", Name = "GetProductById")]
     [SwaggerOperation(
         Summary = "Get product by ID",
@@ -189,16 +177,12 @@ public sealed class ProductsController : BaseApiController
     // 4. PUT /products/{productId}
     // =========================================================================
 
-    /// <summary>
-    /// Full field update for an existing product. All ShouldUpdate* flags must
-    /// be set to true to replace all mutable fields.
-    /// </summary>
+    /// <summary>Full field update for an existing product.</summary>
     [HttpPut("{productId:guid}")]
     [SwaggerOperation(
         Summary = "Update product (full replace)",
         Description = "Updates one or more mutable fields of a product. " +
                       "Set ShouldUpdate{Field} = true for each field you want to overwrite. " +
-                      "PUT semantics: caller should set all ShouldUpdate flags to true. " +
                       "Returns the updated product detail DTO.")]
     [ProducesResponseType(typeof(ApiResponse<ProductDetailDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
@@ -237,18 +221,11 @@ public sealed class ProductsController : BaseApiController
     // 5. PATCH /products/{productId}
     // =========================================================================
 
-    /// <summary>
-    /// Partial field update for an existing product. Only send the fields you
-    /// want to change by setting their corresponding ShouldUpdate* flag to true.
-    /// </summary>
+    /// <summary>Partial field update for an existing product.</summary>
     [HttpPatch("{productId:guid}")]
     [SwaggerOperation(
         Summary = "Update product (partial)",
-        Description = "Partial update of a product's mutable fields. " +
-                      "PATCH semantics: only send ShouldUpdate{Field} = true for fields you want to change. " +
-                      "Fields whose ShouldUpdate flag is false are left untouched. " +
-                      "Uses the same UpdateProductCommand as PUT — the distinction is purely semantic. " +
-                      "Returns the updated product detail DTO.")]
+        Description = "Partial update. Only send ShouldUpdate{Field} = true for fields you want to change.")]
     [ProducesResponseType(typeof(ApiResponse<ProductDetailDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -286,16 +263,12 @@ public sealed class ProductsController : BaseApiController
     // 6. DELETE /products/{productId}
     // =========================================================================
 
-    /// <summary>
-    /// Soft-deletes a product and its InventoryRecord in a single atomic transaction.
-    /// The product and its images remain in the database but are excluded from all queries.
-    /// </summary>
+    /// <summary>Soft-deletes a product, its images, inventory record, and inactivates offers.</summary>
     [HttpDelete("{productId:guid}")]
     [SwaggerOperation(
         Summary = "Delete product",
-        Description = "Soft-deletes the product and its associated InventoryRecord atomically. " +
-                      "The operation is irreversible through the public API. " +
-                      "Images are NOT deleted from S3 — a scheduled cleanup job handles orphaned objects. " +
+        Description = "Soft-deletes the product, all child ProductImage records, the InventoryRecord, " +
+                      "and sets any active Offers for this product to Inactive — atomically in one transaction. " +
                       "Returns 204 No Content on success.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
@@ -319,15 +292,12 @@ public sealed class ProductsController : BaseApiController
     // 7. PATCH /products/{productId}/status
     // =========================================================================
 
-    /// <summary>
-    /// Toggles the product's lifecycle status. Active → Inactive, Inactive → Active.
-    /// Draft products transition to Active on the first toggle.
-    /// </summary>
+    /// <summary>Toggles the product's lifecycle status.</summary>
     [HttpPatch("{productId:guid}/status")]
     [SwaggerOperation(
         Summary = "Toggle product status",
-        Description = "Cycles the product's status: Active → Inactive → Active. " +
-                      "Draft products transition directly to Active on the first call. " +
+        Description = "Cycles the product status: Active → Inactive → Active. " +
+                      "Draft and OutOfStock products transition to Active on the first call. " +
                       "Returns the new status string in the response data field.")]
     [ProducesResponseType(typeof(ApiResponse<string>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
@@ -351,18 +321,12 @@ public sealed class ProductsController : BaseApiController
     // 8. GET /products/{productId}/images
     // =========================================================================
 
-    /// <summary>
-    /// Returns the list of non-deleted images for a product, ordered by DisplayOrder.
-    /// Re-uses GetProductByIdQuery and extracts the Images collection from the detail DTO.
-    /// </summary>
+    /// <summary>Returns non-deleted images for a product, ordered by DisplayOrder.</summary>
     [HttpGet("{productId:guid}/images")]
     [SwaggerOperation(
         Summary = "List product images",
         Description = "Returns all non-deleted images for the specified product, " +
-                      "ordered ascending by DisplayOrder. " +
-                      "Returns 404 if the product does not exist or belongs to another retailer. " +
-                      "This endpoint re-uses GetProductByIdQuery — for full product detail use " +
-                      "GET /products/{productId} instead.")]
+                      "ordered ascending by DisplayOrder.")]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<ProductImageDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -374,8 +338,6 @@ public sealed class ProductsController : BaseApiController
     {
         EnsureRetailerOwnership(retailerId);
 
-        // GetProductByIdQuery already loads images with the product (AsSplitQuery + Include).
-        // Extracting Images avoids a dedicated query class for this slim read path.
         var detail = await Sender.Send(
             new GetProductByIdQuery(productId),
             cancellationToken);
@@ -387,21 +349,14 @@ public sealed class ProductsController : BaseApiController
     // 9. POST /products/{productId}/images  (rate-limited: upload)
     // =========================================================================
 
-    /// <summary>
-    /// Uploads a single image to S3 and adds it to the product's image list.
-    /// Magic byte validation runs before any S3 upload.
-    /// </summary>
+    /// <summary>Uploads a single image to S3 and attaches it to the product.</summary>
     [HttpPost("{productId:guid}/images")]
     [Consumes("multipart/form-data")]
     [EnableRateLimiting("upload")]
     [SwaggerOperation(
         Summary = "Add product image",
-        Description = "Uploads a single JPEG or PNG image to S3 and attaches it to the product. " +
-                      "FileStorageService reads the first 4 bytes (magic bytes) to verify " +
-                      "the file is genuinely JPEG (FF D8 FF) or PNG (89 50 4E 47) — " +
-                      "bypassing ContentType header spoofing. " +
-                      "A GUID-based filename is generated to prevent path traversal attacks. " +
-                      "The image is stored under the products/{retailerId}/ folder prefix in S3. " +
+        Description = "Uploads a single JPEG or PNG image (max 5 MB) to S3 and attaches it to the product. " +
+                      "Magic byte validation runs before any S3 upload. " +
                       "Upload rate limit: 20 requests/minute per retailer.")]
     [ProducesResponseType(typeof(ApiResponse<ProductImageDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
@@ -417,8 +372,7 @@ public sealed class ProductsController : BaseApiController
     {
         EnsureRetailerOwnership(retailerId);
 
-        // FIX: Map IFormFile → FileUploadDto here, in the API layer.
-        //      The stream is opened once and disposed by the handler.
+        // Map IFormFile → FileUploadDto in the API layer.
         var imageUpload = new FileUploadDto(
             Content: request.ImageFile.OpenReadStream(),
             FileName: request.ImageFile.FileName,
@@ -428,7 +382,7 @@ public sealed class ProductsController : BaseApiController
         var result = await Sender.Send(
             new AddProductImageCommand(
                 ProductId: productId,
-                ImageFile: imageUpload,       // ← was: request.ImageFile (IFormFile)
+                ImageFile: imageUpload,
                 DisplayOrder: request.DisplayOrder),
             cancellationToken);
 
@@ -442,18 +396,12 @@ public sealed class ProductsController : BaseApiController
     // 10. DELETE /products/{productId}/images/{imageId}
     // =========================================================================
 
-    /// <summary>
-    /// Soft-deletes the image record in the database and attempts to delete
-    /// the underlying object from S3. S3 deletion is best-effort — if it fails,
-    /// the image is already soft-deleted in the DB and will not appear in responses.
-    /// </summary>
+    /// <summary>Soft-deletes the image DB record and performs a best-effort S3 delete.</summary>
     [HttpDelete("{productId:guid}/images/{imageId:guid}")]
     [SwaggerOperation(
         Summary = "Remove product image",
         Description = "Soft-deletes the product image record and performs a best-effort S3 delete. " +
-                      "DB soft-delete happens first; S3 failure is caught, logged as Warning, " +
-                      "and does not roll back the DB change. " +
-                      "Orphaned S3 objects are reconciled by a scheduled cleanup job. " +
+                      "DB soft-delete happens first; S3 failure is caught and does not roll back. " +
                       "Returns 204 No Content on success.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]

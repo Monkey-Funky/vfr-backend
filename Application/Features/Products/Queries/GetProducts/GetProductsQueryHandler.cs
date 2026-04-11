@@ -3,7 +3,6 @@ using Application.Interfaces.Services;
 
 namespace Application.Features.Products.Queries.GetProducts;
 
-
 public sealed class GetProductsQueryHandler
     : IRequestHandler<GetProductsQuery, PagedResult<ProductListDto>>
 {

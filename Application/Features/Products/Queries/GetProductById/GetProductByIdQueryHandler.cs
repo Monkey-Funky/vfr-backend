@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Products.Queries.GetProductById;
 
-
 public sealed class GetProductByIdQueryHandler
     : IRequestHandler<GetProductByIdQuery, ProductDetailDto>
 {
@@ -28,6 +27,8 @@ public sealed class GetProductByIdQueryHandler
         var retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity claim is missing.");
 
+        // Single query: product + images via Include (AsSplitQuery = 2 SQL statements).
+        // IDOR: filter on RetailerId + !IsDeleted in the same predicate.
         var product = await _context.Products
             .AsNoTracking()
             .Include(p => p.Images)
@@ -38,7 +39,7 @@ public sealed class GetProductByIdQueryHandler
                 cancellationToken)
             ?? throw new NotFoundException(nameof(Product), query.ProductId);
 
-        // Load category / sub-category names separately to avoid a JOIN on every call
+        // Category and sub-category names — two lean scalar queries.
         string? categoryName = null;
         string? subCategoryName = null;
 
@@ -60,7 +61,7 @@ public sealed class GetProductByIdQueryHandler
                 .FirstOrDefaultAsync(cancellationToken);
         }
 
-        // Load inventory summary
+        // Lean inventory summary — single scalar projection.
         var inventory = await _context.InventoryRecords
             .AsNoTracking()
             .Where(i => i.ProductId == product.Id && !i.IsDeleted)

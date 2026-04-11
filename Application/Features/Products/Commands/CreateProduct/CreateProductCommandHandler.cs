@@ -4,6 +4,7 @@ using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Enums.Product;
 using Microsoft.EntityFrameworkCore;
+using Shared.Constants;
 
 namespace Application.Features.Products.Commands.CreateProduct;
 
@@ -25,6 +26,7 @@ public sealed class CreateProductCommandHandler
     private readonly IFileStorageService _fileStorage;
     private readonly ICurrentUserService _currentUserService;
     private readonly IApplicationDbContext _context;
+    private readonly ICacheService _cache;
 
     public CreateProductCommandHandler(
         IUnitOfWork unitOfWork,
@@ -32,7 +34,8 @@ public sealed class CreateProductCommandHandler
         ISubscriptionService subscriptionService,
         IFileStorageService fileStorage,
         ICurrentUserService currentUserService,
-        IApplicationDbContext context)
+        IApplicationDbContext context,
+        ICacheService cache)
     {
         _unitOfWork = unitOfWork;
         _productRepo = productRepo;
@@ -40,6 +43,7 @@ public sealed class CreateProductCommandHandler
         _fileStorage = fileStorage;
         _currentUserService = currentUserService;
         _context = context;
+        _cache = cache;
     }
 
     public async Task<Result<ProductDetailDto>> Handle(
@@ -84,6 +88,7 @@ public sealed class CreateProductCommandHandler
         }
 
         // ── STEP 3: Validate barcode uniqueness within the retailer's scope ──
+        // Duplicate barcode across DIFFERENT retailers is allowed.
         if (!string.IsNullOrWhiteSpace(command.Barcode))
         {
             var barcodeExists = await _productRepo.GetByBarcodeAsync(
@@ -97,8 +102,6 @@ public sealed class CreateProductCommandHandler
         }
 
         // ── STEP 4: Upload images to S3 BEFORE the transaction ───────────────
-        // Images are uploaded first. If the DB transaction later fails, the S3
-        // objects are orphaned — a scheduled cleanup job removes these.
         var uploadedImageUrls = new List<(string Url, int Order)>();
 
         if (command.Images is { Length: > 0 })
@@ -107,13 +110,11 @@ public sealed class CreateProductCommandHandler
             {
                 var file = command.Images[i];
 
-                // FIX: Use FileUploadDto.Content (stream pre-opened by controller).
-                //      "await using" disposes the stream after upload.
                 await using var stream = file.Content;
 
                 var url = await _fileStorage.UploadAsync(
                     stream: stream,
-                    fileName: file.FileName,   // extension only; GUID generated inside FileStorageService
+                    fileName: file.FileName,
                     folder: $"products/{retailerId}",
                     ct: cancellationToken);
 
@@ -121,12 +122,12 @@ public sealed class CreateProductCommandHandler
             }
         }
 
-        // ── STEP 5: Plan limit check + atomic Product + InventoryRecord creation
+        // ── STEP 5: Plan limit check + atomic Product + InventoryRecord ──────
         Product? createdProduct = null;
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
-            // ── 5a. Plan limit check (inside transaction) ─────────────────────
+            // ── 5a. Plan limit check (inside transaction — TOCTOU-safe) ───────
             var planInfo = await _subscriptionService.GetCurrentPlanAsync(retailerId, ct);
 
             if (planInfo?.MaxActiveProducts.HasValue == true)
@@ -154,7 +155,7 @@ public sealed class CreateProductCommandHandler
 
             await _unitOfWork.Repository<Product>().AddAsync(createdProduct, ct);
 
-            // ── 5c. Create the InventoryRecord atomically ─────────────────────
+            // ── 5c. Create InventoryRecord atomically ─────────────────────────
             var inventoryRecord = InventoryRecord.Create(
                 retailerId: retailerId,
                 productId: createdProduct.Id,
@@ -168,12 +169,17 @@ public sealed class CreateProductCommandHandler
             foreach (var (url, order) in uploadedImageUrls)
                 createdProduct.AddImage(url, order);
 
-            // ── 5e. Persist everything in one SaveChanges ─────────────────────
+            // ── 5e. Single SaveChanges for all entities ───────────────────────
             await _unitOfWork.SaveChangesAsync(ct);
 
         }, cancellationToken);
 
-        // Load category/sub-category names for the response DTO
+        // ── STEP 6: Invalidate Redis cache ────────────────────────────────────
+        await _cache.RemoveAsync(
+            CacheKeys.ActiveProductCount(retailerId),
+            cancellationToken);
+
+        // ── Build response DTO ────────────────────────────────────────────────
         string? categoryName = null;
         string? subCategoryName = null;
 

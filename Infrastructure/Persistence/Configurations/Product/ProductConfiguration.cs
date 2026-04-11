@@ -1,4 +1,5 @@
 ﻿using Domain.Enums.Product;
+using NpgsqlTypes;
 
 namespace Infrastructure.Persistence.Configurations.Product;
 
@@ -53,7 +54,33 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Domain.Entit
             .IsRequired()
             .HasDefaultValue(ProductStatus.Draft);
 
-        // search_vector is NOT mapped here — see class-level summary above.
+        // ── Search Vector (Shadow Property — PostgreSQL GENERATED ALWAYS AS STORED) ──
+        //
+        // DESIGN: The Product entity has NO SearchVector C# property.
+        //   Using a shadow property keeps the Domain layer free of Npgsql dependencies.
+        //   NpgsqlTsVector is available here in the Infrastructure layer.
+        //
+        // EF Core behaviour with HasComputedColumnSql + stored: true:
+        //   • EF Core will NEVER include this column in INSERT or UPDATE statements.
+        //   • PostgreSQL maintains the value automatically on every row write.
+        //   • The shadow property allows HasIndex("SearchVector").HasMethod("gin")
+        //     to declare the GIN index without a C# property expression.
+        //
+        // FTS queries in ProductRepository reference this column via
+        //   EF.Property<NpgsqlTsVector>(p, "SearchVector").Matches(...)
+        // which translates to: search_vector @@ plainto_tsquery('english', ?)
+        //
+        // ⚠ MIGRATION: The migration scaffold MUST NOT include search_vector in
+        //   CreateTable. Add it via ALTER TABLE in the migration's Up() raw SQL block.
+        builder.Property<NpgsqlTsVector>("SearchVector")
+            .HasColumnName("search_vector")
+            .HasColumnType("tsvector")
+            .HasComputedColumnSql(
+                "to_tsvector('english', " +
+                "coalesce(name, '') || ' ' || " +
+                "coalesce(description, '') || ' ' || " +
+                "coalesce(barcode, ''))",
+                stored: true);
 
         // ── Audit Columns ──────────────────────────────────────────────────────
         builder.Property(p => p.CreatedAt)
@@ -103,11 +130,17 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Domain.Entit
 
         // ── Indexes ───────────────────────────────────────────────────────────
 
-        // Partial unique index: unique product name per retailer (non-deleted only)
+        // Partial unique: unique product name per retailer (non-deleted only)
         builder.HasIndex(p => new { p.RetailerId, p.Name })
             .HasFilter("is_deleted = false")
             .IsUnique()
             .HasDatabaseName("uidx_products_retailer_name");
+
+        // Partial unique: barcode uniqueness scoped per retailer (not global)
+        builder.HasIndex(p => new { p.RetailerId, p.Barcode })
+            .HasFilter("is_deleted = false AND barcode IS NOT NULL")
+            .IsUnique()
+            .HasDatabaseName("uidx_products_retailer_barcode");
 
         builder.HasIndex(p => p.RetailerId)
             .HasDatabaseName("idx_products_retailer_id");
@@ -115,15 +148,27 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Domain.Entit
         builder.HasIndex(p => p.CategoryId)
             .HasDatabaseName("idx_products_category_id");
 
+        builder.HasIndex(p => p.SubCategoryId)
+            .HasDatabaseName("idx_products_sub_category_id");
+
+        // Composite index: (retailer_id, status) for status-filtered list queries
         builder.HasIndex(p => new { p.RetailerId, p.Status })
             .HasDatabaseName("idx_products_retailer_status");
 
-        // GIN index on search_vector is created via raw SQL in the migration.
-        // It cannot be declared here because the property is not mapped to EF.
+        // Composite index: (retailer_id, created_at DESC) for default sort
+        builder.HasIndex(p => new { p.RetailerId, p.CreatedAt })
+            .HasDatabaseName("idx_products_retailer_created_at");
+
+        // GIN index on the generated tsvector shadow property.
+        // Npgsql translates .HasMethod("gin") → USING GIN in the migration DDL.
+        // This makes plainto_tsquery FTS searches O(log n) instead of O(n).
+        builder.HasIndex("SearchVector")
+            .HasMethod("gin")
+            .HasDatabaseName("idx_products_search_vector");
 
         // ── CHECK Constraint ──────────────────────────────────────────────────
         builder.ToTable(t => t.HasCheckConstraint(
             "ck_products_status",
-            "status IN ('Active', 'Inactive', 'Draft')"));
+            "status IN ('Active', 'Inactive', 'Draft', 'OutOfStock')"));
     }
 }

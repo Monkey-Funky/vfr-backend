@@ -7,7 +7,7 @@ public sealed class CreateProductCommandValidator : AbstractValidator<CreateProd
     private static readonly string[] AllowedImageContentTypes =
         ["image/jpeg", "image/jpg", "image/png"];
 
-    private const long MaxImageSizeBytes = 1 * 1024 * 1024; // 1 MB
+    private const long MaxImageSizeBytes = 5L * 1024 * 1024; // 5 MB per spec
 
     public CreateProductCommandValidator()
     {
@@ -40,13 +40,12 @@ public sealed class CreateProductCommandValidator : AbstractValidator<CreateProd
             .Must(ProductStatus.IsValid)
             .WithMessage($"Status must be one of: {string.Join(", ", ProductStatus.All)}.");
 
-        // FileUploadDto.Length and .ContentType — same property names as IFormFile
         RuleForEach(c => c.Images)
             .ChildRules(image =>
             {
                 image.RuleFor(f => f.Length)
                     .LessThanOrEqualTo(MaxImageSizeBytes)
-                    .WithMessage("Each image must not exceed 1 MB.");
+                    .WithMessage("Each image must not exceed 5 MB.");
 
                 image.RuleFor(f => f.ContentType)
                     .Must(ct => AllowedImageContentTypes.Contains(ct.ToLowerInvariant()))

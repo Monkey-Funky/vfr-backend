@@ -3,6 +3,7 @@ using Application.Features.Products.DTOs;
 using Application.Features.Products.Mappings;
 using Application.Features.Products.Queries.GetProducts;
 using Application.Interfaces.Services;
+using NpgsqlTypes;
 using System.Linq;
 
 namespace Infrastructure.Persistence.Repositories;
@@ -33,23 +34,23 @@ public sealed class ProductRepository : Repository<Product>, IProductRepository
     public Task<int> GetActiveProductCountByRetailerAsync(
         Guid retailerId,
         CancellationToken ct)
+        // Global query filter already excludes IsDeleted = true.
         => _db.Products
               .AsNoTracking()
-              .CountAsync(p => p.RetailerId == retailerId && !p.IsDeleted, ct);
+              .CountAsync(p => p.RetailerId == retailerId, ct);
 
-    // ── Paginated product list with FTS ───────────────────────────────────────
+    // ── Paginated product list — ≤ 2 SQL statements ───────────────────────────
 
     public async Task<PagedResult<ProductListDto>> GetProductsPagedAsync(
         GetProductsQuery query,
         Guid retailerId,
         CancellationToken ct)
     {
-        // Start with the retailer-scoped base query
-        // AsNoTracking() + AsSplitQuery() are applied before materialisation.
+        // ── Base query: retailer scope first (index-friendly predicate order) ──
+        // Global query filter applies !IsDeleted automatically.
         var baseQuery = _db.Products
             .AsNoTracking()
-            .AsSplitQuery()
-            .Where(p => p.RetailerId == retailerId && !p.IsDeleted);
+            .Where(p => p.RetailerId == retailerId);
 
         // ── Filters ────────────────────────────────────────────────────────────
         if (query.CategoryId.HasValue)
@@ -61,25 +62,19 @@ public sealed class ProductRepository : Repository<Product>, IProductRepository
         if (!string.IsNullOrWhiteSpace(query.Status))
             baseQuery = baseQuery.Where(p => p.Status == query.Status);
 
-        // ── Full-Text Search ───────────────────────────────────────────────────
-        // EF Core + Npgsql: use EF.Functions.ToTsQuery / PlainToTsQuery for FTS.
-        // plainto_tsquery: converts free-form user text to a tsquery safely.
-        // Never use to_tsquery directly — it throws on special characters.
+        // ── Full-Text Search via stored search_vector GIN column ───────────────
+        // Uses shadow property EF.Property<NpgsqlTsVector>(p, "SearchVector").
+        // Translates to: WHERE search_vector @@ plainto_tsquery('english', ?)
+        // plainto_tsquery is safe for arbitrary user input (no syntax exceptions).
         if (!string.IsNullOrWhiteSpace(query.SearchTerm))
         {
             var searchTerm = query.SearchTerm.Trim();
-
-            // baseQuery ← correct name (NOT "queryable")
+            var tsQuery = EF.Functions.PlainToTsQuery("english", searchTerm);
             baseQuery = baseQuery.Where(p =>
-                EF.Functions.ToTsVector(
-                    "english",
-                    p.Name
-                    + " " + (p.Description ?? "")
-                    + " " + (p.Barcode ?? ""))
-                .Matches(EF.Functions.PlainToTsQuery("english", searchTerm)));
+                EF.Property<NpgsqlTsVector>(p, "SearchVector").Matches(tsQuery));
         }
 
-        // ── Total count ────────────────────────────────────────────────────────
+        // ── Statement 1: COUNT (lean — no includes, no joins) ─────────────────
         var totalCount = await baseQuery.CountAsync(ct);
 
         if (totalCount == 0)
@@ -93,72 +88,67 @@ public sealed class ProductRepository : Repository<Product>, IProductRepository
             };
         }
 
-        // ── Paginate and project ───────────────────────────────────────────────
-        var products = await baseQuery
+        // ── Statement 2: Paginated projection with correlated subqueries ───────
+        //
+        // All joins and subqueries are expressed inside a single Select() so EF Core
+        // translates the entire projection into one SQL SELECT.
+        //
+        // Global query filters on Categories, SubCategories, and ProductImages are
+        // applied automatically by EF Core — no explicit !IsDeleted needed here.
+        var items = await baseQuery
             .OrderByDescending(p => p.CreatedAt)
             .Skip((query.PageNumber - 1) * query.PageSize)
             .Take(query.PageSize)
-            .Include(p => p.Images)
+            .Select(p => new ProductListDto(
+                p.Id,
+                p.Name,
+                _db.Categories
+                    .Where(c => c.Id == p.CategoryId)
+                    .Select(c => c.Name)
+                    .FirstOrDefault(),
+                _db.SubCategories
+                    .Where(s => s.Id == p.SubCategoryId)
+                    .Select(s => s.Name)
+                    .FirstOrDefault(),
+                p.Barcode,
+                p.Status,
+                p.Price,
+                p.Currency,
+                // Thumbnail = first non-deleted image ordered by DisplayOrder
+                _db.ProductImages
+                    .Where(i => i.ProductId == p.Id)
+                    .OrderBy(i => i.DisplayOrder)
+                    .Select(i => i.ImageUrl)
+                    .FirstOrDefault(),
+                p.CreatedAt
+            ))
             .ToListAsync(ct);
-
-        // Collect all CategoryIds and SubCategoryIds in one batch query
-        var categoryIds = products.Where(p => p.CategoryId.HasValue)
-                                     .Select(p => p.CategoryId!.Value)
-                                     .Distinct()
-                                     .ToList();
-        var subCategoryIds = products.Where(p => p.SubCategoryId.HasValue)
-                                     .Select(p => p.SubCategoryId!.Value)
-                                     .Distinct()
-                                     .ToList();
-
-        var categoryNames = categoryIds.Count > 0
-            ? await _db.Categories
-                  .AsNoTracking()
-                  .Where(c => categoryIds.Contains(c.Id) && !c.IsDeleted)
-                  .ToDictionaryAsync(c => c.Id, c => c.Name, ct)
-            : new Dictionary<Guid, string>();
-
-        var subCategoryNames = subCategoryIds.Count > 0
-            ? await _db.SubCategories
-                  .AsNoTracking()
-                  .Where(s => subCategoryIds.Contains(s.Id) && !s.IsDeleted)
-                  .ToDictionaryAsync(s => s.Id, s => s.Name, ct)
-            : new Dictionary<Guid, string>();
-
-        var items = products.Select(p => p.ToListDto(
-            categoryName: p.CategoryId.HasValue
-                                 ? categoryNames.GetValueOrDefault(p.CategoryId.Value)
-                                 : null,
-            subCategoryName: p.SubCategoryId.HasValue
-                                 ? subCategoryNames.GetValueOrDefault(p.SubCategoryId.Value)
-                                 : null))
-            .ToList()
-            .AsReadOnly();
 
         return new PagedResult<ProductListDto>
         {
-            Items = items,
+            Items = items.AsReadOnly(),
             PageNumber = query.PageNumber,
             PageSize = query.PageSize,
             TotalCount = totalCount
         };
     }
 
-    // ── Barcode lookup ────────────────────────────────────────────────────────
+    // ── Barcode lookup (per retailer scope) ───────────────────────────────────
 
     public Task<Product?> GetByBarcodeAsync(
         Guid retailerId,
         string barcode,
         CancellationToken ct)
+        // AnyAsync would be faster for existence checks — use GetByBarcodeAsync
+        // only when the caller needs the entity (e.g. CreateProductCommandHandler).
         => _db.Products
               .AsNoTracking()
               .FirstOrDefaultAsync(
                   p => p.RetailerId == retailerId
-                    && p.Barcode == barcode
-                    && !p.IsDeleted,
+                    && p.Barcode == barcode,
                   ct);
 
-    // ── By-ID with images ────────────────────────────────────────────────────
+    // ── By-ID with images (for GetProductByIdQueryHandler) ───────────────────
 
     public Task<Product?> GetByIdWithImagesAsync(
         Guid productId,
@@ -170,7 +160,6 @@ public sealed class ProductRepository : Repository<Product>, IProductRepository
               .Include(p => p.Images)
               .FirstOrDefaultAsync(
                   p => p.Id == productId
-                    && p.RetailerId == retailerId
-                    && !p.IsDeleted,
+                    && p.RetailerId == retailerId,
                   ct);
 }
