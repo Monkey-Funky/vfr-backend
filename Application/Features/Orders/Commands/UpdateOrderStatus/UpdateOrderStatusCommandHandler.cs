@@ -37,12 +37,12 @@ public sealed class UpdateOrderStatusCommandHandler
                 await _unitOfWork.ExecuteInTransactionAsync(async ct =>
                 {
                     // ── IDOR Defence ─────────────────────────────────────────
-                    // Load WITH tracking (GetTrackedByIdAsync) so RowVersion
-                    // is included in the UPDATE WHERE clause for optimistic lock.
-                    // Then verify RetailerId matches JWT — if not, 404 (not 403).
+                    // GetTrackedByIdAsync loads WITH tracking so RowVersion is
+                    // included in the UPDATE WHERE clause for the optimistic lock.
                     var order = await _unitOfWork.GetTrackedByIdAsync<Order>(request.OrderId, ct)
                         ?? throw new NotFoundException(nameof(Order), request.OrderId);
 
+                    // Verify ownership — return 404 (not 403) to avoid confirming existence
                     if (order.RetailerId != request.RetailerId)
                         throw new NotFoundException(nameof(Order), request.OrderId);
 
@@ -53,14 +53,10 @@ public sealed class UpdateOrderStatusCommandHandler
                     // Invalid transition → BusinessRuleException → HTTP 422.
                     order.UpdateStatus(request.NewStatus);
 
-                    // ── Save Status Change (still inside transaction) ─────────
+                    // ── Save status change (still inside transaction) ──────────
                     await _unitOfWork.SaveChangesAsync(ct);
 
-                    // ── Domain Events (inside same transaction) ───────────────
-                    // All handlers call _unitOfWork.SaveChangesAsync on the SAME
-                    // DbContext scope — they participate in the same transaction.
-                    // If CommissionDeductionHandler throws, the ENTIRE transaction
-                    // rolls back: status change + inventory decrement + notifications.
+                    // ── Domain Events (inside same transaction) ────────────────
                     var domainEvent = new OrderStatusChangedEvent(
                         OrderId: order.Id,
                         RetailerId: order.RetailerId,
@@ -74,24 +70,24 @@ public sealed class UpdateOrderStatusCommandHandler
 
                 return Result<bool>.Success(true, "Order status updated successfully.");
             }
-            catch (DbUpdateConcurrencyException ex) when (attempt < MaxConcurrencyRetries)
+            catch (DbUpdateConcurrencyException) when (attempt < MaxConcurrencyRetries)
             {
                 _logger.LogWarning(
                     "Concurrency conflict on Order {OrderId} (attempt {Attempt}/{Max}). Retrying...",
                     request.OrderId, attempt, MaxConcurrencyRetries);
 
-                // Small delay before retry to reduce contention
                 await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken);
             }
             catch (DbUpdateConcurrencyException ex)
             {
+                // FIX OR-1: throw ConflictException → HTTP 409 (not BusinessRuleException → 422)
                 _logger.LogError(ex,
                     "Concurrency conflict on Order {OrderId} — all {Max} retries exhausted.",
                     request.OrderId, MaxConcurrencyRetries);
 
-                throw new BusinessRuleException(
-                    "ORDER_CONCURRENT_UPDATE",
-                    "The order was modified by another request at the same time. Please try again.");
+                throw new ConflictException(
+                    "ORDER_CONCURRENCY_CONFLICT: The order was modified by another request simultaneously. " +
+                    "Please refresh and try again.");
             }
         }
 

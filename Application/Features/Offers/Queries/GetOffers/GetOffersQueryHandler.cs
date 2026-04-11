@@ -43,8 +43,11 @@ public sealed class GetOffersQueryHandler
         if (cached is not null)
             return cached;
 
+        // Retailer filter FIRST — always scope to the authenticated tenant
         IQueryable<Offer> queryable = _context.Offers
             .AsNoTracking()
+            .Include(o => o.Product)    // FIX O-5: left-join for ProductName in listing
+            .Include(o => o.Category)   // FIX O-5: left-join for CategoryName in listing
             .Where(o => o.RetailerId == retailerId);
 
         if (query.Status is not null)

@@ -23,68 +23,18 @@ public sealed class Offer : BaseEntity
     // Properties
     // =========================================================================
 
-    /// <summary>FK to the owning retailer. Never null after construction.</summary>
     public Guid RetailerId { get; private set; }
-
-    /// <summary>Display title shown to customers. Max 200 chars (varchar(200) in DB).</summary>
     public string Title { get; private set; } = string.Empty;
-
-    /// <summary>Optional marketing description. Mapped to text in DB.</summary>
     public string? Description { get; private set; }
-
-    /// <summary>
-    /// Determines whether the offer targets a Product or a Category.
-    /// See <see cref="OfferType"/> for valid values.
-    /// </summary>
     public string OfferType { get; private set; } = string.Empty;
-
-    /// <summary>
-    /// FK to the targeted product. Non-null when OfferType = Product.
-    /// Null when OfferType = Category.
-    /// ON DELETE SET NULL in the DB — if the product is deleted, this is set to null
-    /// but the offer row is retained.
-    /// </summary>
     public Guid? ProductId { get; private set; }
-
-    /// <summary>
-    /// FK to the targeted category. Non-null when OfferType = Category.
-    /// Null when OfferType = Product.
-    /// ON DELETE SET NULL in the DB.
-    /// </summary>
     public Guid? CategoryId { get; private set; }
-
-    /// <summary>
-    /// Determines how DiscountValue is interpreted.
-    /// See <see cref="DiscountType"/> for valid values.
-    /// </summary>
     public string DiscountType { get; private set; } = string.Empty;
-
-    /// <summary>
-    /// The discount amount or percentage.
-    ///   Percentage: 1–100 (inclusive)
-    ///   Fixed: > 0 and ≤ product price (validated in CreateOfferCommandHandler)
-    /// Stored as numeric(18,2) in the DB.
-    /// </summary>
     public decimal DiscountValue { get; private set; }
-
-    /// <summary>Date on which the offer becomes active. Mapped to PostgreSQL date.</summary>
     public DateOnly StartDate { get; private set; }
-
-    /// <summary>
-    /// Optional expiry date. Null = open-ended offer.
-    /// When EndDate < today and Status = Active, OfferExpiryJob calls Deactivate().
-    /// </summary>
     public DateOnly? EndDate { get; private set; }
-
-    /// <summary>Public-facing cover image URL. Uploaded via IFileStorageService.</summary>
     public string CoverImageUrl { get; private set; } = string.Empty;
-
-    /// <summary>
-    /// Current lifecycle status.
-    /// See <see cref="OfferStatus"/> for valid values and transition rules.
-    /// </summary>
     public string Status { get; private set; } = OfferStatus.Active;
-
 
     // =========================================================================
     // Computed Properties
@@ -92,10 +42,23 @@ public sealed class Offer : BaseEntity
 
     /// <summary>
     /// True when the offer has a defined end date that has already passed.
-    /// Used by OfferExpiryJob to identify candidates for Deactivate().
+    /// Used by OfferExpiryJob to find candidates for Deactivate().
     /// </summary>
     public bool IsExpired =>
         EndDate.HasValue && EndDate.Value < DateOnly.FromDateTime(DateTime.UtcNow);
+
+    /// <summary>
+    /// Returns true when this offer is currently active and in-window.
+    /// RULE: Status = Active AND StartDate &lt;= today AND (EndDate == null OR EndDate &gt;= today).
+    /// Used by product-display layers to determine whether to show the discounted price.
+    /// </summary>
+    public bool IsActive(DateTimeOffset now)
+    {
+        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        return Status == OfferStatus.Active
+            && StartDate <= today
+            && (!EndDate.HasValue || EndDate.Value >= today);
+    }
 
     // =========================================================================
     // Navigation Properties (EF Core only — never use in Application layer)
@@ -118,19 +81,8 @@ public sealed class Offer : BaseEntity
     /// <summary>
     /// Creates a new Offer entity ready to be persisted.
     /// Called exclusively from CreateOfferCommandHandler after all business-rule
-    /// validation has passed (entity ownership, discount constraints, plan limits).
+    /// validation has passed (entity ownership, discount constraints).
     /// </summary>
-    /// <param name="retailerId">Owning retailer. Must not be Guid.Empty.</param>
-    /// <param name="title">Offer display title. Max 200 chars.</param>
-    /// <param name="description">Optional marketing description.</param>
-    /// <param name="offerType">See <see cref="OfferType"/>. Must be a valid value.</param>
-    /// <param name="productId">Required when offerType = Product; null otherwise.</param>
-    /// <param name="categoryId">Required when offerType = Category; null otherwise.</param>
-    /// <param name="discountType">See <see cref="DiscountType"/>. Must be a valid value.</param>
-    /// <param name="discountValue">Must be > 0 and within type-specific range.</param>
-    /// <param name="startDate">Must not be in the past.</param>
-    /// <param name="endDate">Optional expiry date. Must be after startDate when supplied.</param>
-    /// <param name="coverImageUrl">Blob storage URL returned by IFileStorageService.</param>
     public static Offer Create(
         Guid retailerId,
         string title,
@@ -151,35 +103,35 @@ public sealed class Offer : BaseEntity
         // Guard: title
         ArgumentException.ThrowIfNullOrWhiteSpace(title, nameof(title));
 
-        // Guard: offerType enum value
-        if (!Enums.Offer.OfferType.IsValid(offerType))
+        // Guard: offerType enum value — FIX O-1: use OfferType directly (Domain.Enums is imported)
+        if (!Domain.Enums.Offer.OfferType.IsValid(offerType))
             throw new BusinessRuleException(
                 "INVALID_OFFER_TYPE",
-                $"OfferType must be one of: {string.Join(", ", Enums.Offer.OfferType.All)}.");
+                $"OfferType must be one of: {string.Join(", ", Domain.Enums.Offer.OfferType.All)}.");
 
         // Guard: discountType enum value
-        if (!Enums.Offer.DiscountType.IsValid(discountType))
+        if (!Domain.Enums.Offer.DiscountType.IsValid(discountType))
             throw new BusinessRuleException(
                 "INVALID_DISCOUNT_TYPE",
-                $"DiscountType must be one of: {string.Join(", ", Enums.Offer.DiscountType.All)}.");
+                $"DiscountType must be one of: {string.Join(", ", Domain.Enums.Offer.DiscountType.All)}.");
 
         // Guard: mutual exclusivity of ProductId / CategoryId
-        if (offerType == Enums.Offer.OfferType.Product && (productId is null || productId == Guid.Empty))
+        if (offerType == Domain.Enums.Offer.OfferType.Product && (productId is null || productId == Guid.Empty))
             throw new BusinessRuleException(
                 "PRODUCT_ID_REQUIRED",
                 "ProductId is required for a Product-type offer.");
 
-        if (offerType == Enums.Offer.OfferType.Category && (categoryId is null || categoryId == Guid.Empty))
+        if (offerType == Domain.Enums.Offer.OfferType.Category && (categoryId is null || categoryId == Guid.Empty))
             throw new BusinessRuleException(
                 "CATEGORY_ID_REQUIRED",
                 "CategoryId is required for a Category-type offer.");
 
-        if (offerType == Enums.Offer.OfferType.Product && categoryId is not null)
+        if (offerType == Domain.Enums.Offer.OfferType.Product && categoryId is not null)
             throw new BusinessRuleException(
                 "MUTUAL_EXCLUSIVITY_VIOLATION",
                 "A Product-type offer must not carry a CategoryId.");
 
-        if (offerType == Enums.Offer.OfferType.Category && productId is not null)
+        if (offerType == Domain.Enums.Offer.OfferType.Category && productId is not null)
             throw new BusinessRuleException(
                 "MUTUAL_EXCLUSIVITY_VIOLATION",
                 "A Category-type offer must not carry a ProductId.");
@@ -200,15 +152,15 @@ public sealed class Offer : BaseEntity
             Title = title.Trim(),
             Description = description?.Trim(),
             OfferType = offerType,
-            ProductId = offerType == Enums.Offer.OfferType.Product ? productId : null,
-            CategoryId = offerType == Enums.Offer.OfferType.Category ? categoryId : null,
+            ProductId = offerType == Domain.Enums.Offer.OfferType.Product ? productId : null,
+            CategoryId = offerType == Domain.Enums.Offer.OfferType.Category ? categoryId : null,
             DiscountType = discountType,
             DiscountValue = discountValue,
             StartDate = startDate,
             EndDate = endDate,
             CoverImageUrl = coverImageUrl,
             Status = OfferStatus.Active,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
         };
     }
 
@@ -218,9 +170,7 @@ public sealed class Offer : BaseEntity
 
     /// <summary>
     /// Transitions the offer status to <see cref="OfferStatus.Expired"/>.
-    /// Called exclusively by <c>OfferExpiryJob</c> when the offer's EndDate
-    /// has passed. Not to be confused with manual deactivation via
-    /// <see cref="ToggleStatus"/>, which cycles between Active/Inactive.
+    /// Called exclusively by <c>OfferExpiryJob</c> when the offer's EndDate has passed.
     /// </summary>
     public void Deactivate()
     {
@@ -230,7 +180,7 @@ public sealed class Offer : BaseEntity
 
     /// <summary>
     /// Toggles the offer between Active and Inactive.
-    /// Expired offers cannot be toggled — an Expired offer must remain Expired.
+    /// Expired offers cannot be toggled — they must remain Expired.
     /// </summary>
     public void ToggleStatus()
     {
@@ -261,10 +211,11 @@ public sealed class Offer : BaseEntity
 
         ArgumentException.ThrowIfNullOrWhiteSpace(title, nameof(title));
 
-        if (!Enums.Offer.DiscountType.IsValid(discountType))
+        // FIX O-1: use DiscountType directly (Domain.Enums is imported)
+        if (!Domain.Enums.Offer.DiscountType.IsValid(discountType))
             throw new BusinessRuleException(
                 "INVALID_DISCOUNT_TYPE",
-                $"DiscountType must be one of: {string.Join(", ", Enums.Offer.DiscountType.All)}.");
+                $"DiscountType must be one of: {string.Join(", ", DiscountType.All)}.");
 
         if (!OfferStatus.IsValid(status))
             throw new BusinessRuleException(
@@ -297,7 +248,7 @@ public sealed class Offer : BaseEntity
     /// <summary>Soft-deletes the offer. Called from DeleteOfferCommandHandler.</summary>
     public void SoftDelete()
     {
-        IsDeleted = true;   
+        IsDeleted = true;
         UpdatedAt = DateTime.UtcNow;
     }
 }

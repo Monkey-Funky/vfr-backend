@@ -43,15 +43,12 @@ public sealed class OfferExpiryJob : BackgroundService
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                // Graceful shutdown — exit the loop cleanly.
                 throw;
             }
             catch (Exception ex)
             {
-                // Log Fatal but do NOT re-throw — host continues running.
                 _logger.LogCritical(ex,
-                    "{Job} encountered an unhandled exception and skipped this run. " +
-                    "Error: {Message}",
+                    "{Job} encountered an unhandled exception and skipped this run. Error: {Message}",
                     nameof(OfferExpiryJob), ex.Message);
             }
         }
@@ -69,8 +66,6 @@ public sealed class OfferExpiryJob : BackgroundService
 
         DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        // Load only Active, non-deleted offers whose EndDate has passed.
-        // The partial index idx_offers_end_date_active covers this query efficiently.
         List<Offer> expiredOffers = await context.Offers
             .Where(o =>
                 o.EndDate.HasValue &&
@@ -78,8 +73,6 @@ public sealed class OfferExpiryJob : BackgroundService
                 o.Status == OfferStatus.Active)
             .ToListAsync(cancellationToken);
 
-        // Call the domain method on each entity — this is the contract requirement.
-        // Deactivate() transitions status to OfferStatus.Expired and sets UpdatedAt.
         foreach (Offer offer in expiredOffers)
         {
             offer.Deactivate();

@@ -1,6 +1,7 @@
 ﻿using Application.Interfaces.Persistence;
 using Domain.Entities.Notifications;
 using Domain.Enums.Orders;
+using Microsoft.EntityFrameworkCore;
 
 
 namespace Application.Features.Orders.Events;
@@ -17,14 +18,19 @@ namespace Application.Features.Orders.Events;
 public sealed class LowStockWarningHandler
     : INotificationHandler<OrderStatusChangedEvent>
 {
+    private static readonly TimeSpan DedupWindow = TimeSpan.FromHours(24);
+
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IApplicationDbContext _context;
     private readonly ILogger<LowStockWarningHandler> _logger;
 
     public LowStockWarningHandler(
         IUnitOfWork unitOfWork,
+        IApplicationDbContext context,
         ILogger<LowStockWarningHandler> logger)
     {
         _unitOfWork = unitOfWork;
+        _context = context;
         _logger = logger;
     }
 
@@ -37,7 +43,9 @@ public sealed class LowStockWarningHandler
             return;
 
         var inventoryRepo = _unitOfWork.Repository<InventoryRecord>();
-        var notificationRepo = _unitOfWork.Repository<Notification>(); // ✅ valid — extends BaseEntity
+        var notificationRepo = _unitOfWork.Repository<Notification>();
+
+        DateTime dedupCutoff = DateTime.UtcNow.Subtract(DedupWindow);
 
         foreach (var item in notification.Items)
         {
@@ -57,6 +65,26 @@ public sealed class LowStockWarningHandler
             if (inventory.CurrentStock > inventory.LowStockThreshold)
                 continue;
 
+            // FIX OR-3: 24-hour dedup guard — skip if a LowStock notification
+            // for this product was already created within the dedup window.
+            bool alreadyNotified = await _context.Notifications
+                .AsNoTracking()
+                .AnyAsync(
+                    n => n.RetailerId == notification.RetailerId
+                      && n.Type == Notification.NotificationType.LowStock
+                      && n.ResourceId == item.ProductId
+                      && n.CreatedAt >= dedupCutoff,
+                    cancellationToken);
+
+            if (alreadyNotified)
+            {
+                _logger.LogDebug(
+                    "LowStockWarningHandler: Skipping duplicate notification for " +
+                    "Product {ProductId} (already created within {Window}h).",
+                    item.ProductId, DedupWindow.TotalHours);
+                continue;
+            }
+
             var stockNotification = Notification.Create(
                 retailerId: notification.RetailerId,
                 type: Notification.NotificationType.LowStock,
@@ -66,7 +94,7 @@ public sealed class LowStockWarningHandler
                             $"(threshold: {inventory.LowStockThreshold}).",
                 resourceId: item.ProductId);
 
-            await notificationRepo.AddAsync(stockNotification, cancellationToken); // ✅
+            await notificationRepo.AddAsync(stockNotification, cancellationToken);
 
             _logger.LogInformation(
                 "Low-stock notification created for Product {ProductId} — Stock: {Stock}/{Threshold}",

@@ -9,7 +9,9 @@ public sealed record OfferDto(
     string? Description,
     string OfferType,
     Guid? ProductId,
+    string? ProductName,     
     Guid? CategoryId,
+    string? CategoryName,     
     string DiscountType,
     decimal DiscountValue,
     DateOnly StartDate,
@@ -17,6 +19,7 @@ public sealed record OfferDto(
     string CoverImageUrl,
     string Status,
     bool IsExpired,
+    bool IsActiveNow,     
     DateTime CreatedAt,
     DateTime? UpdatedAt
 );

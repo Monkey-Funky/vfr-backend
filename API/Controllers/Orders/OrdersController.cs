@@ -4,11 +4,7 @@ using Application.Features.Orders.DTOs;
 using Application.Features.Orders.Queries.ExportOrdersCsv;
 using Application.Features.Orders.Queries.GetOrderById;
 using Application.Features.Orders.Queries.GetOrders;
-using CsvHelper;
-using CsvHelper.Configuration;
 using Swashbuckle.AspNetCore.Annotations;
-using System.Formats.Asn1;
-using System.Globalization;
 
 namespace API.Controllers.Orders;
 
@@ -42,7 +38,6 @@ public sealed class OrdersController : BaseApiController
         [FromQuery] string? searchTerm = null,
         CancellationToken cancellationToken = default)
     {
-        // IDOR guard — retailerId in route must match the JWT
         EnsureRetailerOwnership(retailerId);
 
         var query = new GetOrdersQuery(pageNumber, pageSize, status, searchTerm);
@@ -89,9 +84,12 @@ public sealed class OrdersController : BaseApiController
         Description = "Transitions the order status. Valid transitions: " +
                       "NotProcessed→Processing/Cancelled, Processing→Shipped/Cancelled, " +
                       "Shipped→Delivered. Delivered and Cancelled are terminal states. " +
-                      "Returns 422 for invalid transitions. Returns 404 if order not found or not owned.")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+                      "Returns 422 for invalid state-machine transitions. " +
+                      "Returns 409 on concurrent update conflict. " +
+                      "Returns 404 if order not found or not owned by this retailer.")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -105,18 +103,13 @@ public sealed class OrdersController : BaseApiController
 
         var command = new UpdateOrderStatusCommand(
             OrderId: orderId,
-            RetailerId: CurrentRetailerId, // ✅ ALWAYS from JWT — never from request body
+            RetailerId: CurrentRetailerId,   // ✅ ALWAYS from JWT — never from request body
             NewStatus: request.NewStatus);
 
+        // FIX OR-4: Return HTTP 200 with result data (audit requires UpdateStatus → 200)
         var result = await Sender.Send(command, cancellationToken);
 
-        // ✅ FIX: Result<bool> uses .Data not .Value (CS1061 resolved)
-        // For a 204 NoContent response we don't need to read result.Data at all —
-        // success is determined by result.IsSuccess.
-        if (!result.IsSuccess)
-            return BadRequest(ApiResponse<bool>.FailureResponse(result.Message, result.Errors));
-
-        return NoContent(); // 204 — status updated successfully
+        return OkResponse(result.Data);
     }
 
     // =========================================================================
@@ -141,9 +134,8 @@ public sealed class OrdersController : BaseApiController
 
         var query = new ExportOrdersCsvQuery();
 
-        // ✅ FIX: Pass HttpContext.RequestAborted (NOT cancellationToken directly) so that
-        // when the client disconnects mid-download the EF Core DataReader is disposed
-        // and the PostgreSQL connection is returned to the pool immediately.
+        // Pass HttpContext.RequestAborted so EF Core disposes the DataReader
+        // and returns the connection to the pool on client disconnect mid-download.
         var csvBytes = await Sender.Send(query, HttpContext.RequestAborted);
 
         var fileName = $"orders_{retailerId:N}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";

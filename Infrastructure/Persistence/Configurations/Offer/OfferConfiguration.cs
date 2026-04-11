@@ -9,8 +9,8 @@ public sealed class OfferConfiguration : IEntityTypeConfiguration<Domain.Entitie
 {
     public void Configure(EntityTypeBuilder<Domain.Entities.Retailer.Offer> builder)
     {
-        // ── Table ─────────────────────────────────────────────────────────────
-        builder.ToTable("offers", t =>                  
+        // ✅ EF Core 9 pattern: CHECK constraints inside ToTable(t => { ... })
+        builder.ToTable("offers", t =>
         {
             t.HasCheckConstraint(
                 "ck_offers_offer_type",
@@ -24,13 +24,13 @@ public sealed class OfferConfiguration : IEntityTypeConfiguration<Domain.Entitie
                 "ck_offers_status",
                 "status IN ('Active', 'Inactive', 'Expired')");
 
+            // Mutual exclusivity: ProductId XOR CategoryId based on OfferType
             t.HasCheckConstraint(
                 "ck_offers_type_target_mutual_exclusivity",
                 "(offer_type = 'Product'   AND product_id  IS NOT NULL AND category_id IS NULL) " +
                 "OR " +
                 "(offer_type = 'Category'  AND category_id IS NOT NULL AND product_id  IS NULL)");
         });
-
 
         // ── Primary Key ───────────────────────────────────────────────────────
         builder.HasKey(o => o.Id);
@@ -78,7 +78,7 @@ public sealed class OfferConfiguration : IEntityTypeConfiguration<Domain.Entitie
                .HasColumnType("numeric(18,2)")
                .IsRequired();
 
-        // DateOnly → PostgreSQL date (Npgsql handles this mapping automatically)
+        // DateOnly → PostgreSQL date (Npgsql handles this automatically)
         builder.Property(o => o.StartDate)
                .HasColumnName("start_date")
                .HasColumnType("date")
@@ -115,12 +115,12 @@ public sealed class OfferConfiguration : IEntityTypeConfiguration<Domain.Entitie
                .IsRequired()
                .HasDefaultValue(false);
 
-        // ── Computed property: IsExpired is NOT persisted to the DB ───────────
-        // It is a pure in-memory computed property on the entity.
+        // Ignore BaseEntity audit fields not in the offers table
+        builder.Ignore(o => o.CreatedBy);
+        builder.Ignore(o => o.UpdatedBy);
+
+        // IsExpired and IsActive(now) are pure in-memory computed properties — not persisted
         builder.Ignore(o => o.IsExpired);
-
-        // ── CHECK Constraints — all four required per spec ────────────────────
-
 
         // ── Global Query Filter (soft-delete) ─────────────────────────────────
         builder.HasQueryFilter(o => !o.IsDeleted);
@@ -141,8 +141,7 @@ public sealed class OfferConfiguration : IEntityTypeConfiguration<Domain.Entitie
                .HasForeignKey(o => o.CategoryId)
                .OnDelete(DeleteBehavior.SetNull);
 
-        // ── Indexes (all FK columns + high-frequency query patterns) ──────────
-        // FK indexes — PostgreSQL does NOT auto-index FK columns
+        // ── Indexes ───────────────────────────────────────────────────────────
         builder.HasIndex(o => o.RetailerId)
                .HasDatabaseName("idx_offers_retailer_id");
 
@@ -156,9 +155,7 @@ public sealed class OfferConfiguration : IEntityTypeConfiguration<Domain.Entitie
         builder.HasIndex(o => new { o.RetailerId, o.Status })
                .HasDatabaseName("idx_offers_retailer_status");
 
-        // Partial index: used exclusively by OfferExpiryJob to find expired candidates
-        // Only indexes rows where status = 'Active' AND is_deleted = false
-        // to minimise the index footprint.
+        // Partial index: used by OfferExpiryJob for expired candidates only
         builder.HasIndex(o => o.EndDate)
                .HasFilter("status = 'Active' AND is_deleted = false")
                .HasDatabaseName("idx_offers_end_date_active");

@@ -16,7 +16,9 @@ public static class OfferMappings
             Description: offer.Description,
             OfferType: offer.OfferType,
             ProductId: offer.ProductId,
+            ProductName: offer.Product?.Name,    // populated only when Include(o => o.Product) used
             CategoryId: offer.CategoryId,
+            CategoryName: offer.Category?.Name,   // populated only when Include(o => o.Category) used
             DiscountType: offer.DiscountType,
             DiscountValue: offer.DiscountValue,
             StartDate: offer.StartDate,
@@ -24,6 +26,7 @@ public static class OfferMappings
             CoverImageUrl: offer.CoverImageUrl,
             Status: offer.Status,
             IsExpired: offer.IsExpired,
+            IsActiveNow: offer.IsActive(DateTimeOffset.UtcNow),
             CreatedAt: offer.CreatedAt,
             UpdatedAt: offer.UpdatedAt
         );
@@ -31,10 +34,6 @@ public static class OfferMappings
     /// <summary>
     /// Projects a page of <see cref="Offer"/> entities into a
     /// <see cref="PagedResult{OfferDto}"/> using object-initialiser syntax.
-    ///
-    /// NOTE: PagedResult&lt;T&gt; is a plain class with <c>init</c> setters
-    /// (not a record with a positional constructor) — named-argument syntax
-    /// is not valid here; use the property-initialiser form instead.
     /// </summary>
     public static PagedResult<OfferDto> ToPagedDto(
         this IReadOnlyList<Offer> offers,
