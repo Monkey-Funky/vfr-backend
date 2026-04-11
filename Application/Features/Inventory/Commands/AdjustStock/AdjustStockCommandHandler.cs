@@ -30,6 +30,8 @@ namespace Application.Features.Inventory.Commands.AdjustStock;
 public sealed class AdjustStockCommandHandler
     : IRequestHandler<AdjustStockCommand, Result<bool>>
 {
+    private const int MaxAttempts = 2; // initial attempt + 1 retry
+
     private readonly IUnitOfWork _unitOfWork;
     private readonly IInventoryRepository _inventoryRepository;
     private readonly IMediator _mediator;
@@ -60,20 +62,13 @@ public sealed class AdjustStockCommandHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // ── Two attempts: initial + one retry on concurrency conflict ─────────
-        for (int attempt = 1; attempt <= 2; attempt++)
+        for (int attempt = 1; attempt <= MaxAttempts; attempt++)
         {
             try
             {
-                // Variables declared outside the lambda so they are readable after
-                // ExecuteInTransactionAsync returns (for post-transaction side-effects).
-                int oldQuantity = 0;
-                bool shouldRaiseLowStockAlert = false;
-                LowStockWarningEvent? lowStockEvent = null;
-
                 await _unitOfWork.ExecuteInTransactionAsync(async ct =>
                 {
-                    // ── Step 1: Load with tracking (RowVersion included in WHERE clause) ──
+                    // ── Load WITH tracking so RowVersion participates in UPDATE WHERE ──
                     var inventoryRecord = await _inventoryRepository.GetTrackedByIdAsync(
                         retailerId,
                         command.InventoryRecordId,
@@ -81,24 +76,19 @@ public sealed class AdjustStockCommandHandler
                         ?? throw new NotFoundException(
                             nameof(InventoryRecord), command.InventoryRecordId);
 
-                    // ── Step 2: IDOR guard ────────────────────────────────────────────────
-                    // GetTrackedByIdAsync already scopes by retailerId, but we validate
-                    // explicitly as belt-and-suspenders against future repo changes.
+                    // IDOR check (belt-and-suspenders — repository already scopes by retailerId)
                     if (inventoryRecord.RetailerId != retailerId)
                         throw new NotFoundException(
                             nameof(InventoryRecord), command.InventoryRecordId);
 
-                    // ── Step 3: Domain method — validates >= 0, returns old quantity ──────
-                    // FIX (Error 1): AdjustStock returns oldQuantity so the caller can
-                    // (a) build the audit record without a second DB read and
-                    // (b) determine whether the threshold was just crossed.
-                    oldQuantity = inventoryRecord.AdjustStock(
+                    // ── Domain call: validates >= 0, returns old quantity ─────────────
+                    int oldQuantity = inventoryRecord.AdjustStock(
                         newQuantity: command.NewQuantity,
                         type: command.Type,
                         reason: command.Reason,
                         adjustedById: retailerId);
 
-                    // ── Step 4: Audit record (same transaction) ───────────────────────────
+                    // ── Audit record in the same transaction ─────────────────────────
                     var adjustment = StockAdjustment.Create(
                         inventoryRecordId: inventoryRecord.Id,
                         adjustmentType: command.Type,
@@ -110,80 +100,52 @@ public sealed class AdjustStockCommandHandler
                     await _unitOfWork.Repository<StockAdjustment>()
                         .AddAsync(adjustment, ct);
 
-                    // ── Step 5: Commit — emits UPDATE + INSERT in one DB transaction ──────
-                    // DbUpdateConcurrencyException is thrown here if RowVersion changed.
+                    // ── Single SaveChangesAsync — triggers optimistic concurrency check ─
                     await _unitOfWork.SaveChangesAsync(ct);
 
-                    // ── Step 6: BUG C FIX — threshold-crossing check ──────────────────────
-                    // Raise LowStockWarningEvent ONLY when crossing from above to at/below.
-                    // NOT every time stock is adjusted while already below the threshold.
-                    //
-                    // oldQuantity > LowStockThreshold  → was above threshold before adjustment
-                    // CurrentStock <= LowStockThreshold → is now at or below threshold
-                    //
-                    // If stock was already below threshold and just got lower, no new alert.
-                    // This prevents notification spam on repeated decrements.
-                    bool wasAbove = oldQuantity > inventoryRecord.LowStockThreshold;
-                    bool isNowAtOrBelow = inventoryRecord.CurrentStock <= inventoryRecord.LowStockThreshold;
-
-                    if (wasAbove && isNowAtOrBelow)
+                    // ── Low-stock event (published inside transaction scope) ───────────
+                    if (inventoryRecord.CurrentStock <= inventoryRecord.LowStockThreshold)
                     {
-                        shouldRaiseLowStockAlert = true;
-
-                        // FIX (Error 1): Parameter renamed LowStockThreshold (not Threshold)
-                        // to match InventoryRecord.LowStockThreshold and LowStockWarningEvent record.
-                        lowStockEvent = new LowStockWarningEvent(
+                        await _mediator.Publish(new LowStockWarningEvent(
                             RetailerId: inventoryRecord.RetailerId,
                             ProductId: inventoryRecord.ProductId,
                             ProductName: inventoryRecord.ProductName,
                             CurrentStock: inventoryRecord.CurrentStock,
-                            LowStockThreshold: inventoryRecord.LowStockThreshold);
-                    }
-
-                    // ── Step 7: Publish event inside transaction scope ────────────────────
-                    // LowStockWarningEventHandler.Handle() will call _unitOfWork.SaveChangesAsync
-                    // for the Notification entity — that second save participates in the same
-                    // open DB transaction (same DbContext scope).
-                    if (shouldRaiseLowStockAlert && lowStockEvent is not null)
-                    {
-                        await _mediator.Publish(lowStockEvent, ct);
+                            LowStockThreshold: inventoryRecord.LowStockThreshold), ct);
                     }
 
                 }, cancellationToken);
 
-                // ── Step 8: Cache invalidation (after transaction commits) ──────────────
+                // ── Cache invalidation (only on success) ─────────────────────────────
                 await _cacheService.RemoveByPrefixAsync(
                     $"inventory:{retailerId:N}:", cancellationToken);
 
                 return Result<bool>.Success(true, "Stock adjusted successfully.");
             }
-            catch (DbUpdateConcurrencyException) when (attempt == 1)
+            catch (DbUpdateConcurrencyException ex) when (attempt < MaxAttempts)
             {
-                // ── Single retry on concurrency conflict ──────────────────────────────
-                // Re-entering the loop re-fetches the entity with the latest RowVersion.
-                // The absolute NewQuantity is re-applied against the fresh stock level.
                 _logger.LogWarning(
-                    "Concurrency conflict adjusting InventoryRecord {Id} (attempt 1/2). Retrying...",
-                    command.InventoryRecordId);
+                    "Concurrency conflict adjusting stock for InventoryRecord {Id} " +
+                    "(attempt {Attempt}/{Max}). Retrying...",
+                    command.InventoryRecordId, attempt, MaxAttempts);
 
-                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
-                // Falls through to attempt 2
+                await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken);
             }
             catch (DbUpdateConcurrencyException ex)
             {
-                // ── Both attempts exhausted → fail with domain error ──────────────────
                 _logger.LogError(ex,
-                    "Concurrency conflict adjusting InventoryRecord {Id} — both attempts exhausted.",
-                    command.InventoryRecordId);
+                    "Concurrency conflict adjusting stock for InventoryRecord {Id} — " +
+                    "all {Max} attempts exhausted.",
+                    command.InventoryRecordId, MaxAttempts);
 
-                throw new BusinessRuleException(
-                    "CONCURRENT_STOCK_UPDATE",
-                    "The inventory record was modified by another request at the same time. " +
+                // FIX: ConflictException(string message) — single-argument constructor
+                throw new ConflictException(
+                    "The inventory record was modified by another request. " +
                     "Please retrieve the latest stock level and try again.");
             }
         }
 
-        // Unreachable — the loop always returns or throws above
+        // Unreachable — loop always returns or throws
         return Result<bool>.Failure("Unexpected error in AdjustStockCommandHandler.");
     }
 }

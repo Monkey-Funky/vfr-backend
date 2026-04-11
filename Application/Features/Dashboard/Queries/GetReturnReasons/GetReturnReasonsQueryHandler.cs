@@ -1,10 +1,16 @@
 ﻿using Application.Features.Dashboard.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
+using Microsoft.EntityFrameworkCore;
 
 
 namespace Application.Features.Dashboard.Queries.GetReturnReasons;
 
+/// <summary>
+/// Groups and counts return reasons for the authenticated retailer.
+/// Results are grouped server-side — never raw rows loaded into memory.
+/// Redis cache TTL 1 hour.
+/// </summary>
 public sealed class GetReturnReasonsQueryHandler
     : IRequestHandler<GetReturnReasonsQuery, List<ReturnReasonDto>>
 {
@@ -41,7 +47,8 @@ public sealed class GetReturnReasonsQueryHandler
         List<ReturnReasonDto> result = await _dashboardRepository.GetReturnReasonsAsync(
             retailerId, query.From, query.To, cancellationToken);
 
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromHours(1), cancellationToken);
+        await _cacheService.SetAsync(
+            cacheKey, result, TimeSpan.FromHours(1), cancellationToken);
 
         return result;
     }

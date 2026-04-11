@@ -28,8 +28,7 @@ public sealed class GetReportStatusQueryHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // RetailerId scoping is the IDOR guard — a report that exists but belongs
-        // to another retailer returns NotFoundException, not a 403.
+        // RetailerId scoping is the IDOR guard.
         Report report = await _context.Reports
             .AsNoTracking()
             .FirstOrDefaultAsync(

@@ -5,9 +5,11 @@ public sealed class GetNotificationsQueryValidator : AbstractValidator<GetNotifi
     public GetNotificationsQueryValidator()
     {
         RuleFor(x => x.PageNumber)
-            .GreaterThanOrEqualTo(1);
+            .GreaterThanOrEqualTo(1)
+            .WithMessage("PageNumber must be at least 1.");
 
         RuleFor(x => x.PageSize)
-            .InclusiveBetween(1, 100);
+            .InclusiveBetween(1, 50)
+            .WithMessage("PageSize must be between 1 and 50.");
     }
 }

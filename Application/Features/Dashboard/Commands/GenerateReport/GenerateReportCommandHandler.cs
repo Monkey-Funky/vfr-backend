@@ -47,7 +47,6 @@ public sealed class GenerateReportCommandHandler
         _context.Reports.Add(report);
         await _context.SaveChangesAsync(cancellationToken);
 
-        // Hand off to background generation — non-blocking.
         await _reportQueue.EnqueueAsync(report.Id, cancellationToken);
 
         return Result<GenerateReportResponse>.Success(new GenerateReportResponse(report.Id));

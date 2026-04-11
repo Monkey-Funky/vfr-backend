@@ -29,7 +29,7 @@ public sealed class GetSizeDistributionQueryHandler
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
         string cacheKey =
-            $"dashboard:{retailerId}:sizedist:{query.From:yyyy-MM-dd}:{query.To:yyyy-MM-dd}";
+            $"dashboard:{retailerId}:sizedistribution:{query.From:yyyy-MM-dd}:{query.To:yyyy-MM-dd}";
 
         List<SizeDistributionDto>? cached =
             await _cacheService.GetAsync<List<SizeDistributionDto>>(cacheKey, cancellationToken);
@@ -40,7 +40,8 @@ public sealed class GetSizeDistributionQueryHandler
         List<SizeDistributionDto> result = await _dashboardRepository.GetSizeDistributionAsync(
             retailerId, query.From, query.To, cancellationToken);
 
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromHours(1), cancellationToken);
+        await _cacheService.SetAsync(
+            cacheKey, result, TimeSpan.FromHours(1), cancellationToken);
 
         return result;
     }

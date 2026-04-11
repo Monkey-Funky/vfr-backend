@@ -3,8 +3,9 @@
 namespace Application.Features.Settings.DTOs;
 
 /// <summary>
-/// Full profile projection returned by <c>GetRetailerProfileQuery</c>.
-/// Excludes all sensitive fields: PasswordHash, RefreshTokenHash, AccessFailedCount.
+/// Full profile projection returned by GetRetailerProfileQuery.
+/// Excludes all sensitive fields: PasswordHash, RefreshTokenHash,
+/// RefreshTokenExpiresAt, GoogleId, AccessFailedCount.
 /// </summary>
 public sealed record RetailerSettingsProfileDto(
     Guid Id,

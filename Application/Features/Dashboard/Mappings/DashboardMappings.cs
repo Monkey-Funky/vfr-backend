@@ -7,15 +7,17 @@ namespace Application.Features.Dashboard.Mappings;
 
 public static class DashboardMappings
 {
+    /// <summary>Maps ActivityEvent domain entity → ActivityEventDto.</summary>
     public static ActivityEventDto ToDto(this Domain.Entities.Analytics.ActivityEvent e)
         => new(
             Id: e.Id,
             EventType: e.EventType,
             ResourceId: e.ResourceId,
-            EventData: e.EventData,
+            EventData: e.EventData,   // ← FIX: ActivityEvent.EventData (JSONB field, never Description)
             CreatedAt: e.CreatedAt
         );
 
+    /// <summary>Maps Report domain entity → ReportStatusDto.</summary>
     public static ReportStatusDto ToStatusDto(this Report report)
         => new(
             ReportId: report.Id,
@@ -26,7 +28,12 @@ public static class DashboardMappings
             CompletedAt: report.CompletedAt
         );
 
-    /// <summary>Formats a DateOnly into a chart label appropriate for the grouping.</summary>
+    /// <summary>
+    /// Formats a DateOnly into a chart label string appropriate for the given grouping.
+    /// Day  → "2024-01-15"
+    /// Week → "2024-W03"
+    /// Month→ "2024-01"
+    /// </summary>
     public static string ToChartLabel(this DateOnly date, ChartGroupBy groupBy)
         => groupBy switch
         {

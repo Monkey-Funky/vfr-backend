@@ -1,16 +1,22 @@
 ﻿using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Notifications;
-namespace Application.Features.Notifications.Commands.MarkNotificationRead;
 
-public sealed class MarkNotificationReadCommandHandler
-    : IRequestHandler<MarkNotificationReadCommand, Result<bool>>
+namespace Application.Features.Notifications.Commands.DeleteNotification;
+
+/// <summary>
+/// Hard-deletes a single notification belonging to the authenticated retailer.
+/// Hard delete per spec — notification audit records have no business value after dismissal.
+/// IDOR guard: notification.RetailerId must match the JWT retailer.
+/// </summary>
+public sealed class DeleteNotificationCommandHandler
+    : IRequestHandler<DeleteNotificationCommand, Result>
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
     private readonly ICacheService _cacheService;
 
-    public MarkNotificationReadCommandHandler(
+    public DeleteNotificationCommandHandler(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
         ICacheService cacheService)
@@ -20,8 +26,8 @@ public sealed class MarkNotificationReadCommandHandler
         _cacheService = cacheService;
     }
 
-    public async Task<Result<bool>> Handle(
-        MarkNotificationReadCommand command,
+    public async Task<Result> Handle(
+        DeleteNotificationCommand command,
         CancellationToken cancellationToken)
     {
         Guid retailerId = _currentUserService.RetailerId
@@ -31,21 +37,18 @@ public sealed class MarkNotificationReadCommandHandler
             .GetByIdAsync(command.NotificationId, cancellationToken)
             ?? throw new NotFoundException(nameof(Notification), command.NotificationId);
 
-        // IDOR: notification must belong to the authenticated retailer
+        // IDOR guard
         if (notification.RetailerId != retailerId)
             throw new NotFoundException(nameof(Notification), command.NotificationId);
 
-        // Idempotent — no-op if already read
-        notification.MarkAsRead(); // sets IsRead = true, ReadAt = UtcNow
-
         await _unitOfWork.Repository<Notification>()
-            .UpdateAsync(notification, cancellationToken);
+            .DeleteAsync(notification, cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         await _cacheService.RemoveByPrefixAsync(
             $"notifications:{retailerId}:", cancellationToken);
 
-        return Result<bool>.Success(true, "Notification marked as read.");
+        return Result.Success("Notification deleted.");
     }
 }

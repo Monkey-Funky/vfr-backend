@@ -41,7 +41,8 @@ public sealed class GetConversionRateQueryHandler
         ConversionRateDto result = await _dashboardRepository.GetConversionRateAsync(
             retailerId, query.From, query.To, cancellationToken);
 
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(30), cancellationToken);
+        await _cacheService.SetAsync(
+            cacheKey, result, TimeSpan.FromMinutes(30), cancellationToken);
 
         return result;
     }

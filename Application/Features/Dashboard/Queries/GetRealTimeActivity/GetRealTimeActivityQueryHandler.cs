@@ -1,15 +1,13 @@
 ﻿using Application.Features.Dashboard.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Dashboard.Queries.GetRealTimeActivity;
 
 /// <summary>
-/// Returns the 20 most recent activity events for the authenticated retailer.
-///
-/// CACHE RULE: This handler must NEVER call ICacheService.
-/// Real-time activity data is stale the moment it is cached.
-/// The query uses the (retailer_id, created_at DESC) index for performance.
+/// CRITICAL: ICacheService is intentionally NOT injected here.
+/// Real-time activity must always read from the database — never cached.
 /// </summary>
 public sealed class GetRealTimeActivityQueryHandler
     : IRequestHandler<GetRealTimeActivityQuery, List<ActivityEventDto>>
@@ -17,7 +15,6 @@ public sealed class GetRealTimeActivityQueryHandler
     private readonly IDashboardRepository _dashboardRepository;
     private readonly ICurrentUserService _currentUserService;
 
-    // Note: ICacheService is intentionally NOT injected in this handler.
     public GetRealTimeActivityQueryHandler(
         IDashboardRepository dashboardRepository,
         ICurrentUserService currentUserService)
@@ -33,7 +30,7 @@ public sealed class GetRealTimeActivityQueryHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // Direct DB query — no cache. Uses (retailer_id, created_at DESC) index.
+        // Direct DB query — NO cache. Uses (retailer_id, created_at DESC) index.
         return await _dashboardRepository.GetRealTimeActivityAsync(
             retailerId, cancellationToken);
     }

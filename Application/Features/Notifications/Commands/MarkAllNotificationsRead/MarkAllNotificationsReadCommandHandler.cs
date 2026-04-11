@@ -3,6 +3,11 @@ using Application.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Notifications.Commands.MarkAllNotificationsRead;
+/// <summary>
+/// Marks all unread notifications for the authenticated retailer as read.
+/// Uses ExecuteUpdateAsync (EF Core 7+ bulk UPDATE) — never loads records into memory.
+/// Returns the count of rows updated.
+/// </summary>
 public sealed class MarkAllNotificationsReadCommandHandler
     : IRequestHandler<MarkAllNotificationsReadCommand, Result<int>>
 {
@@ -29,8 +34,8 @@ public sealed class MarkAllNotificationsReadCommandHandler
 
         DateTime readAt = DateTime.UtcNow;
 
-        // Bulk UPDATE — avoids loading entities into memory.
-        int updated = await _context.Notifications
+        // Bulk UPDATE — no in-memory loop, no individual SaveChanges per record
+        int updatedCount = await _context.Notifications
             .Where(n => n.RetailerId == retailerId && !n.IsRead)
             .ExecuteUpdateAsync(
                 setters => setters
@@ -38,9 +43,10 @@ public sealed class MarkAllNotificationsReadCommandHandler
                     .SetProperty(n => n.ReadAt, readAt),
                 cancellationToken);
 
-        if (updated > 0)
-            await _cacheService.RemoveByPrefixAsync($"notifications:{retailerId}:");
+        await _cacheService.RemoveByPrefixAsync(
+            $"notifications:{retailerId}:", cancellationToken);
 
-        return Result<int>.Success(updated);
+        return Result<int>.Success(updatedCount,
+            $"{updatedCount} notification(s) marked as read.");
     }
 }

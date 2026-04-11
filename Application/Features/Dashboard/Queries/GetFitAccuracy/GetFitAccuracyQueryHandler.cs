@@ -40,7 +40,8 @@ public sealed class GetFitAccuracyQueryHandler
         FitAccuracyDto result = await _dashboardRepository.GetFitAccuracyAsync(
             retailerId, query.From, query.To, cancellationToken);
 
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromHours(1), cancellationToken);
+        await _cacheService.SetAsync(
+            cacheKey, result, TimeSpan.FromHours(1), cancellationToken);
 
         return result;
     }

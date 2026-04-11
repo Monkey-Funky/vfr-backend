@@ -1,5 +1,6 @@
 ﻿using Application.Features.Inventory.Commands.AdjustStock;
 using Application.Features.Inventory.Commands.DeleteInventoryRecord;
+using Application.Features.Inventory.Commands.SetLowStockThreshold;
 using Application.Features.Inventory.DTOs;
 using Application.Features.Inventory.Queries.ExportInventoryCsv;
 using Application.Features.Inventory.Queries.GetInventory;
@@ -54,14 +55,15 @@ public sealed class InventoryController : BaseApiController
     // GET /api/retailers/{retailerId}/inventory/product/{productId}
     // =========================================================================
 
-    /// <summary>Returns the inventory record for a specific product.</summary>
+    /// <summary>Returns the inventory record (with adjustment history) for a specific product.</summary>
     [HttpGet("product/{productId:guid}", Name = "GetInventoryByProductId")]
     [SwaggerOperation(
         Summary = "Get inventory by product ID",
-        Description = "Returns the inventory record linked to the given product. " +
+        Description = "Returns the inventory record linked to the given product, including the " +
+                      "full StockAdjustments audit trail ordered by date descending. " +
                       "Returns 404 if no inventory record exists or if the product " +
                       "does not belong to the authenticated retailer.")]
-    [ProducesResponseType(typeof(ApiResponse<InventoryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<InventoryDetailDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -82,7 +84,7 @@ public sealed class InventoryController : BaseApiController
     // PATCH /api/retailers/{retailerId}/inventory/{inventoryRecordId}/adjust
     // =========================================================================
 
-    /// <summary>Adjusts the stock quantity of an inventory record.</summary>
+    /// <summary>Adjusts the stock quantity of an inventory record (absolute value).</summary>
     [HttpPatch("{inventoryRecordId:guid}/adjust")]
     [SwaggerOperation(
         Summary = "Adjust stock quantity",
@@ -91,10 +93,11 @@ public sealed class InventoryController : BaseApiController
                       "Reason is required for ManualIncrease and ManualDecrease adjustment types. " +
                       "Creates an immutable StockAdjustment audit record in the same transaction. " +
                       "Raises a LowStockWarning notification if stock drops to or below the threshold. " +
-                      "Returns 422 on concurrent update conflict after one retry.")]
+                      "Returns 409 on concurrent update conflict after retries are exhausted.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
@@ -121,6 +124,43 @@ public sealed class InventoryController : BaseApiController
     }
 
     // =========================================================================
+    // PUT /api/retailers/{retailerId}/inventory/{inventoryRecordId}/threshold
+    // =========================================================================
+
+    /// <summary>Sets the low stock threshold for an inventory record.</summary>
+    [HttpPut("{inventoryRecordId:guid}/threshold")]
+    [SwaggerOperation(
+        Summary = "Set low stock threshold",
+        Description = "Updates the LowStockThreshold for the specified inventory record. " +
+                      "Must be between 0 and 10 000. " +
+                      "Returns 200 on success.")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SetLowStockThreshold(
+        [FromRoute] Guid retailerId,
+        [FromRoute] Guid inventoryRecordId,
+        [FromBody] SetLowStockThresholdRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureRetailerOwnership(retailerId);
+
+        var command = new SetLowStockThresholdCommand(
+            InventoryRecordId: inventoryRecordId,
+            NewThreshold: request.NewThreshold);
+
+        var result = await Sender.Send(command, cancellationToken);
+
+        if (!result.IsSuccess)
+            return BadRequest(ApiResponse<bool>.FailureResponse(result.Message, result.Errors));
+
+        return OkResponse(result);
+    }
+
+    // =========================================================================
     // DELETE /api/retailers/{retailerId}/inventory/{inventoryRecordId}
     // =========================================================================
 
@@ -129,8 +169,7 @@ public sealed class InventoryController : BaseApiController
     [SwaggerOperation(
         Summary = "Delete inventory record",
         Description = "Soft-deletes the inventory record. " +
-                      "Does NOT delete or deactivate the parent product. " +
-                      "The record is hidden from all subsequent inventory queries.")]
+                      "Does NOT delete or deactivate the parent product.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
@@ -160,10 +199,7 @@ public sealed class InventoryController : BaseApiController
     [Produces("text/csv")]
     [SwaggerOperation(
         Summary = "Export inventory as CSV",
-        Description = "Streams all non-deleted inventory records for the retailer as a UTF-8 CSV file. " +
-                      "Columns: InventoryRecordId, ProductId, ProductName, " +
-                      "CurrentStock, SoldQuantity, LowStockThreshold, Status, CreatedAt. " +
-                      "Uses server-side streaming — safe for large datasets.")]
+        Description = "Streams all non-deleted inventory records for the retailer as a UTF-8 CSV file.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -174,13 +210,8 @@ public sealed class InventoryController : BaseApiController
         EnsureRetailerOwnership(retailerId);
 
         var query = new ExportInventoryCsvQuery();
-
-        // Pass HttpContext.RequestAborted — ensures the EF Core DataReader is disposed
-        // immediately when the client disconnects mid-download.
         var csvBytes = await Sender.Send(query, HttpContext.RequestAborted);
-
-        var fileName =
-            $"inventory_{retailerId:N}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";
+        var fileName = $"inventory_{retailerId:N}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";
 
         return File(csvBytes, "text/csv", fileName);
     }
@@ -190,19 +221,11 @@ public sealed class InventoryController : BaseApiController
 // Request Contracts
 // =============================================================================
 
-/// <summary>
-/// Request body for PATCH /inventory/{inventoryRecordId}/adjust.
-/// </summary>
-/// <param name="NewQuantity">
-///   Absolute target stock level. Must be >= 0.
-/// </param>
-/// <param name="Type">
-///   Category of adjustment: ManualIncrease | ManualDecrease | OrderSale | ReturnRestock.
-/// </param>
-/// <param name="Reason">
-///   Human-readable reason. Required for ManualIncrease and ManualDecrease.
-/// </param>
+/// <summary>Request body for PATCH …/{inventoryRecordId}/adjust.</summary>
 public sealed record AdjustStockRequest(
     int NewQuantity,
     string Type,
     string? Reason);
+
+/// <summary>Request body for PUT …/{inventoryRecordId}/threshold.</summary>
+public sealed record SetLowStockThresholdRequest(int NewThreshold);

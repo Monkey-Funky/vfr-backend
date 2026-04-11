@@ -20,16 +20,25 @@ public sealed record KpiDto(
     int NewOrders
 );
 
+public sealed record RevenueDataPointDto(
+    DateTime PeriodStart,
+    decimal Revenue,
+    int OrderCount);
+
+
 // ── Charts ───────────────────────────────────────────────────────────────────
 
 /// <summary>Single data point for line/bar chart rendering.</summary>
 public sealed record ChartDataPoint(
-    string Label,   // ISO date string (e.g. "2024-01-15") or period label ("2024-W03")
+    string Label,   // ISO date string e.g. "2024-01-15" or "2024-W03"
     decimal Value
 );
-
 // ── Activity ──────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// ActivityEvent DTO. EventData is the JSONB metadata from ActivityEvent.EventData.
+/// Named EventData (not Description) to match the domain entity property exactly.
+/// </summary>
 public sealed record ActivityEventDto(
     Guid Id,
     string EventType,
@@ -57,7 +66,6 @@ public sealed record SizeDistributionDto(
     int Count,
     double Percentage
 );
-
 public sealed record ReturnRateByProductDto(
     Guid ProductId,
     string ProductName,
@@ -92,6 +100,7 @@ public sealed record DashboardExportRow(
     decimal ConversionRate,
     int TryOnEngagement
 );
+
 
 // ── Report status ─────────────────────────────────────────────────────────────
 

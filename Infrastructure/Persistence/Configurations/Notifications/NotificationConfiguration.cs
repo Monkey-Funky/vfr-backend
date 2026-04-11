@@ -28,7 +28,7 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
 
         builder.Property(n => n.Id)
             .HasColumnName("id")
-            .HasDefaultValueSql("gen_random_uuid()");
+            .IsRequired();
 
         builder.Property(n => n.RetailerId)
             .HasColumnName("retailer_id")
@@ -36,12 +36,12 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
 
         builder.Property(n => n.Type)
             .HasColumnName("type")
-            .HasColumnType("varchar(50)")
+            .HasMaxLength(50)
             .IsRequired();
 
         builder.Property(n => n.Title)
             .HasColumnName("title")
-            .HasColumnType("varchar(200)")
+            .HasMaxLength(200)
             .IsRequired();
 
         builder.Property(n => n.Body)
@@ -55,38 +55,39 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
             .IsRequired();
 
         builder.Property(n => n.ReadAt)
-            .HasColumnName("read_at")
-            .IsRequired(false);
+            .HasColumnName("read_at");
 
         builder.Property(n => n.ResourceId)
-            .HasColumnName("resource_id")
-            .IsRequired(false);
+            .HasColumnName("resource_id");
 
         builder.Property(n => n.CreatedAt)
             .HasColumnName("created_at")
-            .HasDefaultValueSql("now()")
             .IsRequired();
 
-        builder.HasCheckConstraint(
-            "chk_notifications_type",
-            "type IN ('LowStock','OrderStatusChanged','SubscriptionExpiring','PaymentFailed','AccountDeletion')");
+        // BaseEntity fields not persisted for notifications
+        builder.Ignore(n => n.UpdatedAt);
+        builder.Ignore(n => n.CreatedBy);
+        builder.Ignore(n => n.UpdatedBy);
+        builder.Ignore(n => n.IsDeleted);
 
-        // Indexes
+        // FK to retailer
+        builder.HasOne<Domain.Entities.Retailer.RetailerAccount>()
+            .WithMany()
+            .HasForeignKey(n => n.RetailerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // CHECK constraint: type must be a known value
+        builder.ToTable(t => t.HasCheckConstraint(
+            "ck_notifications_type",
+            "type IN ('LowStock','NewOrder','OrderStatusChanged','SubscriptionExpiring','PaymentFailed','SystemAlert')"));
+
+        // Composite index: (retailer_id, created_at DESC) — primary read pattern
         builder.HasIndex(n => new { n.RetailerId, n.CreatedAt })
-            .HasDatabaseName("idx_notifications_retailer_createdat")
+            .HasDatabaseName("idx_notifications_retailer_created_at")
             .IsDescending(false, true);
 
-        builder.HasIndex(n => n.RetailerId)
-            .HasDatabaseName("idx_notifications_retailer_id");
-
+        // Index for unread count queries
         builder.HasIndex(n => new { n.RetailerId, n.IsRead })
-            .HasDatabaseName("idx_notifications_retailer_unread")
-            .HasFilter("is_read = false");
-
-        // Ignore audit fields not in DB schema for this entity
-        builder.Ignore(n => n.UpdatedAt);
-        builder.Ignore(n => n.UpdatedBy);
-        builder.Ignore(n => n.CreatedBy);
-        builder.Ignore(n => n.IsDeleted);
+            .HasDatabaseName("idx_notifications_retailer_is_read");
     }
 }

@@ -14,9 +14,11 @@ using Swashbuckle.AspNetCore.Annotations;
 
 namespace API.Controllers.Settings;
 
+
 /// <summary>
 /// Handles all Profile and Settings endpoints for an authenticated retailer.
-/// Every endpoint is retailer-scoped and protected by the IDOR guard in <c>BaseApiController</c>.
+/// EnsureRetailerOwnership() is called on every endpoint — all routes carry {retailerId}.
+/// No separate resource ID exists in these routes; all data is tenant-scoped via JWT.
 /// </summary>
 [SwaggerTag("Retailer Profile & Settings")]
 [Route("api/retailers/{retailerId:guid}")]
@@ -26,9 +28,7 @@ public sealed class SettingsController : BaseApiController
     // GET — Profile
     // =========================================================================
 
-    /// <summary>
-    /// Returns the full profile of the authenticated retailer.
-    /// </summary>
+    /// <summary>Returns the full profile of the authenticated retailer.</summary>
     [HttpGet("profile", Name = "GetRetailerProfile")]
     [SwaggerOperation(
         Summary = "Get retailer profile",
@@ -54,9 +54,7 @@ public sealed class SettingsController : BaseApiController
     // PUT — Update Profile
     // =========================================================================
 
-    /// <summary>
-    /// Partially updates the authenticated retailer's profile (PATCH semantics).
-    /// </summary>
+    /// <summary>Partially updates the authenticated retailer's profile (PATCH semantics).</summary>
     [HttpPut("profile")]
     [SwaggerOperation(
         Summary = "Update retailer profile",
@@ -83,9 +81,7 @@ public sealed class SettingsController : BaseApiController
     // PUT — Change Password
     // =========================================================================
 
-    /// <summary>
-    /// Changes the retailer's password and revokes all active sessions.
-    /// </summary>
+    /// <summary>Changes the retailer's password and revokes all active sessions.</summary>
     [HttpPut("profile/password")]
     [SwaggerOperation(
         Summary = "Change password",
@@ -111,9 +107,7 @@ public sealed class SettingsController : BaseApiController
     // POST — Upload Avatar
     // =========================================================================
 
-    /// <summary>
-    /// Uploads or replaces the retailer's personal avatar image.
-    /// </summary>
+    /// <summary>Uploads or replaces the retailer's personal avatar image.</summary>
     [HttpPost("profile/avatar")]
     [Consumes("multipart/form-data")]
     [SwaggerOperation(
@@ -132,8 +126,6 @@ public sealed class SettingsController : BaseApiController
     {
         EnsureRetailerOwnership(retailerId);
 
-        // Read the file into a byte[] in the API layer so that the Application layer
-        // stays free of ASP.NET Core abstractions (IFormFile is an HTTP concern).
         byte[] fileContent = await ReadFormFileAsync(file, cancellationToken);
 
         UploadAvatarCommand command = new(
@@ -148,9 +140,7 @@ public sealed class SettingsController : BaseApiController
     // DELETE — Delete Avatar
     // =========================================================================
 
-    /// <summary>
-    /// Removes the retailer's avatar from storage and clears the avatar URL.
-    /// </summary>
+    /// <summary>Removes the retailer's avatar from storage and clears the avatar URL.</summary>
     [HttpDelete("profile/avatar")]
     [SwaggerOperation(
         Summary = "Delete avatar",
@@ -173,9 +163,7 @@ public sealed class SettingsController : BaseApiController
     // POST — Upload Brand Logo
     // =========================================================================
 
-    /// <summary>
-    /// Uploads or replaces the retailer's brand logo.
-    /// </summary>
+    /// <summary>Uploads or replaces the retailer's brand logo.</summary>
     [HttpPost("profile/brand-logo")]
     [Consumes("multipart/form-data")]
     [SwaggerOperation(
@@ -208,9 +196,7 @@ public sealed class SettingsController : BaseApiController
     // DELETE — Delete Brand Logo
     // =========================================================================
 
-    /// <summary>
-    /// Removes the retailer's brand logo from storage and clears the logo URL.
-    /// </summary>
+    /// <summary>Removes the retailer's brand logo from storage and clears the logo URL.</summary>
     [HttpDelete("profile/brand-logo")]
     [SwaggerOperation(
         Summary = "Delete brand logo",
@@ -233,9 +219,7 @@ public sealed class SettingsController : BaseApiController
     // GET — Notification Preferences
     // =========================================================================
 
-    /// <summary>
-    /// Returns the notification preferences for the authenticated retailer.
-    /// </summary>
+    /// <summary>Returns the notification preferences for the authenticated retailer.</summary>
     [HttpGet("settings/notifications", Name = "GetNotificationPreferences")]
     [SwaggerOperation(
         Summary = "Get notification preferences",
@@ -260,15 +244,12 @@ public sealed class SettingsController : BaseApiController
     // PATCH — Update Notification Preferences
     // =========================================================================
 
-    /// <summary>
-    /// Partially updates the retailer's notification preferences.
-    /// </summary>
+    /// <summary>Partially updates the retailer's notification preferences.</summary>
     [HttpPatch("settings/notifications")]
     [SwaggerOperation(
         Summary = "Update notification preferences",
         Description = "Updates one or more notification preference flags (PATCH semantics). " +
-                      "Omit any field to leave it unchanged. " +
-                      "At least one field must be provided.")]
+                      "Omit any field to leave it unchanged. At least one field must be provided.")]
     [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -288,17 +269,14 @@ public sealed class SettingsController : BaseApiController
     // DELETE — Account (GDPR)
     // =========================================================================
 
-    /// <summary>
-    /// Initiates GDPR account deletion. Sets account to PendingDeletion and revokes all sessions.
-    /// </summary>
+    /// <summary>Initiates GDPR account deletion. Sets account to PendingDeletion and revokes all sessions.</summary>
     [HttpDelete("account")]
     [SwaggerOperation(
         Summary = "Delete account (GDPR)",
         Description = "Marks the retailer account as PendingDeletion, revokes all active sessions " +
                       "immediately, and schedules permanent PII erasure after a 30-day grace period. " +
                       "A confirmation email is sent to the retailer's address. " +
-                      "This operation is IDEMPOTENT: calling it again when already PendingDeletion " +
-                      "returns 200 without creating a second event.")]
+                      "IDEMPOTENT: calling again when already PendingDeletion returns 200 immediately.")]
     [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -317,20 +295,19 @@ public sealed class SettingsController : BaseApiController
     // =========================================================================
 
     /// <summary>
-    /// Reads an <c>IFormFile</c> into a <c>byte[]</c>.
-    /// Validates that the file is present and non-empty at the HTTP boundary.
-    /// The Application layer validator then enforces size and magic-byte constraints.
+    /// Reads an IFormFile into a byte[].
+    /// Throws ValidationException (string overload — no ValidationError type) when
+    /// no file is provided or the file is empty.
     /// </summary>
     private static async Task<byte[]> ReadFormFileAsync(
-    IFormFile? file,
-    CancellationToken cancellationToken)
+        IFormFile? file,
+        CancellationToken cancellationToken)
     {
+        // FIX B-16: use the ValidationException(string message) overload from
+        // Domain.Exceptions.ValidationException — the ValidationError type does not exist.
         if (file is null || file.Length == 0)
             throw new Domain.Exceptions.ValidationException(
-                new Dictionary<string, string[]>
-                {
-                { "File", new[] { "A file must be provided and must not be empty." } }
-                });
+                "A file must be provided and must not be empty.");
 
         await using MemoryStream memoryStream = new();
         await file.CopyToAsync(memoryStream, cancellationToken);

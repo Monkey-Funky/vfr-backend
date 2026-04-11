@@ -33,7 +33,7 @@ public sealed class ReportGenerationJob : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("{Job} hosted service started", nameof(ReportGenerationJob));
+        _logger.LogInformation("{Job} hosted service started.", nameof(ReportGenerationJob));
 
         try
         {
@@ -49,10 +49,10 @@ public sealed class ReportGenerationJob : BackgroundService
                 }
                 catch (Exception ex)
                 {
-                    // Per-report failure — mark the report as failed and continue.
+                    // Per-report failure — mark failed and continue.
                     _logger.LogError(ex,
-                        "{Job} failed to generate ReportId {ReportId}. Error: {Message}",
-                        nameof(ReportGenerationJob), reportId, ex.Message);
+                        "{Job} failed to generate ReportId {ReportId}.",
+                        nameof(ReportGenerationJob), reportId);
 
                     await TryMarkReportFailedAsync(reportId, ex.Message, stoppingToken);
                 }
@@ -65,10 +65,12 @@ public sealed class ReportGenerationJob : BackgroundService
         catch (Exception ex)
         {
             _logger.LogCritical(ex,
-                "{Job} encountered a fatal error. Error: {Message}",
-                nameof(ReportGenerationJob), ex.Message);
+                "{Job} encountered a fatal unhandled error.",
+                nameof(ReportGenerationJob));
         }
     }
+
+    // ── Report processing ─────────────────────────────────────────────────────
 
     private async Task ProcessReportAsync(Guid reportId, CancellationToken cancellationToken)
     {
@@ -76,8 +78,7 @@ public sealed class ReportGenerationJob : BackgroundService
 
         IApplicationDbContext context =
             scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
-
-        IS3StorageService s3Service =
+        IS3StorageService s3 =
             scope.ServiceProvider.GetRequiredService<IS3StorageService>();
 
         Report? report = await context.Reports
@@ -98,18 +99,13 @@ public sealed class ReportGenerationJob : BackgroundService
             "{Job} generating report for ReportId {ReportId} | RetailerId {RetailerId}",
             nameof(ReportGenerationJob), reportId, report.RetailerId);
 
-        // ── Build the CSV/PDF content ─────────────────────────────────────────
-        // In a full implementation this would use a PDF library (e.g. QuestPDF).
-        // For the MVP this generates a CSV stream.
         using MemoryStream content = await BuildReportCsvAsync(
             report, context, cancellationToken);
 
-        // ── Upload to S3 ──────────────────────────────────────────────────────
         string s3Key = $"reports/{report.RetailerId}/{reportId}.csv";
-        string reportUrl = await s3Service.UploadReportAsync(
+        string reportUrl = await s3.UploadReportAsync(
             s3Key, content, "text/csv", cancellationToken);
 
-        // ── Mark ready ────────────────────────────────────────────────────────
         report.MarkReady(reportUrl);
         await context.SaveChangesAsync(cancellationToken);
 
@@ -127,15 +123,16 @@ public sealed class ReportGenerationJob : BackgroundService
         await using StreamWriter writer = new(stream, leaveOpen: true);
 
         await writer.WriteLineAsync(
-            "SnapshotDate,TotalRevenue,TotalProfit,TotalOrders,ActiveProducts,LowStockCount,ConversionRate,TryOnEngagement");
+            "SnapshotDate,TotalRevenue,TotalProfit,TotalOrders," +
+            "ActiveProducts,LowStockCount,ConversionRate,TryOnEngagement");
 
         List<DashboardSnapshot> snapshots = await context.DashboardSnapshots
+            .AsNoTracking()
             .Where(s =>
                 s.RetailerId == report.RetailerId &&
                 s.SnapshotDate >= report.RangeFrom &&
                 s.SnapshotDate <= report.RangeTo)
             .OrderBy(s => s.SnapshotDate)
-            .AsNoTracking()
             .ToListAsync(cancellationToken);
 
         foreach (DashboardSnapshot snapshot in snapshots)
@@ -179,8 +176,8 @@ public sealed class ReportGenerationJob : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "{Job} could not mark ReportId {ReportId} as Failed. Error: {Message}",
-                nameof(ReportGenerationJob), reportId, ex.Message);
+                "{Job} failed to mark ReportId {ReportId} as Failed.",
+                nameof(ReportGenerationJob), reportId);
         }
     }
 }

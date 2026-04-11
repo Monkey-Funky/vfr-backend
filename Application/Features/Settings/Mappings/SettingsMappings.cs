@@ -9,7 +9,7 @@ namespace Application.Features.Settings.Mappings;
 public static class SettingsMappings
 {
     /// <summary>
-    /// Projects a <see cref="RetailerAccount"/> to a <see cref="RetailerSettingsProfileDto"/>.
+    /// Projects a RetailerAccount to a RetailerSettingsProfileDto.
     /// Never includes PasswordHash, RefreshTokenHash, or AccessFailedCount.
     /// </summary>
     public static RetailerSettingsProfileDto ToSettingsProfileDto(this RetailerAccount account)
@@ -29,11 +29,11 @@ public static class SettingsMappings
             SubscriptionId: account.SubscriptionId,
             AvailableBalance: account.AvailableBalance,
             CreatedAt: account.CreatedAt,
-            UpdatedAt: account.UpdatedAt);
+            UpdatedAt: account.UpdatedAt);   
     }
 
     /// <summary>
-    /// Projects a <see cref="NotificationPreference"/> to a <see cref="NotificationPreferenceDto"/>.
+    /// Projects a NotificationPreference to a NotificationPreferenceDto.
     /// </summary>
     public static NotificationPreferenceDto ToDto(this NotificationPreference preference)
     {

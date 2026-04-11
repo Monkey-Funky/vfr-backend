@@ -40,7 +40,8 @@ public sealed class GetProfitChartQueryHandler
         List<ChartDataPoint> result = await _dashboardRepository.GetProfitChartAsync(
             retailerId, query.From, query.To, query.GroupBy, cancellationToken);
 
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(30), cancellationToken);
+        await _cacheService.SetAsync(
+            cacheKey, result, TimeSpan.FromMinutes(30), cancellationToken);
 
         return result;
     }

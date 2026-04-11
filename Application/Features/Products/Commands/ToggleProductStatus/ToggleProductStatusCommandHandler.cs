@@ -1,6 +1,8 @@
 ﻿
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
+using Domain.Enums.Product;
+using Microsoft.EntityFrameworkCore;
 using Shared.Constants;
 
 namespace Application.Features.Products.Commands.ToggleProductStatus;
@@ -10,15 +12,18 @@ public sealed class ToggleProductStatusCommandHandler
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IApplicationDbContext _context;
     private readonly ICacheService _cache;
 
     public ToggleProductStatusCommandHandler(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
+        IApplicationDbContext context,
         ICacheService cache)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _context = context;
         _cache = cache;
     }
 
@@ -42,17 +47,26 @@ public sealed class ToggleProductStatusCommandHandler
         if (product.IsDeleted)
             throw new NotFoundException(nameof(Product), command.ProductId);
 
-        // TODO: When transitioning from OutOfStock → Active, verify that
-        //       InventoryRecord.CurrentStock > 0 for this product. This requires
-        //       checking IApplicationDbContext.InventoryRecords inside this handler.
-        //       Inject IApplicationDbContext and add:
-        //         var stock = await _context.InventoryRecords
-        //             .Where(ir => ir.ProductId == command.ProductId && !ir.IsDeleted)
-        //             .Select(ir => ir.CurrentStock)
-        //             .FirstOrDefaultAsync(cancellationToken);
-        //         if (product.Status == ProductStatus.OutOfStock && stock <= 0)
-        //             throw new BusinessRuleException("INSUFFICIENT_STOCK",
-        //                 "Cannot activate a product with zero stock.");
+        // ── OutOfStock → Active guard ────────────────────────────────────────
+        // When transitioning from OutOfStock, verify the product actually has
+        // stock before allowing activation. Prevents phantom "active" products
+        // that would immediately appear out-of-stock in the catalogue.
+        if (product.Status == ProductStatus.OutOfStock)
+        {
+            int currentStock = await _context.InventoryRecords
+                .AsNoTracking()
+                .Where(ir => ir.ProductId == command.ProductId
+                          && ir.RetailerId == retailerId
+                          && !ir.IsDeleted)
+                .Select(ir => ir.CurrentStock)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (currentStock <= 0)
+                throw new BusinessRuleException(
+                    "INSUFFICIENT_STOCK",
+                    "Cannot activate a product with zero stock. " +
+                    "Please adjust the inventory before activating.");
+        }
 
         var newStatus = product.ToggleStatus();
 

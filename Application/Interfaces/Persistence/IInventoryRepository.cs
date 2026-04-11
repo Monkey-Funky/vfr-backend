@@ -12,6 +12,7 @@ public interface IInventoryRepository
     /// <summary>
     /// Returns a paginated list of inventory records for the given retailer,
     /// optionally filtered by product name and sorted by sold quantity.
+    /// StockAdjustments are NOT included (too heavy for list queries).
     /// </summary>
     Task<(IReadOnlyList<InventoryRecord> Items, int TotalCount)> GetPagedAsync(
         Guid retailerId,
@@ -22,7 +23,8 @@ public interface IInventoryRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns the inventory record for a specific product owned by the retailer.
+    /// Returns the inventory record for a specific product owned by the retailer,
+    /// with StockAdjustments eagerly loaded (ordered by AdjustedAt DESC).
     /// Returns null if not found or if the record is soft-deleted.
     /// </summary>
     Task<InventoryRecord?> GetByProductIdAsync(
@@ -32,7 +34,8 @@ public interface IInventoryRepository
 
     /// <summary>
     /// Returns a tracked (non-AsNoTracking) InventoryRecord by its primary key.
-    /// Required by AdjustStockCommandHandler for optimistic concurrency via RowVersion.
+    /// Required by AdjustStockCommandHandler and SetLowStockThresholdCommandHandler
+    /// for optimistic concurrency via RowVersion.
     /// Returns null when not found or soft-deleted.
     /// </summary>
     Task<InventoryRecord?> GetTrackedByIdAsync(

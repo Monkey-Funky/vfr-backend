@@ -4,24 +4,12 @@ namespace Infrastructure.Persistence.Configurations.Retailer;
 
 /// <summary>
 /// EF Core configuration for InventoryRecord.
-///
-/// KEY DECISIONS:
-///   • RowVersion is mapped as IsConcurrencyToken() — NOT as IsRowVersion() (timestamp type).
-///     PostgreSQL does not support the SQL Server rowversion/timestamp type.
-///     The integer column is incremented manually in domain logic; EF Core includes
-///     it in the UPDATE WHERE clause automatically when IsConcurrencyToken() is set.
-///   • Global query filter excludes soft-deleted records from ALL queries
-///     (GetInventoryQuery, GetInventoryByProductIdQuery, CSV export).
-///   • Partial UNIQUE index enforces one InventoryRecord per (retailer_id, product_id)
-///     for non-deleted records.
-///   • CheckConstraint for current_stock >= 0 provides a DB-level safety net
-///     complementing the domain-level validation.
 /// </summary>
 public sealed class InventoryRecordConfiguration : IEntityTypeConfiguration<InventoryRecord>
 {
     public void Configure(EntityTypeBuilder<InventoryRecord> builder)
     {
-        // ── Table + Check Constraints (EF Core 9 pattern) ──────────────────────
+        // ── Table + Check Constraints ──────────────────────────────────────────
         builder.ToTable("inventory_records", t =>
         {
             t.HasCheckConstraint(
@@ -73,9 +61,6 @@ public sealed class InventoryRecordConfiguration : IEntityTypeConfiguration<Inve
             .IsRequired();
 
         // ── Optimistic Concurrency Token ───────────────────────────────────────
-        // IsConcurrencyToken() — EF Core will include this column in
-        // "UPDATE ... WHERE id = @id AND row_version = @original_row_version".
-        // DbUpdateConcurrencyException is thrown if the WHERE clause matches 0 rows.
         builder.Property(r => r.RowVersion)
             .HasColumnName("row_version")
             .IsConcurrencyToken()
@@ -102,7 +87,6 @@ public sealed class InventoryRecordConfiguration : IEntityTypeConfiguration<Inve
             .HasDefaultValue(false)
             .IsRequired();
 
-        // inventory_records does NOT have created_by / updated_by columns
         builder.Ignore(r => r.CreatedBy);
         builder.Ignore(r => r.UpdatedBy);
 
@@ -121,26 +105,25 @@ public sealed class InventoryRecordConfiguration : IEntityTypeConfiguration<Inve
             .OnDelete(DeleteBehavior.Cascade);
 
         // ── Navigation: StockAdjustments ──────────────────────────────────────
-        // Defined on StockAdjustmentConfiguration — no explicit nav property on
-        // InventoryRecord (audit trail is append-only, read via direct queries).
+        // FIX B-13: map the StockAdjustments collection so Include() works correctly.
+        builder.HasMany(r => r.StockAdjustments)
+            .WithOne()
+            .HasForeignKey(a => a.InventoryRecordId)
+            .HasConstraintName("fk_stock_adjustments_inventory_records_inventory_record_id")
+            .OnDelete(DeleteBehavior.Cascade);
 
         // ── Indexes ───────────────────────────────────────────────────────────
-
-        // FK index: retailer_id (enables fast tenant-scoped queries)
         builder.HasIndex(r => r.RetailerId)
             .HasDatabaseName("idx_inventory_records_retailer_id");
 
-        // FK index: product_id
         builder.HasIndex(r => r.ProductId)
             .HasDatabaseName("idx_inventory_records_product_id");
 
-        // Partial UNIQUE: one active inventory record per (retailer, product)
         builder.HasIndex(r => new { r.RetailerId, r.ProductId })
             .IsUnique()
             .HasFilter("is_deleted = false")
             .HasDatabaseName("uq_inventory_records_retailer_product");
 
-        // Composite index for paginated list queries sorted by sold_quantity
         builder.HasIndex(r => new { r.RetailerId, r.SoldQuantity })
             .HasDatabaseName("idx_inventory_records_retailer_sold_qty");
     }

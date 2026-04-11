@@ -53,8 +53,20 @@ public sealed class InventoryRecord : BaseEntity
     /// </summary>
     public int RowVersion { get; private set; }
 
-    /// <summary>Derived inventory status. Use <see cref="InventoryStatus"/> constants.</summary>
+    /// <summary>Derived inventory status.</summary>
     public string Status { get; private set; } = InventoryStatus.InStock;
+
+    // =========================================================================
+    // Navigation
+    // =========================================================================
+
+    /// <summary>
+    /// Audit trail of all stock adjustments for this record.
+    /// Loaded only by GetInventoryByProductIdQueryHandler via Include.
+    /// Always ordered by AdjustedAt DESC in the query — do not rely on
+    /// in-memory order here.
+    /// </summary>
+    public ICollection<StockAdjustment> StockAdjustments { get; private set; } = [];
 
     // =========================================================================
     // EF Core Constructor (private — do not call directly)
@@ -123,12 +135,8 @@ public sealed class InventoryRecord : BaseEntity
 
     /// <summary>
     /// Adjusts the current stock by the given delta (positive = increase, negative = decrease).
-    /// Called by <see cref="InventoryDecrementHandler"/> during order fulfilment.
-    /// Throws when the resulting stock would be negative.
+    /// Called by InventoryDecrementHandler during order fulfilment.
     /// </summary>
-    /// <param name="delta">Units to add (positive) or remove (negative).</param>
-    /// <param name="adjustmentType">One of the <see cref="AdjustmentType"/> constants.</param>
-    /// <param name="adjustedById">Retailer account that triggered this change.</param>
     public void AdjustStock(int delta, string adjustmentType, Guid adjustedById)
     {
         int newStock = CurrentStock + delta;
@@ -149,27 +157,10 @@ public sealed class InventoryRecord : BaseEntity
     }
 
     /// <summary>
-    /// Sets stock to an absolute <paramref name="newQuantity"/> value.
-    /// Called by <see cref="AdjustStockCommandHandler"/> for manual inventory adjustments via the API.
-    ///
-    /// DOMAIN INVARIANT:
-    ///   <paramref name="newQuantity"/> must be >= 0. Negative values violate the stock floor
-    ///   and throw <see cref="BusinessRuleException"/> with code "STOCK_FLOOR_VIOLATION".
-    ///
-    /// POST-CONDITION:
-    ///   After adjustment, if <see cref="CurrentStock"/> &lt;= <see cref="LowStockThreshold"/>,
-    ///   the caller (handler) MUST raise a <see cref="LowStockWarningEvent"/>.
-    ///   The domain method does NOT raise the event itself — event dispatch is the handler's
-    ///   responsibility so that it participates in the correct transaction scope.
+    /// Sets stock to an absolute newQuantity value.
+    /// Called by AdjustStockCommandHandler for manual inventory adjustments via the API.
+    /// Returns old quantity for the audit record.
     /// </summary>
-    /// <param name="newQuantity">Target stock level. Must be >= 0.</param>
-    /// <param name="type">Category of adjustment — must be a valid AdjustmentType constant.</param>
-    /// <param name="reason">
-    ///   Human-readable reason. Required when <paramref name="type"/> is
-    ///   ManualIncrease or ManualDecrease. Optional for OrderSale and ReturnRestock.
-    /// </param>
-    /// <param name="adjustedById">ID of the retailer account performing the adjustment.</param>
-    /// <returns>The stock quantity before this adjustment (used to build the audit record).</returns>
     public int AdjustStock(int newQuantity, string type, string? reason, Guid adjustedById)
     {
         if (newQuantity < 0)
@@ -182,7 +173,6 @@ public sealed class InventoryRecord : BaseEntity
 
         int oldQuantity = CurrentStock;
 
-        // For OrderSale decrements track sold units
         if (type == AdjustmentType.OrderSale && newQuantity < CurrentStock)
             SoldQuantity += CurrentStock - newQuantity;
 
@@ -204,6 +194,23 @@ public sealed class InventoryRecord : BaseEntity
 
         SoldQuantity += orderedQuantity;
         CurrentStock = newStockLevel;
+        Status = InventoryStatus.Derive(CurrentStock, LowStockThreshold);
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Sets the low stock threshold to an absolute value.
+    /// Called by SetLowStockThresholdCommandHandler.
+    /// Threshold must be between 0 and 10000 (validated by FluentValidation in the command).
+    /// </summary>
+    public void SetLowStockThreshold(int newThreshold)
+    {
+        if (newThreshold < 0 || newThreshold > 10000)
+            throw new BusinessRuleException(
+                "INVALID_THRESHOLD",
+                "Low stock threshold must be between 0 and 10 000.");
+
+        LowStockThreshold = newThreshold;
         Status = InventoryStatus.Derive(CurrentStock, LowStockThreshold);
         UpdatedAt = DateTime.UtcNow;
     }

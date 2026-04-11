@@ -3,9 +3,7 @@
 
 namespace Application.Features.Notifications.DTOs;
 
-/// <summary>
-/// Read model returned by <c>GetNotificationsQuery</c>.
-/// </summary>
+/// <summary>Read model returned by GetNotificationsQuery.</summary>
 public sealed record NotificationDto(
     Guid Id,
     string Type,
@@ -18,16 +16,13 @@ public sealed record NotificationDto(
 
 public static class NotificationMappingExtensions
 {
-    public static NotificationDto ToDto(this Notification notification)
-    {
-        return new NotificationDto(
-            Id: notification.Id,
-            Type: notification.Type,
-            Title: notification.Title,
-            Body: notification.Body,
-            IsRead: notification.IsRead,
-            ReadAt: notification.ReadAt,
-            ResourceId: notification.ResourceId,
-            CreatedAt: notification.CreatedAt);
-    }
+    public static NotificationDto ToDto(this Notification n) => new(
+        Id: n.Id,
+        Type: n.Type,
+        Title: n.Title,
+        Body: n.Body,
+        IsRead: n.IsRead,
+        ReadAt: n.ReadAt,
+        ResourceId: n.ResourceId,
+        CreatedAt: n.CreatedAt);
 }

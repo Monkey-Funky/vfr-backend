@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Features.Notifications.Queries.GetNotifications;
 
 public sealed class GetNotificationsQueryHandler
-    : IRequestHandler<GetNotificationsQuery, PagedResult<NotificationDto>>
+    : IRequestHandler<GetNotificationsQuery, NotificationsPagedResult>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
@@ -23,7 +23,7 @@ public sealed class GetNotificationsQueryHandler
         _cacheService = cacheService;
     }
 
-    public async Task<PagedResult<NotificationDto>> Handle(
+    public async Task<NotificationsPagedResult> Handle(
         GetNotificationsQuery query,
         CancellationToken cancellationToken)
     {
@@ -35,40 +35,47 @@ public sealed class GetNotificationsQueryHandler
             $"p{query.PageNumber}s{query.PageSize}" +
             $":read{query.IsRead?.ToString().ToLower() ?? "null"}";
 
-        PagedResult<NotificationDto>? cached =
-            await _cacheService.GetAsync<PagedResult<NotificationDto>>(cacheKey, cancellationToken);
+        var cached = await _cacheService
+            .GetAsync<NotificationsPagedResult>(cacheKey, cancellationToken);
 
         if (cached is not null)
             return cached;
 
-        IQueryable<Notification> queryable = _context.Notifications
+        // ── Base queryable filtered by retailer first ────────────────────────
+        var baseQuery = _context.Notifications
             .AsNoTracking()
             .Where(n => n.RetailerId == retailerId);
 
+        // ── Unread count (separate lightweight query) ─────────────────────────
+        int unreadCount = await baseQuery
+            .CountAsync(n => !n.IsRead, cancellationToken);
+
+        // ── Apply IsRead filter ───────────────────────────────────────────────
         if (query.IsRead.HasValue)
-            queryable = queryable.Where(n => n.IsRead == query.IsRead.Value);
+            baseQuery = baseQuery.Where(n => n.IsRead == query.IsRead.Value);
 
-        queryable = queryable.OrderByDescending(n => n.CreatedAt);
+        // ── Newest first ──────────────────────────────────────────────────────
+        baseQuery = baseQuery.OrderByDescending(n => n.CreatedAt);
 
-        int totalCount = await queryable.CountAsync(cancellationToken);
+        int totalCount = await baseQuery.CountAsync(cancellationToken);
 
-        List<NotificationDto> items = await queryable
+        List<NotificationDto> items = await baseQuery
             .Skip((query.PageNumber - 1) * query.PageSize)
             .Take(query.PageSize)
             .Select(n => n.ToDto())
             .ToListAsync(cancellationToken);
 
-        // FIX: PagedResult<T> is a class with init properties — use object initializer,
-        //      NOT a positional/named-parameter constructor call.
-        PagedResult<NotificationDto> result = new()
+        var result = new NotificationsPagedResult
         {
             Items = items,
             TotalCount = totalCount,
             PageNumber = query.PageNumber,
-            PageSize = query.PageSize
+            PageSize = query.PageSize,
+            UnreadCount = unreadCount
         };
 
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(2), cancellationToken);
+        await _cacheService.SetAsync(
+            cacheKey, result, TimeSpan.FromMinutes(2), cancellationToken);
 
         return result;
     }

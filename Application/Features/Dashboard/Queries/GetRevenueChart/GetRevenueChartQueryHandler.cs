@@ -2,9 +2,17 @@
 using Application.Features.Dashboard.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
+using Domain.Enums.Orders;
+using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Dashboard.Queries.GetRevenueChart;
 
+/// <summary>
+/// Groups delivered order revenue by Day/Week/Month using EF.Functions.DateTrunc
+/// (Npgsql PostgreSQL DATE_TRUNC — never string-based date grouping).
+/// Redis cache TTL 5 minutes.
+/// GroupBy parameter is validated by FluentValidation — never interpolated into SQL.
+/// </summary>
 public sealed class GetRevenueChartQueryHandler
     : IRequestHandler<GetRevenueChartQuery, List<ChartDataPoint>>
 {
@@ -41,7 +49,8 @@ public sealed class GetRevenueChartQueryHandler
         List<ChartDataPoint> result = await _dashboardRepository.GetRevenueChartAsync(
             retailerId, query.From, query.To, query.GroupBy, cancellationToken);
 
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(30), cancellationToken);
+        await _cacheService.SetAsync(
+            cacheKey, result, TimeSpan.FromMinutes(30), cancellationToken);
 
         return result;
     }

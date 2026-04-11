@@ -40,7 +40,8 @@ public sealed class GetTryOnEngagementQueryHandler
         List<TryOnEngagementDto> result = await _dashboardRepository.GetTryOnEngagementAsync(
             retailerId, query.From, query.To, query.GroupBy, cancellationToken);
 
-        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(30), cancellationToken);
+        await _cacheService.SetAsync(
+            cacheKey, result, TimeSpan.FromMinutes(30), cancellationToken);
 
         return result;
     }

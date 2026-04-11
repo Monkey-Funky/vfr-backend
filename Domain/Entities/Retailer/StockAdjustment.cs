@@ -1,7 +1,6 @@
 ﻿
 namespace Domain.Entities.Retailer;
 
-
 /// <summary>
 /// Immutable audit record of every stock quantity change on an InventoryRecord.
 ///
@@ -12,6 +11,8 @@ namespace Domain.Entities.Retailer;
 ///
 /// COLUMN MAPPING NOTES:
 ///   • BaseEntity.CreatedAt maps to the "adjusted_at" DB column (see EF config).
+///   • AdjustedAt is a computed property that returns CreatedAt — used by
+///     InventoryMappings and InventoryRepository for ordering and projection.
 ///   • UpdatedAt, CreatedBy, UpdatedBy are ignored in EF config (not in DB schema).
 ///   • IsDeleted is ignored in EF config — adjustment records are never soft-deleted;
 ///     they are immutable audit entries.
@@ -46,6 +47,13 @@ public sealed class StockAdjustment : BaseEntity
     /// <summary>ID of the retailer account that triggered this adjustment.</summary>
     public Guid AdjustedById { get; private set; }
 
+    /// <summary>
+    /// When this adjustment was recorded. Computed from BaseEntity.CreatedAt.
+    /// The EF Core configuration maps BaseEntity.CreatedAt to the "adjusted_at"
+    /// column — AdjustedAt is a domain-level alias used by mappings and repositories.
+    /// </summary>
+    public DateTime AdjustedAt => CreatedAt;
+
     // =========================================================================
     // EF Core Constructor (private — do not call directly)
     // =========================================================================
@@ -58,14 +66,9 @@ public sealed class StockAdjustment : BaseEntity
 
     /// <summary>
     /// Creates an immutable StockAdjustment audit record.
-    /// Called from InventoryDecrementHandler after successfully updating InventoryRecord.
+    /// Called from AdjustStockCommandHandler and InventoryDecrementHandler
+    /// after successfully updating the parent InventoryRecord.
     /// </summary>
-    /// <param name="inventoryRecordId">FK to the parent InventoryRecord.</param>
-    /// <param name="adjustmentType">One of the AdjustmentType constants.</param>
-    /// <param name="oldQuantity">Stock level before the adjustment.</param>
-    /// <param name="newQuantity">Stock level after the adjustment.</param>
-    /// <param name="adjustedById">Retailer account ID that performed the change.</param>
-    /// <param name="reason">Optional textual reason for the change.</param>
     public static StockAdjustment Create(
         Guid inventoryRecordId,
         string adjustmentType,
@@ -75,7 +78,9 @@ public sealed class StockAdjustment : BaseEntity
         string? reason = null)
     {
         if (inventoryRecordId == Guid.Empty)
-            throw new ArgumentException("InventoryRecordId must not be empty.", nameof(inventoryRecordId));
+            throw new ArgumentException(
+                "InventoryRecordId must not be empty.", nameof(inventoryRecordId));
+
         ArgumentException.ThrowIfNullOrWhiteSpace(adjustmentType, nameof(adjustmentType));
 
         return new StockAdjustment
@@ -88,7 +93,7 @@ public sealed class StockAdjustment : BaseEntity
             AdjustedById = adjustedById,
             Reason = reason,
             // BaseEntity.CreatedAt is set by ApplicationDbContext.SaveChangesAsync.
-            // It maps to the "adjusted_at" column in the DB via EF configuration.
+            // It maps to the "adjusted_at" column in DB via StockAdjustmentConfiguration.
         };
     }
 }

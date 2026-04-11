@@ -2,27 +2,41 @@
 namespace Domain.Entities.Notifications;
 
 /// <summary>
-/// Represents an in-app notification delivered to a retailer.
-/// Use the <see cref="Create"/> factory method — the parameterless constructor
-/// is reserved for EF Core materialisation only.
+/// In-app notification for a retailer. Extends BaseEntity for IUnitOfWork.Repository compatibility.
+/// IsRead defaults false. ReadAt is set only when MarkAsRead() is called.
+/// Composite index (retailer_id, created_at DESC) configured in NotificationConfiguration.
 /// </summary>
 public sealed class Notification : BaseEntity
 {
     public static class NotificationType
     {
         public const string LowStock = "LowStock";
+        public const string NewOrder = "NewOrder";
         public const string OrderStatusChanged = "OrderStatusChanged";
         public const string SubscriptionExpiring = "SubscriptionExpiring";
         public const string PaymentFailed = "PaymentFailed";
-        public const string AccountDeletion = "AccountDeletion";
+        public const string SystemAlert = "SystemAlert";
     }
 
+    /// <summary>FK to the owning retailer. Never null after construction.</summary>
     public Guid RetailerId { get; private set; }
+
+    /// <summary>Notification type — one of NotificationType constants.</summary>
     public string Type { get; private set; } = string.Empty;
+
+    /// <summary>Short display title.</summary>
     public string Title { get; private set; } = string.Empty;
+
+    /// <summary>Full notification body text (may contain HTML).</summary>
     public string Body { get; private set; } = string.Empty;
+
+    /// <summary>Whether the retailer has read this notification. Defaults false.</summary>
     public bool IsRead { get; private set; }
+
+    /// <summary>UTC timestamp when MarkAsRead() was called. Null until read.</summary>
     public DateTime? ReadAt { get; private set; }
+
+    /// <summary>Optional FK to the entity that triggered this notification (product, order, etc.).</summary>
     public Guid? ResourceId { get; private set; }
 
     // EF Core materialisation only.
@@ -38,6 +52,13 @@ public sealed class Notification : BaseEntity
         string body,
         Guid? resourceId = null)
     {
+        if (retailerId == Guid.Empty)
+            throw new ArgumentException("RetailerId must not be empty.", nameof(retailerId));
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(type, nameof(type));
+        ArgumentException.ThrowIfNullOrWhiteSpace(title, nameof(title));
+        ArgumentException.ThrowIfNullOrWhiteSpace(body, nameof(body));
+
         return new Notification
         {
             Id = Guid.NewGuid(),
@@ -54,7 +75,8 @@ public sealed class Notification : BaseEntity
 
     /// <summary>
     /// Marks this notification as read. Idempotent — calling on an already-read
-    /// notification is a no-op.
+    /// notification is a no-op (no second SaveChanges triggered).
+    /// Sets ReadAt = UtcNow.
     /// </summary>
     public void MarkAsRead()
     {
