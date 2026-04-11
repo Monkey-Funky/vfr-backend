@@ -1,7 +1,6 @@
 ﻿using Application.Features.Subscriptions.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
-using Domain.Entities.Subscriptions;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Subscriptions.Queries.GetCurrentSubscriptionDetails;
@@ -50,7 +49,7 @@ public sealed class GetCurrentSubscriptionDetailsQueryHandler
             BillingCycle: plan.BillingCycle,
             PriceAmount: plan.PriceAmount,
             Currency: plan.Currency,
-            CommissionRate: plan.CommissionRate,
+            // CommissionRate deliberately omitted — internal business data
             MaxActiveProducts: plan.MaxActiveProducts,
             MaxMonthlyTryOns: plan.MaxMonthlyTryOns,
             SupportLevel: plan.SupportLevel,

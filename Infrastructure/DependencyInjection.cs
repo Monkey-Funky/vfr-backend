@@ -17,9 +17,6 @@ using Infrastructure.Services.Storage;
 using Infrastructure.Services.Subscription;
 using Infrastructure.Services.System;
 using Infrastructure.Settings;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Retry;
@@ -185,6 +182,7 @@ public static class DependencyInjection
         // ReportGenerationJob — hosted service (singleton, reads from IReportQueue.ReadAllAsync).
         services.AddHostedService<ReportGenerationJob>();
 
+        services.AddScoped<IPlanLimitService, PlanLimitService>();
 
         return services;
     }

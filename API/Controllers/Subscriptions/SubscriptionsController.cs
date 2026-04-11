@@ -1,4 +1,5 @@
-﻿using Application.Features.Subscriptions.Commands.DowngradePlan;
+﻿using Application.Features.Subscriptions.Commands.CancelSubscription;
+using Application.Features.Subscriptions.Commands.DowngradePlan;
 using Application.Features.Subscriptions.Commands.SelectPlan;
 using Application.Features.Subscriptions.Commands.StartTrial;
 using Application.Features.Subscriptions.Commands.SubmitSaasEnquiry;
@@ -28,11 +29,11 @@ public sealed record DowngradePlanRequest(
 
 /// <summary>
 /// Subscription lifecycle management for the authenticated retailer.
-/// Handles trial activation, plan selection, upgrades, downgrades,
+/// Handles trial activation, plan selection, upgrades, downgrades, cancellation,
 /// and recurring billing settings.
 /// </summary>
 [Route("api/retailers/{retailerId:guid}")]
-[SwaggerTag("Subscription lifecycle — trial, plan selection, upgrade, downgrade, and billing settings.")]
+[SwaggerTag("Subscription lifecycle — trial, plan selection, upgrade, downgrade, cancellation, and billing settings.")]
 public sealed class SubscriptionsController : BaseApiController
 {
     public SubscriptionsController() { }
@@ -159,6 +160,33 @@ public sealed class SubscriptionsController : BaseApiController
         return OkResponse(result.Data, result.Message);
     }
 
+    // ── POST /api/retailers/{retailerId}/subscriptions/cancel ─────────────────
+
+    /// <summary>Cancels the retailer's active subscription.</summary>
+    [HttpPost("subscriptions/cancel")]
+    [SwaggerOperation(
+        Summary = "Cancel subscription",
+        Description = "Cancels the current subscription immediately. " +
+                      "Status transitions to Cancelled and EndDate is set to now. " +
+                      "Returns 422 with code SUBSCRIPTION_ALREADY_CANCELLED if already cancelled.")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CancelSubscription(
+        Guid retailerId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureRetailerOwnership(retailerId);
+
+        Result<bool> result = await Sender.Send(
+            new CancelSubscriptionCommand(),
+            cancellationToken);
+
+        return OkResponse(result.Data, result.Message);
+    }
+
     // ── GET /api/retailers/{retailerId}/subscription/current ──────────────────
 
     /// <summary>Returns the retailer's current subscription with UI button state flags.</summary>
@@ -192,7 +220,7 @@ public sealed class SubscriptionsController : BaseApiController
     [SwaggerOperation(
         Summary = "Get current subscription details",
         Description = "Returns the retailer's active subscription with the complete plan feature list " +
-                      "(commission rate, limits, SaaS flags, pending downgrade info). " +
+                      "(limits, SaaS flags, pending downgrade info). " +
                       "Used by the account billing detail page.")]
     [ProducesResponseType(typeof(ApiResponse<CurrentSubscriptionDetailsDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
@@ -246,7 +274,7 @@ public sealed class SubscriptionsController : BaseApiController
         Summary = "Submit SaaS enquiry",
         Description = "Submits a SaaS/White-Label enquiry on behalf of the authenticated retailer. " +
                       "Triggers an admin notification. " +
-                      "Only one pending enquiry per retailer is allowed at a time.")]
+                      "Only one open (Pending or InProgress) enquiry per retailer is allowed at a time.")]
     [ProducesResponseType(typeof(ApiResponse<Guid>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]

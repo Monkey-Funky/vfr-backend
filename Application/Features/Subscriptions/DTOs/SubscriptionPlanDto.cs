@@ -1,10 +1,9 @@
-﻿using Domain.Entities.Subscriptions;
-
-namespace Application.Features.Subscriptions.DTOs;
+﻿namespace Application.Features.Subscriptions.DTOs;
 
 /// <summary>
-/// Read model for a subscription plan.
-/// Returned by GetAllSubscriptionPlansQuery and GetSubscriptionPlanByIdQuery.
+/// Read model for a subscription plan — retailer-facing pricing page.
+/// CommissionRate is intentionally excluded: it is internal business data
+/// and must never be exposed to retailers via any API response.
 /// </summary>
 public sealed record SubscriptionPlanDto(
     Guid Id,
@@ -13,7 +12,6 @@ public sealed record SubscriptionPlanDto(
     string BillingCycle,
     decimal PriceAmount,
     string Currency,
-    decimal CommissionRate,
     int? MaxActiveProducts,
     int? MaxMonthlyTryOns,
     string SupportLevel,
@@ -27,7 +25,8 @@ public sealed record SubscriptionPlanDto(
 );
 
 /// <summary>
-/// Extension method to project a SubscriptionPlan entity to its DTO.
+/// Extension method to project a SubscriptionPlan entity to its retailer-facing DTO.
+/// CommissionRate is deliberately excluded from the mapping — it is internal data.
 /// No AutoMapper — explicit mapping per 03-CodingStandards.md.
 /// </summary>
 public static class SubscriptionPlanMappingExtensions
@@ -40,7 +39,6 @@ public static class SubscriptionPlanMappingExtensions
             plan.BillingCycle,
             plan.PriceAmount,
             plan.Currency,
-            plan.CommissionRate,
             plan.MaxActiveProducts,
             plan.MaxMonthlyTryOns,
             plan.SupportLevel,

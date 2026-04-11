@@ -64,19 +64,15 @@ public sealed class CreateCategoryCommandHandler
         catch (DbUpdateException ex)
             when (ex.InnerException is PostgresException { SqlState: "23505" })
         {
-            // BUG-002 FIX: A concurrent request already inserted the same name.
-            // Clean up the orphaned S3 image before converting to a conflict error.
             await _fileStorageService.DeleteAsync(coverImageUrl, cancellationToken);
             throw new ConflictException(nameof(Category), "Name", command.Name);
         }
         catch
         {
-            // BUG-002 FIX: Any other DB failure — clean up the orphaned S3 image.
             await _fileStorageService.DeleteAsync(coverImageUrl, cancellationToken);
             throw;
         }
 
-        // Invalidate category list cache for this retailer
         await _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken);
 
         return Result<Guid>.Success(category.Id, "Category created successfully.");

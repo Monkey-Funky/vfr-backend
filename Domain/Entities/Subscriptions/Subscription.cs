@@ -1,5 +1,4 @@
-﻿using Domain.Common;
-using Domain.Enums.Subscription;
+﻿using Domain.Enums.Subscription;
 using Domain.Exceptions;
 
 namespace Domain.Entities.Subscriptions;
@@ -64,20 +63,23 @@ public sealed class Subscription : BaseEntity
 
     /// <summary>
     /// When true, the RecurringPaymentJob will automatically charge the retailer
-    /// at the end of each billing cycle. Toggleable via ToggleRecurringPaymentCommand.
+    /// at the end of each billing cycle.
     /// </summary>
     public bool IsRecurringEnabled { get; private set; }
 
     // ── Computed Domain Properties ────────────────────────────────────────────
 
     /// <summary>
-    /// True if the subscription is Active and the end date has not passed.
+    /// True when the subscription is currently usable by the retailer.
+    /// Per spec: returns true when Status == Active OR (Status == Trial AND TrialEndsAt > UtcNow).
     /// </summary>
     public bool IsActive =>
-        Status == SubscriptionStatus.Active && EndDate > DateTime.UtcNow;
+        Status == SubscriptionStatus.Active ||
+        (Status == SubscriptionStatus.Trial && TrialEndsAt > DateTime.UtcNow);
 
     /// <summary>
-    /// True if the subscription is in its Trial period and the trial has not ended.
+    /// True when the subscription is in its Trial period and the trial has not ended.
+    /// Kept as a separate convenience property for UI button state computations.
     /// </summary>
     public bool IsInTrial =>
         Status == SubscriptionStatus.Trial && TrialEndsAt > DateTime.UtcNow;
@@ -174,13 +176,16 @@ public sealed class Subscription : BaseEntity
     /// <summary>
     /// Cancels the subscription from any non-terminal state.
     /// Valid from: Any state except Cancelled.
+    /// R-002: Sets EndDate to now (immediate cancellation).
+    ///        Throws SUBSCRIPTION_ALREADY_CANCELLED if already cancelled.
     /// </summary>
     public void Cancel()
     {
         const string ErrorCode = "INVALID_SUBSCRIPTION_TRANSITION";
 
         if (Status == SubscriptionStatus.Cancelled)
-            throw new BusinessRuleException(ErrorCode,
+            throw new BusinessRuleException(
+                "SUBSCRIPTION_ALREADY_CANCELLED",
                 "Subscription is already cancelled.");
 
         // Clear any pending downgrade if applicable
@@ -191,6 +196,7 @@ public sealed class Subscription : BaseEntity
         }
 
         Status = SubscriptionStatus.Cancelled;
+        EndDate = DateTime.UtcNow;
         SetUpdatedAudit(null, DateTime.UtcNow);
     }
 

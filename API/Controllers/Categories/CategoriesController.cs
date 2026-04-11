@@ -25,12 +25,9 @@ public sealed class CategoriesController : BaseApiController
     // Category Endpoints
     // =========================================================================
 
-    /// <summary>GET api/retailers/{retailerId}/categories</summary>
     [HttpGet]
-    [SwaggerOperation(
-        Summary = "List categories",
-        Description = "Returns a paginated list of categories for the retailer, " +
-                      "optionally filtered by status. Results are cached for 30 minutes.")]
+    [SwaggerOperation(Summary = "List categories",
+        Description = "Returns a paginated list of categories. Results cached 30 minutes.")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<CategoryDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -51,12 +48,9 @@ public sealed class CategoriesController : BaseApiController
         return OkResponse(result);
     }
 
-    /// <summary>GET api/retailers/{retailerId}/categories/{categoryId}</summary>
     [HttpGet("{categoryId:guid}", Name = "GetCategoryById")]
-    [SwaggerOperation(
-        Summary = "Get category by ID",
-        Description = "Returns a single category with its sub-category count. " +
-                      "Returns 404 if the category does not exist or belongs to another retailer.")]
+    [SwaggerOperation(Summary = "Get category by ID",
+        Description = "Returns a single category. Returns 404 if it does not exist or belongs to another retailer.")]
     [ProducesResponseType(typeof(ApiResponse<CategoryDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -75,13 +69,10 @@ public sealed class CategoriesController : BaseApiController
         return OkResponse(dto);
     }
 
-    /// <summary>POST api/retailers/{retailerId}/categories</summary>
     [HttpPost]
     [Consumes("multipart/form-data")]
-    [SwaggerOperation(
-        Summary = "Create a category",
-        Description = "Creates a new category. Uploads the cover image to S3 and " +
-                      "stores the public URL. Returns 409 if the name already exists for this retailer.")]
+    [SwaggerOperation(Summary = "Create a category",
+        Description = "Creates a new category with cover image upload to S3. Returns 409 on duplicate name.")]
     [ProducesResponseType(typeof(ApiResponse<Guid>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -112,14 +103,10 @@ public sealed class CategoriesController : BaseApiController
             result.Data);
     }
 
-    /// <summary>PUT api/retailers/{retailerId}/categories/{categoryId}</summary>
     [HttpPut("{categoryId:guid}")]
     [Consumes("multipart/form-data")]
-    [SwaggerOperation(
-        Summary = "Update a category",
-        Description = "Updates an existing category. All fields are optional — only " +
-                      "supplied fields are changed. If a new cover image is provided, " +
-                      "the old image is deleted from S3.")]
+    [SwaggerOperation(Summary = "Update a category",
+        Description = "Updates an existing category. All fields optional. Old image deleted from S3 on replacement.")]
     [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -162,14 +149,10 @@ public sealed class CategoriesController : BaseApiController
         }
     }
 
-    /// <summary>DELETE api/retailers/{retailerId}/categories/{categoryId}</summary>
     [HttpDelete("{categoryId:guid}")]
-    [SwaggerOperation(
-        Summary = "Delete a category",
-        Description = "Soft-deletes a category and cascades: " +
-                      "offers with this category → Inactive, " +
-                      "products.CategoryId → null, " +
-                      "all sub-categories → soft-deleted. All in one transaction.")]
+    [SwaggerOperation(Summary = "Delete a category",
+        Description = "Soft-deletes a category. Cascades: offers → Inactive, products.CategoryId → null, " +
+                      "sub-categories → soft-deleted. All in one transaction.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -186,12 +169,9 @@ public sealed class CategoriesController : BaseApiController
         return NoContentResponse();
     }
 
-    /// <summary>PATCH api/retailers/{retailerId}/categories/{categoryId}/toggle-status</summary>
     [HttpPatch("{categoryId:guid}/toggle-status")]
-    [SwaggerOperation(
-        Summary = "Toggle category status",
-        Description = "Switches the category status between Active and Inactive. " +
-                      "Returns the newly applied status value.")]
+    [SwaggerOperation(Summary = "Toggle category status",
+        Description = "Switches category status between Active and Inactive. Returns the new status value.")]
     [ProducesResponseType(typeof(ApiResponse<CategoryStatusDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -214,12 +194,9 @@ public sealed class CategoriesController : BaseApiController
     // Sub-Category Endpoints
     // =========================================================================
 
-    /// <summary>GET api/retailers/{retailerId}/categories/{categoryId}/sub-categories</summary>
     [HttpGet("{categoryId:guid}/sub-categories")]
-    [SwaggerOperation(
-        Summary = "List sub-categories",
-        Description = "Returns all sub-categories for the given parent category. " +
-                      "Returns 404 if the parent category does not exist or belongs to another retailer.")]
+    [SwaggerOperation(Summary = "List sub-categories",
+        Description = "Returns all sub-categories for the given parent category. Returns 404 if parent not found.")]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<SubCategoryDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -238,13 +215,9 @@ public sealed class CategoriesController : BaseApiController
         return OkResponse(result);
     }
 
-    /// <summary>POST api/retailers/{retailerId}/categories/{categoryId}/sub-categories</summary>
     [HttpPost("{categoryId:guid}/sub-categories")]
-    [SwaggerOperation(
-        Summary = "Create a sub-category",
-        Description = "Creates a sub-category under the specified parent category. " +
-                      "Enforces max depth = 1 and name uniqueness within the parent. " +
-                      "Returns 404 if the parent category does not belong to this retailer.")]
+    [SwaggerOperation(Summary = "Create a sub-category",
+        Description = "Creates a sub-category under the specified parent. Enforces max depth=1 and name uniqueness.")]
     [ProducesResponseType(typeof(ApiResponse<Guid>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -266,23 +239,15 @@ public sealed class CategoriesController : BaseApiController
                 Status: request.Status),
             cancellationToken);
 
-        // FIX-2: Corrected argument order to match BaseApiController.CreatedResponse<T> signature:
-        //   CreatedResponse<T>(string routeName, object routeValues, T data)
-        // Previously the arguments were passed as (result.Data, routeName, routeValues)
-        // which caused CS1503: Argument 1 cannot convert from 'Guid' to 'string'.
         return CreatedResponse(
             "GetCategoryById",
             new { retailerId, categoryId },
             result.Data);
     }
 
-    /// <summary>PUT api/retailers/{retailerId}/categories/{categoryId}/sub-categories/{subCategoryId}</summary>
     [HttpPut("{categoryId:guid}/sub-categories/{subCategoryId:guid}")]
-    [SwaggerOperation(
-        Summary = "Update a sub-category",
-        Description = "Updates the Name and/or Status of an existing sub-category. " +
-                      "Returns 404 if the sub-category does not belong to this retailer " +
-                      "or does not belong to the specified parent category.")]
+    [SwaggerOperation(Summary = "Update a sub-category",
+        Description = "Updates Name and/or Status. Returns 404 if sub-category does not belong to the specified parent.")]
     [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -300,7 +265,7 @@ public sealed class CategoriesController : BaseApiController
 
         Result<bool> result = await Sender.Send(
             new UpdateSubCategoryCommand(
-                ParentCategoryId: categoryId,   // BUG-004 FIX: was not passed before
+                ParentCategoryId: categoryId,   
                 SubCategoryId: subCategoryId,
                 NewName: request.NewName,
                 Status: request.Status),
@@ -309,12 +274,9 @@ public sealed class CategoriesController : BaseApiController
         return OkResponse(result.Data);
     }
 
-    /// <summary>DELETE api/retailers/{retailerId}/categories/{categoryId}/sub-categories/{subCategoryId}</summary>
     [HttpDelete("{categoryId:guid}/sub-categories/{subCategoryId:guid}")]
-    [SwaggerOperation(
-        Summary = "Delete a sub-category",
-        Description = "Soft-deletes a sub-category. " +
-                      "Cascade: products.SubCategoryId → null in the same transaction.")]
+    [SwaggerOperation(Summary = "Delete a sub-category",
+        Description = "Soft-deletes a sub-category. products.SubCategoryId → null in same transaction.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]

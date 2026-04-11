@@ -36,9 +36,8 @@ public sealed class CreateSubCategoryCommandHandler
             ?? throw new NotFoundException(nameof(Category), command.ParentCategoryId);
 
         // Step 2: Depth limit enforcement — parent must be a Category, not a SubCategory.
-        // Since we fetched it from the Category repository and it exists, it is definitionally
-        // a top-level Category. However, as a belt-and-suspenders check we also ensure the
-        // parentCategoryId does NOT exist as a SubCategory Id.
+        // A SubCategory ID cannot exist in the Category table under normal data integrity.
+        // This belt-and-suspenders check guards against abnormal states.
         bool parentIsSubCategory = await _unitOfWork.Repository<SubCategory>().AnyAsync(
             sc => sc.Id == command.ParentCategoryId,
             cancellationToken);
@@ -71,7 +70,6 @@ public sealed class CreateSubCategoryCommandHandler
         catch (DbUpdateException ex)
             when (ex.InnerException is PostgresException { SqlState: "23505" })
         {
-            // BUG-005 FIX: Concurrent insert with the same name raced past the AnyAsync check.
             // Convert the DB constraint violation to a clean 409 Conflict instead of a 500.
             throw new ConflictException(nameof(SubCategory), "Name", command.Name);
         }

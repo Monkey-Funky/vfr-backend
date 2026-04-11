@@ -38,6 +38,7 @@ public sealed class DeleteSubCategoryCommandHandler
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
         // IDOR guard: verify the sub-category belongs to this retailer AND to the specified parent.
+        // BUG-004 FIX: sc.CategoryId == command.ParentCategoryId enforces URL route contract.
         SubCategory subCategory = await _unitOfWork.Repository<SubCategory>().FirstOrDefaultAsync(
             sc => sc.Id == command.SubCategoryId
                   && sc.RetailerId == retailerId
@@ -47,8 +48,8 @@ public sealed class DeleteSubCategoryCommandHandler
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
-            // Step 1: Null out products.SubCategoryId for products in this sub-category.
-            // stamped explicitly in the setter chain — the DbContext override never fires here.
+            // Step 1: Null out products.SubCategoryId (+ stamp UpdatedAt)
+            // BUG-001 FIX: UpdatedAt set explicitly — ExecuteUpdateAsync bypasses SaveChangesAsync.
             await _context.Products
                 .Where(p => p.SubCategoryId == command.SubCategoryId)
                 .ExecuteUpdateAsync(
@@ -57,8 +58,7 @@ public sealed class DeleteSubCategoryCommandHandler
                         .SetProperty(p => p.UpdatedAt, DateTime.UtcNow),
                     ct);
 
-            // Step 2: Soft-delete the sub-category itself.
-            // SaveChangesAsync stamps UpdatedAt via the ApplicationDbContext override.
+            // Step 2: Soft-delete the sub-category itself
             subCategory.MarkAsDeleted();
             await _unitOfWork.Repository<SubCategory>().UpdateAsync(subCategory, ct);
             await _unitOfWork.SaveChangesAsync(ct);

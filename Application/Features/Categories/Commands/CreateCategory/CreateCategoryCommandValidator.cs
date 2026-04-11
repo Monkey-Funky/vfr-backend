@@ -10,7 +10,7 @@ public sealed class CreateCategoryCommandValidator
         RuleFor(x => x.Name)
             .NotEmpty().WithMessage("Category name is required.")
             .Must(n => !string.IsNullOrWhiteSpace(n))
-            .WithMessage("Category name must not be blank.") 
+            .WithMessage("Category name must not be blank.")   
             .MaximumLength(150).WithMessage("Category name must not exceed 150 characters.");
 
         RuleFor(x => x.Description)
@@ -26,7 +26,7 @@ public sealed class CreateCategoryCommandValidator
             .WithMessage("Cover image file must not be empty.")
             .Must(stream => stream.Length <= MaxCoverImageBytes)
             .WithMessage("Cover image must not exceed 1 MB.")
-            .When(x => x.CoverImageStream is not null);
+            .When(x => x.CoverImageStream is not null);  
 
         RuleFor(x => x.CoverImageFileName)
             .NotEmpty().WithMessage("Cover image file name is required.");

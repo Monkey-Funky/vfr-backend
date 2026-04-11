@@ -57,16 +57,13 @@ public sealed class DeleteCategoryCommandHandler
             ?? throw new NotFoundException(nameof(Category), command.CategoryId);
 
         string coverImageUrlToDelete = category.CoverImageUrl;
-
-        // ExecuteUpdateAsync bulk steps stamp an identical updated_at value. The variable is
-        // closed over by the lambda — it is evaluated once, not once per step.
         DateTime now = DateTime.UtcNow;
 
         // All cascade operations execute inside a single PostgreSQL transaction
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
             // Step 1: Set offers with this category → Inactive (+ stamp UpdatedAt)
-            // set explicitly in each setter chain to keep audit columns accurate.
+            // BUG-001 FIX: UpdatedAt set explicitly — ExecuteUpdateAsync bypasses SaveChangesAsync.
             await _context.Offers
                 .Where(o => o.CategoryId == command.CategoryId)
                 .ExecuteUpdateAsync(
@@ -93,7 +90,7 @@ public sealed class DeleteCategoryCommandHandler
                         .SetProperty(sc => sc.UpdatedAt, now),
                     ct);
 
-            // Step 4: Soft-delete the category itself.
+            // Step 4: Soft-delete the category itself
             // SaveChangesAsync stamps UpdatedAt via the ApplicationDbContext override.
             category.MarkAsDeleted();
             await _unitOfWork.Repository<Category>().UpdateAsync(category, ct);

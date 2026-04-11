@@ -61,7 +61,7 @@ public sealed class GetCategoriesQueryHandler
             .OrderBy(c => c.Name)
             .Skip((query.PageNumber - 1) * query.PageSize)
             .Take(query.PageSize)
-            // effect and produced a misleading EF Core diagnostic warning.
+            // BUG-008 FIX: Removed .AsSplitQuery() — no Include() is present here.
             .ToListAsync(cancellationToken);
 
         // Fetch sub-category counts in a single IN query to avoid N+1

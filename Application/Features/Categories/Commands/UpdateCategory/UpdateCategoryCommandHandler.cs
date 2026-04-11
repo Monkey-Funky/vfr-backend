@@ -85,14 +85,12 @@ public sealed class UpdateCategoryCommandHandler
         catch (DbUpdateException ex)
             when (ex.InnerException is PostgresException { SqlState: "23505" })
         {
-            // BUG-003 FIX: Concurrent rename collision — clean up orphaned new image before re-throwing.
             if (newCoverImageUrl is not null)
                 await _fileStorageService.DeleteAsync(newCoverImageUrl, cancellationToken);
             throw new ConflictException(nameof(Category), "Name", command.NewName!);
         }
         catch
         {
-            // BUG-003 FIX: Any other DB failure — clean up the newly uploaded image.
             if (newCoverImageUrl is not null)
                 await _fileStorageService.DeleteAsync(newCoverImageUrl, cancellationToken);
             throw;

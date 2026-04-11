@@ -2,7 +2,7 @@
 
 /// <summary>Updates an existing SubCategory's Name and/or Status.</summary>
 public sealed record UpdateSubCategoryCommand(
-    Guid ParentCategoryId,  
+    Guid ParentCategoryId,
     Guid SubCategoryId,
     string? NewName,
     string? Status

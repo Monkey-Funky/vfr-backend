@@ -6,6 +6,6 @@ namespace Application.Features.Categories.Commands.DeleteSubCategory;
 /// Cascade: products.SubCategoryId → null, in the same PostgreSQL transaction.
 /// </summary>
 public sealed record DeleteSubCategoryCommand(
-    Guid ParentCategoryId,  
+    Guid ParentCategoryId,
     Guid SubCategoryId
 ) : IRequest<Result<bool>>;

@@ -12,7 +12,7 @@ public sealed class CreateSubCategoryCommandValidator
         RuleFor(x => x.Name)
             .NotEmpty().WithMessage("Sub-category name is required.")
             .Must(n => !string.IsNullOrWhiteSpace(n))
-            .WithMessage("Sub-category name must not be blank.")
+            .WithMessage("Sub-category name must not be blank.") 
             .MaximumLength(150).WithMessage("Sub-category name must not exceed 150 characters.");
 
         RuleFor(x => x.Status)

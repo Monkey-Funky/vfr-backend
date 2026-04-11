@@ -13,7 +13,7 @@ public sealed class UpdateCategoryCommandValidator
         RuleFor(x => x.NewName)
             .MinimumLength(1).WithMessage("Category name must not be blank if provided.")
             .Must(n => !string.IsNullOrWhiteSpace(n))
-            .WithMessage("Category name must not be blank if provided.") // BUG-007 FIX
+            .WithMessage("Category name must not be blank if provided.")   
             .MaximumLength(150).WithMessage("Category name must not exceed 150 characters.")
             .When(x => x.NewName is not null);
 
@@ -23,9 +23,9 @@ public sealed class UpdateCategoryCommandValidator
             .When(x => x.NewDescription is not null);
 
         RuleFor(x => x.NewCoverImageStream)
-            .Must(stream => stream is not null && stream.Length > 0)
+            .Must(stream => stream.Length > 0)
             .WithMessage("Cover image file must not be empty if provided.")
-            .Must(stream => stream is null || stream.Length <= MaxCoverImageBytes)
+            .Must(stream => stream.Length <= MaxCoverImageBytes)
             .WithMessage("Cover image must not exceed 1 MB.")
             .When(x => x.NewCoverImageStream is not null);
 

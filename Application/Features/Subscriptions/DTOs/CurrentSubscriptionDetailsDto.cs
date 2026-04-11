@@ -5,6 +5,7 @@ namespace Application.Features.Subscriptions.DTOs;
 /// <summary>
 /// Detailed subscription read model with full plan feature list.
 /// Returned by GetCurrentSubscriptionDetailsQuery.
+/// CommissionRate is excluded — internal business data, not surfaced to retailers.
 /// </summary>
 public sealed record CurrentSubscriptionDetailsDto(
     Guid SubscriptionId,
@@ -21,7 +22,6 @@ public sealed record CurrentSubscriptionDetailsDto(
     string BillingCycle,
     decimal PriceAmount,
     string Currency,
-    decimal CommissionRate,
     int? MaxActiveProducts,
     int? MaxMonthlyTryOns,
     string SupportLevel,
