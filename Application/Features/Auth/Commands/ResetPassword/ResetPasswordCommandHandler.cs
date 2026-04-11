@@ -16,7 +16,8 @@ namespace Application.Features.Auth.Commands.ResetPassword;
 ///   7. Delete the OTP from Redis (one-time use)
 ///   8. Persist and return success
 /// </summary>
-public sealed class ResetPasswordCommandHandler : IRequestHandler<ResetPasswordCommand, Result<bool>>
+public sealed class ResetPasswordCommandHandler
+    : IRequestHandler<ResetPasswordCommand, Result<bool>>
 {
     private const string OtpCacheKeyPrefix = "pwd_reset:";
 
@@ -39,6 +40,8 @@ public sealed class ResetPasswordCommandHandler : IRequestHandler<ResetPasswordC
         CancellationToken cancellationToken)
     {
         // ── 1. Look up the retailer ───────────────────────────────────────────
+        //
+        // Only Active accounts are eligible for password reset.
         RetailerAccount? account = await _unitOfWork
             .Repository<RetailerAccount>()
             .FirstOrDefaultAsync(
@@ -52,8 +55,7 @@ public sealed class ResetPasswordCommandHandler : IRequestHandler<ResetPasswordC
         if (account is null)
         {
             _logger.LogWarning(
-                "ResetPassword — email not found or account inactive. Email: {Email}",
-                command.Email);
+                "ResetPassword — email not found or account inactive.");
 
             throw new BusinessRuleException(
                 "INVALID_OTP",
@@ -61,17 +63,18 @@ public sealed class ResetPasswordCommandHandler : IRequestHandler<ResetPasswordC
         }
 
         // ── 2. Retrieve OTP hash from Redis ───────────────────────────────────
+        //
+        // A null result means the key either never existed or has expired (TTL elapsed).
         string cacheKey = $"{OtpCacheKeyPrefix}{account.Email.ToLowerInvariant()}";
 
-        // ICacheService.GetAsync returns null on cache miss (key expired or never set)
         string? storedHashedOtp = await _cacheService.GetAsync<string>(
             cacheKey, cancellationToken);
 
         if (storedHashedOtp is null)
         {
             _logger.LogWarning(
-                "ResetPassword — OTP not found in cache (expired?). RetailerId: {RetailerId}",
-                account.Id);
+                "ResetPassword — OTP not found in cache (likely expired). " +
+                "RetailerId: {RetailerId}", account.Id);
 
             throw new BusinessRuleException(
                 "INVALID_OTP",
@@ -79,6 +82,8 @@ public sealed class ResetPasswordCommandHandler : IRequestHandler<ResetPasswordC
         }
 
         // ── 3. Verify OTP (BCrypt hash comparison) ────────────────────────────
+        //
+        // BCrypt.Verify is constant-time — safe against timing attacks on the OTP.
         bool otpValid = BCrypt.Net.BCrypt.Verify(command.OtpCode, storedHashedOtp);
 
         if (!otpValid)
@@ -92,20 +97,24 @@ public sealed class ResetPasswordCommandHandler : IRequestHandler<ResetPasswordC
         }
 
         // ── 4. Hash the new password ──────────────────────────────────────────
-        string newPasswordHash = BCrypt.Net.BCrypt.HashPassword(command.NewPassword, workFactor: 12);
+        //
+        // BCrypt work factor 12 is mandatory per 07-SecurityArchitecture.md §3.1.
+        string newPasswordHash = BCrypt.Net.BCrypt.HashPassword(
+            command.NewPassword, workFactor: 12);
 
         // ── 5 & 6. Update password and revoke all tokens ──────────────────────
         //
-        // We access the private PasswordHash via the domain entity. Since we cannot
-        // set it directly (private setter), we need to expose a domain method.
-        // However, since this is a simple value assignment with no domain invariant,
-        // we use a dedicated method on the entity:
+        // ResetPassword sets the new password hash via the domain method (private setter).
         account.ResetPassword(newPasswordHash);
 
-        // Revoking all refresh tokens forces every device to re-authenticate
+        // Revoking all refresh tokens forces every device to re-authenticate.
+        // This is a security requirement on password change.
         account.RevokeAllRefreshTokens();
 
         // ── 7. Delete OTP from Redis (one-time use) ───────────────────────────
+        //
+        // Delete the OTP before the DB write to ensure it cannot be replayed
+        // even if the subsequent SaveChangesAsync fails for a transient reason.
         await _cacheService.RemoveAsync(cacheKey, cancellationToken);
 
         // ── 8. Persist ────────────────────────────────────────────────────────

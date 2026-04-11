@@ -1,12 +1,12 @@
-﻿// src/Infrastructure/Persistence/Configurations/RetailerAccountConfiguration.cs
-namespace Infrastructure.Persistence.Configurations.Retailer;
+﻿namespace Infrastructure.Persistence.Configurations.Retailer;
 
 /// <summary>
 /// EF Core Fluent API configuration for <see cref="RetailerAccount"/>.
 ///
 /// Applies to table: retailer_accounts (snake_case via global UseSnakeCaseNamingConvention).
 /// </summary>
-public sealed class RetailerAccountConfiguration : IEntityTypeConfiguration<RetailerAccount>
+public sealed class RetailerAccountConfiguration
+    : IEntityTypeConfiguration<RetailerAccount>
 {
     public void Configure(EntityTypeBuilder<RetailerAccount> builder)
     {
@@ -21,23 +21,7 @@ public sealed class RetailerAccountConfiguration : IEntityTypeConfiguration<Reta
         // ── Primary Key ───────────────────────────────────────────────────────
         builder.HasKey(r => r.Id);
 
-        // ── FIX F-03: Optimistic concurrency via PostgreSQL xmin system column ─
-        //
-        // xmin is a hidden uint column on every PostgreSQL row that is incremented
-        // on every UPDATE to that row. EF Core reads it back after each update and
-        // uses it as the expected value on the next update's WHERE clause:
-        //
-        //   UPDATE retailer_accounts SET ... WHERE id = @id AND xmin = @expected_xmin
-        //
-        // If two concurrent RefreshToken requests both read xmin = 100 and one
-        // commits first (xmin becomes 101), the second update finds 0 rows affected
-        // and EF Core throws DbUpdateConcurrencyException, which RefreshTokenCommandHandler
-        // catches and converts to a 401 "concurrent refresh detected" response.
-        //
-        // Requires Npgsql.EntityFrameworkCore.PostgreSQL — no migration needed,
-        // xmin is a system column that already exists on every table.
-
-        // ── Column constraints ────────────────────────────────────────────────
+        // ── Column constraints — Identity ─────────────────────────────────────
         builder.Property(r => r.FullName)
                .HasMaxLength(100)
                .IsRequired();
@@ -50,6 +34,7 @@ public sealed class RetailerAccountConfiguration : IEntityTypeConfiguration<Reta
                .HasMaxLength(255)
                .IsRequired();
 
+        // ── Column constraints — Brand / Business ─────────────────────────────
         builder.Property(r => r.BrandName)
                .HasMaxLength(150)
                .IsRequired();
@@ -61,35 +46,54 @@ public sealed class RetailerAccountConfiguration : IEntityTypeConfiguration<Reta
         builder.Property(r => r.BrandLogoUrl)
                .HasMaxLength(2048);
 
+        // ── Column constraints — OAuth ────────────────────────────────────────
         builder.Property(r => r.GoogleId)
                .HasMaxLength(128);
 
+        // ── Column constraints — Account Status ───────────────────────────────
         builder.Property(r => r.AccountStatus)
                .HasMaxLength(50)
                .IsRequired();
 
+        // ── Column constraints — Refresh Token ────────────────────────────────
         builder.Property(r => r.RefreshTokenHash)
                .HasMaxLength(255);
 
-        builder.Property(r => r.PhoneNumber)
-            .HasColumnName("phone_number")
-            .HasMaxLength(20)
-            .IsRequired(false);
-
-        builder.Property(r => r.AvatarUrl)
-            .HasColumnName("avatar_url")
-            .HasMaxLength(500)
-            .IsRequired(false);
-
-        // IsRememberMeSession is a plain bool — no special mapping needed.
-        // Defaults to false at DB level (column default).
+        // IsRememberMeSession defaults to false at DB level.
         builder.Property(r => r.IsRememberMeSession)
                .HasDefaultValue(false);
 
+        // ── FIX BUG-005: AvailableBalance — explicit precision and default ─────
+        //
+        // RetailerAccount.AvailableBalance has the doc comment:
+        //   "DB column: available_balance numeric(18,2) NOT NULL DEFAULT 0"
+        //
+        // Without HasPrecision, EF Core may generate a column type different from
+        // numeric(18,2). Without HasDefaultValue, the DB-level DEFAULT 0 is absent,
+        // which can cause issues with rows that bypass EF Core (e.g. raw SQL inserts
+        // or seeding scripts).
+        //
+        // NOTE: Because this property was absent from the original configuration,
+        // the existing migration does NOT include this column. After applying this fix,
+        // run:
+        //   dotnet ef migrations add Add_AvailableBalance_To_RetailerAccounts \
+        //     --project src/Infrastructure \
+        //     --startup-project src/API
+        // to generate a migration that adds the column with the correct type and default.
+        builder.Property(r => r.AvailableBalance)
+               .HasPrecision(18, 2)
+               .HasDefaultValue(0m)
+               .IsRequired();
+
         // ── Soft-delete global query filter ───────────────────────────────────
+        //
+        // All queries on RetailerAccount automatically exclude soft-deleted rows.
+        // Use .IgnoreQueryFilters() only for administrative or audit operations.
         builder.HasQueryFilter(r => !r.IsDeleted);
 
         // ── Partial unique index on Email (active accounts only) ──────────────
+        //
+        // Allows a deleted retailer's email to be re-registered by a new account.
         builder.HasIndex(r => r.Email)
                .IsUnique()
                .HasFilter("is_deleted = false")
@@ -102,11 +106,17 @@ public sealed class RetailerAccountConfiguration : IEntityTypeConfiguration<Reta
                .HasDatabaseName("ux_retailer_accounts_brand_name_active");
 
         // ── Sparse index on GoogleId ──────────────────────────────────────────
+        //
+        // NULL-filtered so that password-only accounts (GoogleId IS NULL) are not
+        // indexed, saving index space and avoiding a unique constraint on NULLs.
         builder.HasIndex(r => r.GoogleId)
                .HasFilter("google_id IS NOT NULL")
                .HasDatabaseName("ix_retailer_accounts_google_id");
 
         // ── Navigation: NotificationPreference (1:1) ──────────────────────────
+        //
+        // Cascade delete ensures the preference row is cleaned up when the
+        // retailer account is hard-deleted (soft-delete doesn't trigger this).
         builder.HasOne<NotificationPreference>()
                .WithOne()
                .HasForeignKey<NotificationPreference>(n => n.RetailerId)

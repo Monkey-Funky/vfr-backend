@@ -20,12 +20,13 @@ namespace Application.Features.Auth.Commands.ForgotPassword;
 ///   The OTP is hashed before being stored in Redis.
 ///   The raw OTP is only sent to the email address — it is never logged.
 /// </summary>
-public sealed class ForgotPasswordCommandHandler : IRequestHandler<ForgotPasswordCommand, Result<bool>>
+public sealed class ForgotPasswordCommandHandler
+    : IRequestHandler<ForgotPasswordCommand, Result<bool>>
 {
     // Cache key prefix for password reset OTPs stored in Redis.
     private const string OtpCacheKeyPrefix = "pwd_reset:";
 
-    // OTP TTL matches the 15-minute security requirement.
+    // OTP TTL matches the 15-minute security requirement from 07-SecurityArchitecture.md.
     private static readonly TimeSpan OtpTtl = TimeSpan.FromMinutes(15);
 
     private readonly IUnitOfWork _unitOfWork;
@@ -63,8 +64,8 @@ public sealed class ForgotPasswordCommandHandler : IRequestHandler<ForgotPasswor
 
         // ── 2. Email not found — constant-time path ───────────────────────────
         //
-        // Run a dummy BCrypt hash at work factor 4 (≈ 20ms) to equalise response
-        // time with the found-email path (BCrypt at work factor 12 ≈ 300ms for the OTP).
+        // Run a dummy BCrypt hash at work factor 4 (≈ 20ms) to partially equalise
+        // response time with the found-email path (BCrypt at work factor 12 ≈ 300ms).
         // The two paths will not be perfectly equal, but the dummy work closes the
         // most easily measurable timing gap (zero work vs. hundreds of milliseconds).
         if (account is null)
@@ -80,34 +81,32 @@ public sealed class ForgotPasswordCommandHandler : IRequestHandler<ForgotPasswor
         }
 
         // ── 3. Generate a 6-digit CSPRNG OTP ─────────────────────────────────
-        //
-        // FIX F-05: Replace Random.Shared.Next() (PRNG) with RandomNumberGenerator.GetInt32()
-        // (CSPRNG). This is cryptographically secure and resistant to prediction attacks.
-        //
         // Range: [100_000, 1_000_000) — all 900_000 six-digit codes are reachable.
-        // The previous code used Next(100_000, 999_999) which excluded 999_999.
         string rawOtp = RandomNumberGenerator.GetInt32(100_000, 1_000_000).ToString();
 
+        // Hash the OTP before storing it. The raw OTP is NEVER stored in Redis or logged.
         string hashedOtp = BCrypt.Net.BCrypt.HashPassword(rawOtp, workFactor: 12);
 
+        // Cache key is keyed to the lower-case email to avoid case sensitivity issues.
         string cacheKey = $"{OtpCacheKeyPrefix}{account.Email.ToLowerInvariant()}";
         await _cacheService.SetAsync(cacheKey, hashedOtp, OtpTtl, cancellationToken);
 
         _logger.LogInformation(
-            "Password reset OTP cached. RetailerId: {RetailerId}. Expiry: {ExpiryMinutes} min.",
+            "Password reset OTP cached. RetailerId: {RetailerId}. " +
+            "ExpiryMinutes: {ExpiryMinutes}",
             account.Id, OtpTtl.TotalMinutes);
 
         // ── 4. Send OTP email ─────────────────────────────────────────────────
         //
         // OTP email is CRITICAL (not fire-and-forget) — the user cannot reset their
-        // password if this email doesn't arrive. Awaited here.
+        // password if this email doesn't arrive. Awaited here so failures surface.
         await _emailService.SendEmailAsync(
             to: account.Email,
             subject: "Your VFR Password Reset Code",
             body: $"<p>Hi {account.FullName},</p>" +
-                     $"<p>Your password reset code is: <strong>{rawOtp}</strong></p>" +
-                     $"<p>This code expires in 15 minutes. " +
-                     $"Do not share this code with anyone.</p>",
+                  $"<p>Your password reset code is: <strong>{rawOtp}</strong></p>" +
+                  $"<p>This code expires in 15 minutes. " +
+                  $"Do not share this code with anyone.</p>",
             ct: cancellationToken);
 
         // ── 5. Return identical response ──────────────────────────────────────
