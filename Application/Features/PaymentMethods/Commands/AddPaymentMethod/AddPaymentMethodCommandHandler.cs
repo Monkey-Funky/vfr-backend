@@ -28,12 +28,8 @@ public sealed class AddPaymentMethodCommandHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // ── Encrypt PII before persisting ─────────────────────────────────────
         string encryptedName = _encryptionService.Encrypt(command.CardholderName);
 
-        // BUG-007 FIX: PaymentMethod.Create() now validates that the card's
-        // expiry month/year is not in the past. A BusinessRuleException is thrown
-        // if the card is expired — preventing expired cards from ever being stored.
         PaymentMethod method = PaymentMethod.Create(
             retailerId: retailerId,
             providerType: command.ProviderType,
@@ -45,11 +41,8 @@ public sealed class AddPaymentMethodCommandHandler
 
         await _unitOfWork.Repository<PaymentMethod>().AddAsync(method, cancellationToken);
 
-        // ── Optionally set as the default card ────────────────────────────────
         if (command.SetAsDefault)
         {
-            // BUG-008 FIX: No longer using fragile "as List<T>" cast.
-            // Use IReadOnlyList<T> directly — no unsafe runtime casts.
             IReadOnlyList<PaymentMethod> existingMethods = await _unitOfWork
                 .Repository<PaymentMethod>()
                 .FindAsync(
@@ -62,7 +55,6 @@ public sealed class AddPaymentMethodCommandHandler
                 await _unitOfWork.Repository<PaymentMethod>().UpdateAsync(existing, cancellationToken);
             }
 
-            // SetAsDefault() also validates expiry (BUG-007) — will throw if somehow expired.
             method.SetAsDefault();
         }
 

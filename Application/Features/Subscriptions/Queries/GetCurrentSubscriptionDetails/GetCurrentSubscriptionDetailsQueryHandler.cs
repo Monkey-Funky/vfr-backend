@@ -49,7 +49,6 @@ public sealed class GetCurrentSubscriptionDetailsQueryHandler
             BillingCycle: plan.BillingCycle,
             PriceAmount: plan.PriceAmount,
             Currency: plan.Currency,
-            // CommissionRate deliberately omitted — internal business data
             MaxActiveProducts: plan.MaxActiveProducts,
             MaxMonthlyTryOns: plan.MaxMonthlyTryOns,
             SupportLevel: plan.SupportLevel,

@@ -5,15 +5,16 @@ using Application.Interfaces.Services;
 namespace Application.Features.Settings.Commands.ChangePassword;
 
 /// <summary>
-/// Verifies the current password via BCrypt, hashes the new password,
-/// and calls <see cref="RetailerAccount.ChangePassword"/> which:
-///   1. Stores the new hash.
-///   2. Calls <see cref="RetailerAccount.RevokeAllRefreshTokens"/> — forces
-///      re-login on every device (not just the current session).
+/// Handles ChangePasswordCommand.
 ///
-/// IMPORTANT: After this command succeeds, the client must discard its access and
-/// refresh tokens and redirect the user to the login screen. The API layer
-/// must NOT automatically re-issue tokens — the retailer must re-authenticate.
+/// Steps:
+///   1. Load the authenticated retailer's account.
+///   2. Guard: OAuth-only accounts cannot set a password.
+///   3. Verify the current password hash with BCrypt.
+///   4. Hash the new password.
+///   5. Call account.ChangePassword() which internally revokes all refresh tokens.
+///   6. Persist via SaveChangesAsync.
+///   7. Publish PasswordChangedEvent → SecurityAlertEmailHandler sends alert email.
 /// </summary>
 public sealed class ChangePasswordCommandHandler
     : IRequestHandler<ChangePasswordCommand, Result<bool>>

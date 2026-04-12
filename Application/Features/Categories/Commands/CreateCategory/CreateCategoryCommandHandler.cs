@@ -42,7 +42,6 @@ public sealed class CreateCategoryCommandHandler
         if (nameExists)
             throw new ConflictException(nameof(Category), "Name", command.Name);
 
-        // Upload cover image to S3 before creating the entity
         string coverImageUrl = await _fileStorageService.UploadAsync(
             command.CoverImageStream,
             command.CoverImageFileName,
@@ -61,8 +60,7 @@ public sealed class CreateCategoryCommandHandler
             await _unitOfWork.Repository<Category>().AddAsync(category, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex)
-            when (ex.InnerException is PostgresException { SqlState: "23505" })
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
             await _fileStorageService.DeleteAsync(coverImageUrl, cancellationToken);
             throw new ConflictException(nameof(Category), "Name", command.Name);
@@ -77,4 +75,9 @@ public sealed class CreateCategoryCommandHandler
 
         return Result<Guid>.Success(category.Id, "Category created successfully.");
     }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+        => ex.InnerException?.Message.Contains("23505") == true
+        || ex.InnerException?.Message.Contains("unique constraint") == true
+        || ex.InnerException?.Message.Contains("unique_violation") == true;
 }

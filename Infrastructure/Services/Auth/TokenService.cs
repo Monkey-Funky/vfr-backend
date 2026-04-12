@@ -185,11 +185,6 @@ public sealed class TokenService : ITokenService
 
         var handler = new JwtSecurityTokenHandler();
 
-        // FIX F-05: Reuse the cached singleton RsaKey instead of creating a new RSA instance
-        // on every call. The previous implementation called RSA.Create() + ImportParameters()
-        // per invocation and never disposed the resulting RSA object, leaking OS-level crypto
-        // handles under load. RsaSecurityKey wrapping the private-key RSA instance can still
-        // validate signatures — it uses the public modulus/exponent internally.
         var parameters = new TokenValidationParameters
         {
             ValidateIssuer = true,

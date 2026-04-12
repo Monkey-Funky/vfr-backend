@@ -13,36 +13,19 @@ namespace Application.Features.Auth.Commands.RegisterStep2;
 /// FLOW:
 ///   1. Validate and decode TempStepToken — verify signature, expiry, token_type claim
 ///   2. Extract and validate temp_account_id and step claims
-///   3. Load the partial RetailerAccount from DB
+///   3. Load the partial RetailerAccount
 ///   4. Verify it is still in PendingEmailVerification status (replay attack guard)
-///   5. Upload brand logo to S3 (if provided)
-///   6. Call account.CompleteRegistration(...) — sets Status = Active, IsEmailVerified = true
-///   7. Atomic transaction via ExecuteInTransactionAsync:
-///        a. Update RetailerAccount (Status → Active)
+///   5. Upload brand logo to blob storage (if provided)
+///   6. Call account.CompleteRegistration(...) — sets Status = Active
+///   7. Begin DB transaction:
+///        a. Update RetailerAccount
 ///        b. Seed NotificationPreference record
-///        c. SaveChangesAsync inside the lambda
-///        d. Commit (by ExecuteInTransactionAsync) — or rollback on failure
-///   8. On transaction failure: delete the uploaded S3 object (FIX F-06 — orphan prevention)
-///   9. Send verification welcome email (fire-and-forget — does not block response)
-///  10. Generate tokens, store hashed refresh token, return AuthTokenResponse
-///
-/// FIX F-02 — token_type claim validation:
-///   Step tokens carry a "token_type":"step" claim validated here so no other
-///   token type is accepted even if it passes HS256 signature verification.
-///
-/// FIX F-05 — IsEmailVerified:
-///   CompleteRegistration() now calls MarkEmailVerified() internally so
-///   IsEmailVerified = true for all email-registered accounts after Step 2.
-///
-/// FIX F-06 — Orphaned S3 objects on transaction failure:
-///   If the DB transaction rolls back after a logo was already uploaded to S3,
-///   we delete the S3 object before rethrowing, so no orphaned objects accumulate.
-///
-/// TRANSACTION COMPATIBILITY:
-///   Uses ExecuteInTransactionAsync (instead of BeginTransactionAsync / CommitTransactionAsync)
-///   to be compatible with NpgsqlRetryingExecutionStrategy (EnableRetryOnFailure).
-///   See UnitOfWork.ExecuteInTransactionAsync for the full explanation.
+///        c. Commit (atomic)
+///        d. On failure: rollback DB AND delete uploaded S3 object (FIX F-06)
+///   8. Send verification email (fire-and-forget — does not block the response)
+///   9. Generate and store tokens, return AuthTokenResponse
 /// </summary>
+
 public sealed class RegisterStep2CommandHandler
     : IRequestHandler<RegisterStep2Command, Result<AuthTokenResponse>>
 {
@@ -78,12 +61,12 @@ public sealed class RegisterStep2CommandHandler
 
         if (principal is null)
         {
-            throw new UnauthorizedException(
+            // UnauthorizedAccessException → HTTP 401 (correct: authentication failure)
+            throw new UnauthorizedAccessException(
                 "The registration step token is invalid or has expired. " +
                 "Please restart registration from Step 1.");
         }
 
-        // FIX F-02: Validate the explicit token_type claim.
         // A valid HS256 signature alone is not enough — the token must declare itself
         // as a "step" token, so other token types cannot be substituted here.
         string? tokenType = principal.FindFirst("token_type")?.Value;
@@ -91,7 +74,9 @@ public sealed class RegisterStep2CommandHandler
         {
             _logger.LogWarning(
                 "RegisterStep2 — token_type claim is '{TokenType}', expected 'step'.", tokenType);
-            throw new UnauthorizedException(
+
+            // UnauthorizedAccessException → HTTP 401
+            throw new UnauthorizedAccessException(
                 "The provided token is not a valid registration step token.");
         }
 
@@ -99,14 +84,16 @@ public sealed class RegisterStep2CommandHandler
         string? tempIdClaim = principal.FindFirst("temp_account_id")?.Value;
         if (!Guid.TryParse(tempIdClaim, out Guid tempAccountId) || tempAccountId == Guid.Empty)
         {
-            throw new UnauthorizedException(
+            // UnauthorizedAccessException → HTTP 401
+            throw new UnauthorizedAccessException(
                 "The registration step token contains invalid account data.");
         }
 
         string? stepClaim = principal.FindFirst("step")?.Value;
         if (stepClaim != "1")
         {
-            throw new UnauthorizedException(
+            // UnauthorizedAccessException → HTTP 401
+            throw new UnauthorizedAccessException(
                 "The registration step token is not a valid Step 1 token.");
         }
 
@@ -159,7 +146,6 @@ public sealed class RegisterStep2CommandHandler
         // ── 6. Complete registration (domain method) ───────────────────────────
         //
         // Sets AccountStatus = Active, BusinessType, Has3DModels, BrandLogoUrl.
-        // FIX F-05: Also sets IsEmailVerified = true (see CompleteRegistration implementation).
         account.CompleteRegistration(command.BusinessType, command.Has3DModels, brandLogoUrl);
 
         // ── 7. Atomic transaction: update account + seed NotificationPreference ─
@@ -191,7 +177,6 @@ public sealed class RegisterStep2CommandHandler
         }
         catch
         {
-            // FIX F-06: If the DB transaction failed AFTER the S3 upload succeeded,
             // delete the orphaned S3 object so it does not accumulate in the bucket.
             // Use CancellationToken.None — the request token may already be cancelled.
             if (brandLogoUrl is not null)

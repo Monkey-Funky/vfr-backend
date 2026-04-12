@@ -63,7 +63,7 @@ public sealed class DeleteCategoryCommandHandler
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
             // Step 1: Set offers with this category → Inactive (+ stamp UpdatedAt)
-            // BUG-001 FIX: UpdatedAt set explicitly — ExecuteUpdateAsync bypasses SaveChangesAsync.
+            // FIX: Offer.OfferStatus.Inactive is a const string in the nested class.
             await _context.Offers
                 .Where(o => o.CategoryId == command.CategoryId)
                 .ExecuteUpdateAsync(
@@ -91,10 +91,10 @@ public sealed class DeleteCategoryCommandHandler
                     ct);
 
             // Step 4: Soft-delete the category itself
-            // SaveChangesAsync stamps UpdatedAt via the ApplicationDbContext override.
             category.MarkAsDeleted();
             await _unitOfWork.Repository<Category>().UpdateAsync(category, ct);
             await _unitOfWork.SaveChangesAsync(ct);
+
         }, cancellationToken);
 
         // Delete the cover image from S3 after the DB transaction commits successfully

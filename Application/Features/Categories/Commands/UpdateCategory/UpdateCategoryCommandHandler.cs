@@ -60,7 +60,6 @@ public sealed class UpdateCategoryCommandHandler
         if (command.NewCoverImageStream is not null
             && command.NewCoverImageFileName is not null)
         {
-            // Remember old URL so we can delete it from S3 after a successful save
             oldCoverImageUrl = category.CoverImageUrl;
 
             newCoverImageUrl = await _fileStorageService.UploadAsync(
@@ -82,8 +81,7 @@ public sealed class UpdateCategoryCommandHandler
             await _unitOfWork.Repository<Category>().UpdateAsync(category, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex)
-            when (ex.InnerException is PostgresException { SqlState: "23505" })
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
             if (newCoverImageUrl is not null)
                 await _fileStorageService.DeleteAsync(newCoverImageUrl, cancellationToken);
@@ -104,4 +102,9 @@ public sealed class UpdateCategoryCommandHandler
 
         return Result<bool>.Success(true, "Category updated successfully.");
     }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+        => ex.InnerException?.Message.Contains("23505") == true
+        || ex.InnerException?.Message.Contains("unique constraint") == true
+        || ex.InnerException?.Message.Contains("unique_violation") == true;
 }

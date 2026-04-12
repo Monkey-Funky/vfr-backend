@@ -44,7 +44,6 @@ public sealed class PlanLimitService : IPlanLimitService
 
         if (subscriptionData is null)
         {
-            // No subscription — no limit to enforce
             _logger.LogWarning(
                 "PlanLimitService: No subscription found for retailer {RetailerId}. Limit check skipped.",
                 retailerId);
@@ -60,14 +59,14 @@ public sealed class PlanLimitService : IPlanLimitService
             return;
         }
 
-        // Step 3: Count active products for this retailer
+        // Step 3: Count active products for this retailer.
         // Global query filter handles IsDeleted = false automatically.
         // Status = 'Active' filter applied explicitly.
+        // NOTE: Product.Status is a string column; the Product stub does not define it
+        // yet — P-020 will add it. Until then, this counts all non-deleted products.
         int activeCount = await _context.Products
             .AsNoTracking()
-            .CountAsync(
-                p => p.RetailerId == retailerId && p.Status == "Active",
-                cancellationToken);
+            .CountAsync(p => p.RetailerId == retailerId, cancellationToken);
 
         _logger.LogDebug(
             "PlanLimitService: Retailer {RetailerId} has {Count}/{Max} active products on plan '{Plan}'.",
@@ -79,8 +78,8 @@ public sealed class PlanLimitService : IPlanLimitService
             throw new BusinessRuleException(
                 "PRODUCT_LIMIT_REACHED",
                 $"You have reached your plan's limit of {subscriptionData.MaxActiveProducts} active products. " +
-                $"Please upgrade to a higher-tier plan to add more products, " +
-                $"or deactivate existing products to free up capacity.");
+                "Please upgrade to a higher-tier plan to add more products, " +
+                "or deactivate existing products to free up capacity.");
         }
     }
 }

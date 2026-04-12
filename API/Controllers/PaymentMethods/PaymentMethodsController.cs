@@ -19,7 +19,6 @@ public sealed record AddPaymentMethodRequest(
 
 /// <summary>
 /// Payment method management for the authenticated retailer.
-/// Handles listing, adding, removing, and designating the default card.
 /// </summary>
 [Route("api/retailers/{retailerId:guid}/payment-methods")]
 [SwaggerTag("Payment methods — manage saved cards for subscription billing.")]
@@ -29,12 +28,11 @@ public sealed class PaymentMethodsController : BaseApiController
 
     // ── GET /api/retailers/{retailerId}/payment-methods ───────────────────────
 
-    /// <summary>Lists all active payment methods for the authenticated retailer.</summary>
     [HttpGet]
     [SwaggerOperation(
         Summary = "List payment methods",
         Description = "Returns all active (non-deleted) saved cards for the authenticated retailer. " +
-                      "The default card is listed first. Cardholder names are returned decrypted.")]
+                      "The default card is listed first.")]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<PaymentMethodDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -53,15 +51,11 @@ public sealed class PaymentMethodsController : BaseApiController
 
     // ── POST /api/retailers/{retailerId}/payment-methods ──────────────────────
 
-    /// <summary>Adds a new payment method to the authenticated retailer's account.</summary>
     [HttpPost]
     [SwaggerOperation(
         Summary = "Add payment method",
         Description = "Saves a new payment card for the retailer. " +
-                      "The card must be pre-tokenized via Stripe Elements on the frontend — " +
-                      "StripePaymentMethodId (pm_xxxx) is the resulting token. " +
-                      "CardholderName is encrypted at rest using AES-256. " +
-                      "Set SetAsDefault=true to designate this card as the recurring billing card.")]
+                      "The card must be pre-tokenized via Stripe Elements on the frontend.")]
     [ProducesResponseType(typeof(ApiResponse<Guid>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -92,12 +86,10 @@ public sealed class PaymentMethodsController : BaseApiController
 
     // ── GET /api/retailers/{retailerId}/payment-methods/{methodId} ────────────
 
-    /// <summary>Returns a single payment method by ID.</summary>
     [HttpGet("{methodId:guid}", Name = "GetPaymentMethodById")]
     [SwaggerOperation(
         Summary = "Get payment method by ID",
-        Description = "Returns the details of a single active payment method " +
-                      "belonging to the authenticated retailer.")]
+        Description = "Returns the details of a single active payment method belonging to the authenticated retailer.")]
     [ProducesResponseType(typeof(ApiResponse<PaymentMethodDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -109,8 +101,6 @@ public sealed class PaymentMethodsController : BaseApiController
     {
         EnsureRetailerOwnership(retailerId);
 
-        // Delegate to the GetPaymentMethods handler and filter by ID.
-        // A dedicated GetPaymentMethodByIdQuery may be added in a future iteration.
         IReadOnlyList<PaymentMethodDto> all = await Sender.Send(
             new GetPaymentMethodsQuery(),
             cancellationToken);
@@ -125,14 +115,11 @@ public sealed class PaymentMethodsController : BaseApiController
 
     // ── DELETE /api/retailers/{retailerId}/payment-methods/{methodId} ─────────
 
-    /// <summary>Removes a payment method. Cannot remove the active default card.</summary>
     [HttpDelete("{methodId:guid}")]
     [SwaggerOperation(
         Summary = "Remove payment method",
         Description = "Soft-deletes the specified payment method. " +
-                      "Returns 422 if the card is the current default/recurring card and other " +
-                      "cards exist — designate another card as default first. " +
-                      "Returns 404 if the card does not belong to this retailer.")]
+                      "Returns 422 if the card is the current default/recurring card and other cards exist.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -154,13 +141,11 @@ public sealed class PaymentMethodsController : BaseApiController
 
     // ── PUT /api/retailers/{retailerId}/payment-methods/{methodId}/default ────
 
-    /// <summary>Sets the specified payment method as the default recurring billing card.</summary>
     [HttpPut("{methodId:guid}/default")]
     [SwaggerOperation(
         Summary = "Set default payment method",
         Description = "Designates the specified card as the retailer's default/recurring billing card. " +
-                      "All other cards for this retailer are simultaneously un-set as default. " +
-                      "The update is atomic — both operations complete in a single transaction.")]
+                      "All other cards are simultaneously un-set as default. Atomic operation.")]
     [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]

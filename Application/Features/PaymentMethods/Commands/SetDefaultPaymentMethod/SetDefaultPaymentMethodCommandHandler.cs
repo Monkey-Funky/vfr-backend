@@ -25,8 +25,6 @@ public sealed class SetDefaultPaymentMethodCommandHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // BUG-008 FIX: No longer using fragile "as List<T>" cast.
-        // FindAsync returns IReadOnlyList<T> — we use it directly and call ToList() only when needed.
         IReadOnlyList<PaymentMethod> allMethods = await _unitOfWork
             .Repository<PaymentMethod>()
             .FindAsync(
@@ -37,7 +35,6 @@ public sealed class SetDefaultPaymentMethodCommandHandler
             throw new NotFoundException(
                 "No payment methods found for this retailer.");
 
-        // ── Locate target card (IDOR guard: must belong to retailer) ──────────
         PaymentMethod? target = allMethods
             .FirstOrDefault(pm => pm.Id == command.PaymentMethodId);
 
@@ -48,26 +45,20 @@ public sealed class SetDefaultPaymentMethodCommandHandler
             return Result<bool>.Success(
                 true, "This card is already your default payment method.");
 
-        // BUG-007 FIX: Reject expired cards — SetAsDefault() also validates this
-        // in the domain method, but checking here gives a clearer error before
-        // entering the transaction.
         if (target.IsExpired)
             throw new BusinessRuleException(
                 "PAYMENT_METHOD_EXPIRED_DEFAULT",
                 $"Card ending in {target.CardNumberLast4} expired on {target.ExpiryDate} " +
                 "and cannot be set as default. Please add a valid card first.");
 
-        // ── Atomically swap default flag ──────────────────────────────────────
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
-            // Un-set all current defaults.
             foreach (PaymentMethod method in allMethods.Where(pm => pm.IsDefault))
             {
                 method.UnsetDefault();
                 await _unitOfWork.Repository<PaymentMethod>().UpdateAsync(method, ct);
             }
 
-            // Set the target as default (domain method validates expiry again).
             target.SetAsDefault();
             await _unitOfWork.Repository<PaymentMethod>().UpdateAsync(target, ct);
 

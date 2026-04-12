@@ -31,8 +31,6 @@ public sealed class SubmitSaasEnquiryCommandHandler
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
         // BUG-005 FIX: Block BOTH Pending AND InProgress enquiries.
-        // Previously only Pending was blocked — if an enquiry moved to InProgress,
-        // the retailer could submit a second one, creating duplicate active enquiries.
         bool hasActiveEnquiry = await _unitOfWork
             .Repository<SaasEnquiry>()
             .AnyAsync(
@@ -47,13 +45,11 @@ public sealed class SubmitSaasEnquiryCommandHandler
                 "Our team will contact you shortly. You cannot submit another enquiry " +
                 "while an existing one is Pending or In Progress.");
 
-        // ── Create the enquiry ────────────────────────────────────────────────
         SaasEnquiry enquiry = SaasEnquiry.Create(retailerId);
 
         await _unitOfWork.Repository<SaasEnquiry>().AddAsync(enquiry, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // ── Publish domain event AFTER successful save ────────────────────────
         await _publisher.Publish(
             new SaasEnquirySubmittedDomainEvent(
                 EnquiryId: enquiry.Id,

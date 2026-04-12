@@ -35,9 +35,7 @@ public sealed class CreateSubCategoryCommandHandler
             cancellationToken)
             ?? throw new NotFoundException(nameof(Category), command.ParentCategoryId);
 
-        // Step 2: Depth limit enforcement — parent must be a Category, not a SubCategory.
-        // A SubCategory ID cannot exist in the Category table under normal data integrity.
-        // This belt-and-suspenders check guards against abnormal states.
+        // Step 2: Depth limit — parent must be a Category (not itself a SubCategory)
         bool parentIsSubCategory = await _unitOfWork.Repository<SubCategory>().AnyAsync(
             sc => sc.Id == command.ParentCategoryId,
             cancellationToken);
@@ -67,10 +65,8 @@ public sealed class CreateSubCategoryCommandHandler
             await _unitOfWork.Repository<SubCategory>().AddAsync(subCategory, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex)
-            when (ex.InnerException is PostgresException { SqlState: "23505" })
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
         {
-            // Convert the DB constraint violation to a clean 409 Conflict instead of a 500.
             throw new ConflictException(nameof(SubCategory), "Name", command.Name);
         }
 
@@ -78,4 +74,9 @@ public sealed class CreateSubCategoryCommandHandler
 
         return Result<Guid>.Success(subCategory.Id, "Sub-category created successfully.");
     }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+        => ex.InnerException?.Message.Contains("23505") == true
+        || ex.InnerException?.Message.Contains("unique constraint") == true
+        || ex.InnerException?.Message.Contains("unique_violation") == true;
 }

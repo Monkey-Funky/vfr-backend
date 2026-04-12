@@ -1,8 +1,6 @@
 ﻿using Application.Interfaces.External;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
-using Domain.Entities.Retailer;
-using Domain.Entities.Subscriptions;
 using Domain.Enums.Subscription;
 using Microsoft.EntityFrameworkCore;
 
@@ -63,16 +61,13 @@ public sealed class SelectPlanCommandHandler
                 "The selected payment method does not have a valid Stripe token. " +
                 "Please re-add your payment method.");
 
-        // BUG-007 FIX: Reject expired payment method before touching Stripe.
         if (paymentMethod.IsExpired)
             throw new BusinessRuleException(
                 "PAYMENT_METHOD_EXPIRED",
                 $"Card ending in {paymentMethod.CardNumberLast4} expired on {paymentMethod.ExpiryDate}. " +
                 "Please add a valid payment method and try again.");
 
-        // ── Check for an existing subscription (pre-check only — not the lock) ─
-        // This is a quick UX check. The authoritative check happens inside the transaction
-        // with a tracked load to prevent the BUG-001 race condition.
+        // ── Pre-check for existing subscription ───────────────────────────────
         Subscription? preCheckSubscription = await _unitOfWork
             .Repository<Subscription>()
             .FirstOrDefaultAsync(s => s.RetailerId == retailerId, cancellationToken);
@@ -92,7 +87,7 @@ public sealed class SelectPlanCommandHandler
         {
             "Yearly" => now.AddYears(1),
             "Monthly" => now.AddMonths(1),
-            _ => now.AddYears(1) // SaaS defaults to yearly
+            _ => now.AddYears(1)
         };
 
         Guid subscriptionId = Guid.Empty;
@@ -101,17 +96,11 @@ public sealed class SelectPlanCommandHandler
         {
             await _unitOfWork.ExecuteInTransactionAsync(async ct =>
             {
-                // ── BUG-001 FIX (Layer 2): Load tracked entity for optimistic concurrency ──
-                // By loading the entity WITH tracking and using xmin concurrency token,
-                // any concurrent modification by another request will cause
-                // DbUpdateConcurrencyException on SaveChangesAsync.
                 Subscription? existingSubscription = preCheckSubscription is null
                     ? null
                     : await _unitOfWork.GetTrackedByIdAsync<Subscription>(
                         preCheckSubscription.Id, ct);
 
-                // Re-verify state inside transaction — the state could have changed since
-                // the pre-check due to a concurrent request.
                 if (existingSubscription is not null
                     && existingSubscription.Status == SubscriptionStatus.Active
                     && existingSubscription.PlanId == plan.Id)
@@ -121,7 +110,7 @@ public sealed class SelectPlanCommandHandler
                         "You are already subscribed to this plan.");
                 }
 
-                // ── Step 1: Create payment record (Pending) ───────────────────
+                // Step 1: Create payment record (Pending)
                 SubscriptionPayment payment = SubscriptionPayment.Create(
                     retailerId: retailerId,
                     subscriptionPlanId: plan.Id,
@@ -135,11 +124,11 @@ public sealed class SelectPlanCommandHandler
                 await _unitOfWork.Repository<SubscriptionPayment>().AddAsync(payment, ct);
                 await _unitOfWork.SaveChangesAsync(ct);
 
-                // ── Step 2: Mark payment as Processing, save ──────────────────
+                // Step 2: Mark as Processing
                 payment.MarkProcessing();
                 await _unitOfWork.SaveChangesAsync(ct);
 
-                // ── Step 3: Charge Stripe ─────────────────────────────────────
+                // Step 3: Charge Stripe
                 PaymentResult result = await _paymentGateway.ChargeAsync(
                     paymentMethod.StripePaymentMethodId!,
                     plan.PriceAmount,
@@ -155,16 +144,13 @@ public sealed class SelectPlanCommandHandler
                         $"Payment failed: {result.ErrorMessage}. Please try a different payment method.");
                 }
 
-                // ── BUG-002 FIX: Save Completed + StripePaymentIntentId FIRST ──
-                // This ensures the payment is durably recorded even if the subscription
-                // step below fails. The reconciliation job can detect this state.
+                // BUG-002 FIX: Save Completed + StripePaymentIntentId BEFORE subscription step
                 payment.MarkCompleted(result.StripePaymentIntentId!);
                 await _unitOfWork.SaveChangesAsync(ct);
 
-                // ── Step 4: Create or activate the subscription ───────────────
+                // Step 4: Create or activate the subscription
                 if (existingSubscription is null)
                 {
-                    // New subscription (no prior record for this retailer)
                     Subscription subscription = Subscription.Create(
                         retailerId: retailerId,
                         planId: plan.Id,
@@ -178,7 +164,6 @@ public sealed class SelectPlanCommandHandler
                 }
                 else
                 {
-                    // Transition from Trial → Active (or re-activating from another state)
                     existingSubscription.Activate(periodEnd);
 
                     if (existingSubscription.PlanId != plan.Id)
@@ -193,32 +178,23 @@ public sealed class SelectPlanCommandHandler
         }
         catch (DbUpdateConcurrencyException)
         {
-            // BUG-001 FIX (Layer 2): Concurrent modification detected via xmin token.
-            // The other request already changed the subscription state.
             throw new ConflictException(
                 "A concurrent subscription operation was detected. " +
                 "Please check your subscription status and retry if needed.");
         }
         catch (DbUpdateException dbEx) when (IsUniqueConstraintViolation(dbEx))
         {
-            // BUG-001 FIX (Layer 1): DB unique constraint on retailer_id fired.
-            // Another request already created a subscription for this retailer.
             throw new ConflictException(
                 "A subscription was already created for this account by a concurrent request. " +
                 "Please check your current subscription status.");
         }
 
-        // ── Invalidate relevant caches ────────────────────────────────────────
         await _cacheService.RemoveByPrefixAsync(
             $"subscriptions:{retailerId}:", cancellationToken);
 
         return Result<Guid>.Success(subscriptionId, "Plan selected and activated successfully.");
     }
 
-    /// <summary>
-    /// Detects PostgreSQL unique constraint violations.
-    /// Error code "23505" = unique_violation in PostgreSQL.
-    /// </summary>
     private static bool IsUniqueConstraintViolation(DbUpdateException ex)
         => ex.InnerException?.Message.Contains("23505") == true
         || ex.InnerException?.Message.Contains("unique constraint") == true

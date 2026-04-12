@@ -20,13 +20,11 @@ public sealed class SubscriptionPlansController : ControllerBase
 {
     private ISender? _sender;
 
-    /// <summary>Lazily resolved MediatR sender — see BaseApiController §2.2 for rationale.</summary>
     private ISender Sender =>
         _sender ??= HttpContext.RequestServices.GetRequiredService<ISender>();
 
     // ── GET /api/subscription-plans ───────────────────────────────────────────
 
-    /// <summary>Returns all active subscription plans, grouped by tier.</summary>
     [HttpGet]
     [SwaggerOperation(
         Summary = "Get all subscription plans",
@@ -49,7 +47,6 @@ public sealed class SubscriptionPlansController : ControllerBase
 
     // ── GET /api/subscription-plans/{planId} ──────────────────────────────────
 
-    /// <summary>Returns a single active subscription plan by ID.</summary>
     [HttpGet("{planId:guid}", Name = "GetSubscriptionPlanById")]
     [SwaggerOperation(
         Summary = "Get subscription plan by ID",

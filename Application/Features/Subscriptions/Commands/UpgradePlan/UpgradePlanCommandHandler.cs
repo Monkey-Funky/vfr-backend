@@ -84,14 +84,13 @@ public sealed class UpgradePlanCommandHandler
                 "PAYMENT_METHOD_NOT_TOKENIZED",
                 "The selected payment method does not have a valid Stripe token.");
 
-        // BUG-007 FIX: Reject expired payment method before touching Stripe.
         if (paymentMethod.IsExpired)
             throw new BusinessRuleException(
                 "PAYMENT_METHOD_EXPIRED",
                 $"Card ending in {paymentMethod.CardNumberLast4} expired on {paymentMethod.ExpiryDate}. " +
                 "Please add a valid payment method and try again.");
 
-        // ── BUG-006 FIX: Calculate prorated charge with actual dates and decimal arithmetic ──
+        // ── Calculate prorated charge ─────────────────────────────────────────
         DateTime now = DateTime.UtcNow;
 
         decimal proratedAmount = CalculateProratedCharge(
@@ -111,7 +110,7 @@ public sealed class UpgradePlanCommandHandler
                 if (trackedSubscription is null)
                     throw new NotFoundException(nameof(Subscription), subscription.Id);
 
-                // ── Step 1: Create prorated payment record ────────────────────
+                // Step 1: Create prorated payment record
                 SubscriptionPayment payment = SubscriptionPayment.Create(
                     retailerId: retailerId,
                     subscriptionPlanId: newPlan.Id,
@@ -126,7 +125,7 @@ public sealed class UpgradePlanCommandHandler
                 payment.MarkProcessing();
                 await _unitOfWork.SaveChangesAsync(ct);
 
-                // ── Step 2: Charge Stripe ─────────────────────────────────────
+                // Step 2: Charge Stripe
                 PaymentResult result = await _paymentGateway.ChargeAsync(
                     paymentMethod.StripePaymentMethodId!,
                     proratedAmount,
@@ -142,11 +141,11 @@ public sealed class UpgradePlanCommandHandler
                         $"Prorated payment failed: {result.ErrorMessage}.");
                 }
 
-                // BUG-002 FIX: Save Completed payment BEFORE subscription update.
+                // BUG-002 FIX: Save Completed payment BEFORE subscription update
                 payment.MarkCompleted(result.StripePaymentIntentId!);
                 await _unitOfWork.SaveChangesAsync(ct);
 
-                // ── Step 3: Apply the upgrade immediately ─────────────────────
+                // Step 3: Apply the upgrade immediately
                 trackedSubscription.UpgradePlan(newPlan.Id);
                 await _unitOfWork.Repository<Subscription>().UpdateAsync(trackedSubscription, ct);
                 await _unitOfWork.SaveChangesAsync(ct);
@@ -155,20 +154,17 @@ public sealed class UpgradePlanCommandHandler
         }
         catch (DbUpdateConcurrencyException)
         {
-            // BUG-001 FIX: Concurrent upgrade detected — another request modified this subscription.
             throw new ConflictException(
                 "A concurrent subscription operation was detected. " +
                 "Please check your subscription status and retry if needed.");
         }
 
-        // ── Invalidate caches ─────────────────────────────────────────────────
         await _cacheService.RemoveByPrefixAsync(
             $"subscriptions:{retailerId}:", cancellationToken);
 
         return Result<bool>.Success(true, $"Successfully upgraded to the '{newPlan.Name}' plan.");
     }
 
-    
     private static decimal CalculateProratedCharge(
         decimal oldPlanPrice,
         decimal newPlanPrice,
@@ -177,14 +173,12 @@ public sealed class UpgradePlanCommandHandler
     {
         DateTime now = DateTime.UtcNow;
 
-        // Use actual days in this specific billing period (handles leap years, month lengths)
         decimal totalDays = (decimal)(periodEndDate - periodStartDate).TotalDays;
         decimal daysRemaining = (decimal)Math.Max((periodEndDate - now).TotalDays, 0.0);
 
         if (totalDays <= 0m)
             return 0m;
 
-        // Pure decimal arithmetic — no double or int division
         decimal dailyDelta = (newPlanPrice - oldPlanPrice) / totalDays;
         decimal prorated = decimal.Round(
             dailyDelta * daysRemaining,

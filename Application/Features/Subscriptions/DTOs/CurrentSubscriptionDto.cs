@@ -19,18 +19,8 @@ public sealed record CurrentSubscriptionDto(
     SubscriptionPlanDto? PendingDowngradePlan,
 
     // ── UI Button State ────────────────────────────────────────────────────────
-    // The frontend uses these flags to show/hide action buttons, avoiding
-    // business-rule duplication in the client.
-
-    /// <summary>True when an upgrade action button should be shown.</summary>
     bool CanUpgrade,
-
-    /// <summary>True when a downgrade action button should be shown.</summary>
     bool CanDowngrade,
-
-    /// <summary>True when a cancel subscription button should be shown.</summary>
     bool CanCancel,
-
-    /// <summary>True when a start-trial button should be shown.</summary>
     bool CanStartTrial
 );

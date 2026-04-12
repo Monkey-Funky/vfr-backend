@@ -61,10 +61,9 @@ public sealed class GetCategoriesQueryHandler
             .OrderBy(c => c.Name)
             .Skip((query.PageNumber - 1) * query.PageSize)
             .Take(query.PageSize)
-            // BUG-008 FIX: Removed .AsSplitQuery() — no Include() is present here.
             .ToListAsync(cancellationToken);
 
-        // Fetch sub-category counts in a single IN query to avoid N+1
+        // Fetch sub-category counts in a single IN query — avoids N+1
         List<Guid> categoryIds = categories.Select(c => c.Id).ToList();
 
         Dictionary<Guid, int> subCountByCategory = await _context.SubCategories
