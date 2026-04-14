@@ -111,6 +111,30 @@ public sealed class CustomerAccount : BaseEntity
         UpdatedAt = DateTime.UtcNow;
     }
 
+    public void UpdateProfile(string fullName, string? phoneNumber, DateOnly? dateOfBirth, string? gender)
+    {
+        if (!CustomerStatus.IsValid(Status))
+            throw new BusinessRuleException("INVALID_STATUS", "Action not allowed in current account status.");
+
+        if (gender is not null && !new[] { "Male", "Female", "Other", "PreferNotToSay" }.Contains(gender))
+            throw new BusinessRuleException("INVALID_GENDER", "Provided gender is invalid.");
+
+        FullName = string.IsNullOrWhiteSpace(fullName) ? FullName : fullName.Trim();
+        PhoneNumber = phoneNumber?.Trim();
+        DateOfBirth = dateOfBirth;
+        Gender = gender;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void SetPendingDeletion()
+    {
+        if (!CustomerStatus.IsValid(Status))
+            throw new BusinessRuleException("INVALID_STATUS", "Action not allowed in current account status.");
+            
+        Status = CustomerStatus.PendingDeletion;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
     public void UpdateRefreshToken(string hash, DateTime expiresAt, bool rememberMe)
     {
         RefreshTokenHash = hash;

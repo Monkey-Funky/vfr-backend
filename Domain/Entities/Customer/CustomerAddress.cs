@@ -54,9 +54,15 @@ public sealed class CustomerAddress : BaseEntity
         };
     }
 
-    public void MarkAsDefault(bool isDefault)
+    public void SetAsDefault()
     {
-        IsDefault = isDefault;
+        IsDefault = true;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void UnsetDefault()
+    {
+        IsDefault = false;
         UpdatedAt = DateTime.UtcNow;
     }
 
