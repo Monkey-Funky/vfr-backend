@@ -1,4 +1,4 @@
-﻿namespace Application.Interfaces.Services;
+namespace Application.Interfaces.Services;
 /// <summary>
 /// Provides identity information for the authenticated retailer extracted
 /// from the validated RS256 JWT token. RetailerId is ALWAYS sourced from
@@ -8,9 +8,15 @@ public interface ICurrentUserService
 {
     /// <summary>
     /// The authenticated retailer's ID — extracted from the JWT 'sub' claim.
-    /// Null if the request is unauthenticated.
+    /// Null if the request is unauthenticated or the role is not Retailer.
     /// </summary>
     Guid? RetailerId { get; }
+
+    /// <summary>
+    /// The authenticated customer's ID — extracted from the JWT 'sub' claim.
+    /// Null if the request is unauthenticated or the role is not Customer.
+    /// </summary>
+    Guid? CustomerId { get; }
 
     string? UserId { get; }
     string? UserName { get; }

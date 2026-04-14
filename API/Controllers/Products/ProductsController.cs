@@ -1,4 +1,5 @@
-﻿using API.Controllers.Products.Requests;
+﻿using API.Controllers.BaseControllers;
+using API.Controllers.Products.Requests;
 using Application.Common;
 using Application.Features.Products.Commands.AddProductImage;
 using Application.Features.Products.Commands.CreateProduct;
@@ -43,7 +44,7 @@ namespace API.Controllers.Products;
 /// </summary>
 [SwaggerTag("Products — full catalogue management including image uploads")]
 [Route("api/retailers/{retailerId:guid}/products")]
-public sealed class ProductsController : BaseApiController
+public sealed class ProductsController : RetailerBaseApiController
 {
     // =========================================================================
     // 1. GET /products

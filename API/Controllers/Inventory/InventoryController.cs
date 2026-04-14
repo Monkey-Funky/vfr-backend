@@ -1,4 +1,5 @@
-﻿using Application.Features.Inventory.Commands.AdjustStock;
+﻿using API.Controllers.BaseControllers;
+using Application.Features.Inventory.Commands.AdjustStock;
 using Application.Features.Inventory.Commands.DeleteInventoryRecord;
 using Application.Features.Inventory.Commands.SetLowStockThreshold;
 using Application.Features.Inventory.DTOs;
@@ -18,7 +19,7 @@ namespace API.Controllers.Inventory;
 /// </summary>
 [SwaggerTag("Inventory — manage product stock levels and adjustments")]
 [Route("api/retailers/{retailerId:guid}/inventory")]
-public sealed class InventoryController : BaseApiController
+public sealed class InventoryController : RetailerBaseApiController
 {
     // =========================================================================
     // GET /api/retailers/{retailerId}/inventory

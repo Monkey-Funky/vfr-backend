@@ -1,4 +1,4 @@
-﻿using Application.Interfaces.Services;
+using Application.Interfaces.Services;
 
 namespace API.Services;
 public sealed class CurrentUserService : ICurrentUserService
@@ -15,11 +15,19 @@ public sealed class CurrentUserService : ICurrentUserService
 
     /// <summary>
     /// RetailerId extracted from the JWT 'sub' claim.
-    /// The JWT is issued with sub = retailer's Guid during login.
-    /// This is the ONLY authoritative source of the tenant identity.
+    /// Only returns a value if the user is in the "Retailer" role.
     /// </summary>
     public Guid? RetailerId =>
-        Guid.TryParse(User?.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
+        IsInRole("Retailer") && Guid.TryParse(User?.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
+            ? id
+            : null;
+
+    /// <summary>
+    /// CustomerId extracted from the JWT 'sub' claim.
+    /// Only returns a value if the user is in the "Customer" role.
+    /// </summary>
+    public Guid? CustomerId =>
+        IsInRole("Customer") && Guid.TryParse(User?.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
             ? id
             : null;
 

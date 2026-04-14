@@ -1,4 +1,5 @@
-﻿using API.Controllers.Offers.Requests;
+﻿using API.Controllers.BaseControllers;
+using API.Controllers.Offers.Requests;
 using Application.Common;
 using Application.Features.Offers.Commands.CreateOffer;
 using Application.Features.Offers.Commands.DeleteOffer;
@@ -19,7 +20,7 @@ namespace API.Controllers.Offers;
 /// </summary>
 [Route("api/retailers/{retailerId:guid}/offers")]
 [SwaggerTag("Offers — create, retrieve, update, toggle, and delete promotional offers.")]
-public sealed class OffersController : BaseApiController
+public sealed class OffersController : RetailerBaseApiController
 {
     // ── GET /api/retailers/{retailerId}/offers ─────────────────────────────────
 

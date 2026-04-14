@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 ﻿using Application.Features.Subscriptions.Commands.CancelSubscription;
+=======
+﻿using API.Controllers.BaseControllers;
+>>>>>>> 5b75d8e (feat(customer-auth): complete Phase 1 identity foundation, auth controller, and database migrations)
 using Application.Features.Subscriptions.Commands.DowngradePlan;
 using Application.Features.Subscriptions.Commands.SelectPlan;
 using Application.Features.Subscriptions.Commands.StartTrial;
@@ -33,8 +37,13 @@ public sealed record DowngradePlanRequest(
 /// and recurring billing settings.
 /// </summary>
 [Route("api/retailers/{retailerId:guid}")]
+<<<<<<< HEAD
 [SwaggerTag("Subscription lifecycle — trial, plan selection, upgrade, downgrade, cancellation, and billing settings.")]
 public sealed class SubscriptionsController : BaseApiController
+=======
+[SwaggerTag("Subscription lifecycle — trial, plan selection, upgrade, downgrade, and billing settings.")]
+public sealed class SubscriptionsController : RetailerBaseApiController
+>>>>>>> 5b75d8e (feat(customer-auth): complete Phase 1 identity foundation, auth controller, and database migrations)
 {
     public SubscriptionsController() { }
 

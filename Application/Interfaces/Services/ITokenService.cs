@@ -1,4 +1,6 @@
-﻿namespace Application.Interfaces.Services;
+using Domain.Entities.Customer;
+
+namespace Application.Interfaces.Services;
 
 /// <summary>
 /// Abstraction over JWT RS256 token generation and validation.
@@ -26,6 +28,13 @@ public interface ITokenService
     /// <param name="account">The authenticated retailer. Must not be null.</param>
     /// <returns>Signed JWT string ready to be returned to the client.</returns>
     string GenerateAccessToken(RetailerAccount account);
+
+    /// <summary>
+    /// Generates a signed RS256 access JWT for the given customer.
+    /// </summary>
+    /// <param name="customer">The authenticated customer. Must not be null.</param>
+    /// <returns>Signed JWT string ready to be returned to the client.</returns>
+    string GenerateCustomerAccessToken(CustomerAccount customer);
 
     /// <summary>
     /// Generates a cryptographically random opaque refresh token.

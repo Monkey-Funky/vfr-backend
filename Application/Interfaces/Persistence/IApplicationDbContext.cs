@@ -1,8 +1,11 @@
+<<<<<<< HEAD
 ﻿// Application/Interfaces/Persistence/IApplicationDbContext.cs
 using Domain.Entities.Analytics;
+=======
+>>>>>>> 5b75d8e (feat(customer-auth): complete Phase 1 identity foundation, auth controller, and database migrations)
 using Domain.Entities.Notifications;
 using Domain.Entities.Orders;
-using Domain.Entities.Retailer;
+using Domain.Entities.Customer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 
@@ -16,6 +19,7 @@ public interface IApplicationDbContext
 {
     // ── Auth / Retailer (P-011) ───────────────────────────────────────────────
     DbSet<RetailerAccount> RetailerAccounts { get; }
+    DbSet<CustomerAccount> CustomerAccounts { get; }
     DbSet<NotificationPreference> NotificationPreferences { get; }
 
     // ── Subscriptions (P-015) ─────────────────────────────────────────────────

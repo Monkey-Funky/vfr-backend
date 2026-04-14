@@ -1,4 +1,4 @@
-﻿using Amazon;
+using Amazon;
 using Amazon.S3;
 using Application.Interfaces.External;
 using Application.Interfaces.Persistence;

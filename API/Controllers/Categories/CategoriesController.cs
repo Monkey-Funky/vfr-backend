@@ -1,4 +1,5 @@
-﻿using Application.Features.Categories.Commands.CreateCategory;
+﻿using API.Controllers.BaseControllers;
+using Application.Features.Categories.Commands.CreateCategory;
 using Application.Features.Categories.Commands.CreateSubCategory;
 using Application.Features.Categories.Commands.DeleteCategory;
 using Application.Features.Categories.Commands.DeleteSubCategory;
@@ -19,7 +20,7 @@ namespace API.Controllers.Categories;
 /// </summary>
 [SwaggerTag("Categories — manage product categories and sub-categories")]
 [Route("api/retailers/{retailerId:guid}/categories")]
-public sealed class CategoriesController : BaseApiController
+public sealed class CategoriesController : RetailerBaseApiController
 {
     // =========================================================================
     // Category Endpoints

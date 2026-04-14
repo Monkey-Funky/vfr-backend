@@ -1,4 +1,5 @@
-﻿using Application.Features.Settings.Commands.ChangePassword;
+﻿using API.Controllers.BaseControllers;
+using Application.Features.Settings.Commands.ChangePassword;
 using Application.Features.Settings.Commands.DeleteAccount;
 using Application.Features.Settings.Commands.DeleteAvatar;
 using Application.Features.Settings.Commands.DeleteBrandLogo;
@@ -9,7 +10,6 @@ using Application.Features.Settings.Commands.UploadBrandLogo;
 using Application.Features.Settings.DTOs;
 using Application.Features.Settings.Queries.GetNotificationPreferences;
 using Application.Features.Settings.Queries.GetRetailerProfile;
-using Microsoft.IdentityModel.Tokens.Experimental;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace API.Controllers.Settings;
@@ -22,7 +22,7 @@ namespace API.Controllers.Settings;
 /// </summary>
 [SwaggerTag("Retailer Profile & Settings")]
 [Route("api/retailers/{retailerId:guid}")]
-public sealed class SettingsController : BaseApiController
+public sealed class SettingsController : RetailerBaseApiController
 {
     // =========================================================================
     // GET — Profile

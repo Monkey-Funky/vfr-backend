@@ -1,4 +1,5 @@
-﻿using Application.Features.PaymentMethods.Commands.AddPaymentMethod;
+﻿using API.Controllers.BaseControllers;
+using Application.Features.PaymentMethods.Commands.AddPaymentMethod;
 using Application.Features.PaymentMethods.Commands.RemovePaymentMethod;
 using Application.Features.PaymentMethods.Commands.SetDefaultPaymentMethod;
 using Application.Features.PaymentMethods.DTOs;
@@ -22,7 +23,7 @@ public sealed record AddPaymentMethodRequest(
 /// </summary>
 [Route("api/retailers/{retailerId:guid}/payment-methods")]
 [SwaggerTag("Payment methods — manage saved cards for subscription billing.")]
-public sealed class PaymentMethodsController : BaseApiController
+public sealed class PaymentMethodsController : RetailerBaseApiController
 {
     public PaymentMethodsController() { }
 
