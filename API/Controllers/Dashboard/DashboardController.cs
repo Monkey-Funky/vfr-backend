@@ -1,4 +1,4 @@
-﻿using Application.Features.Dashboard.Commands.GenerateReport;
+using Application.Features.Dashboard.Commands.GenerateReport;
 using Application.Features.Dashboard.DTOs;
 using Application.Features.Dashboard.Queries.GetConversionRate;
 using Application.Features.Dashboard.Queries.GetDashboardExport;
@@ -17,8 +17,9 @@ using Domain.Enums.Analytics;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Text;
 
-namespace API.Controllers.Dashboard;
+using API.Controllers.BaseControllers;
 
+namespace API.Controllers.Dashboard;
 
 /// <summary>
 /// Dashboard analytics endpoints for the authenticated retailer.
@@ -29,7 +30,7 @@ namespace API.Controllers.Dashboard;
 /// </summary>
 [Route("api/retailers/{retailerId:guid}/dashboard")]
 [SwaggerTag("Dashboard — analytics KPIs, charts, return metrics, and async report generation.")]
-public sealed class DashboardController : BaseApiController
+public sealed class DashboardController : RetailerBaseApiController
 {
     // ── 1. KPIs ──────────────────────────────────────────────────────────────
 

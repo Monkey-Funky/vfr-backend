@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-﻿using Application.Features.Notifications.Commands.DeleteNotification;
-=======
-﻿using API.Controllers.BaseControllers;
->>>>>>> 5b75d8e (feat(customer-auth): complete Phase 1 identity foundation, auth controller, and database migrations)
+using API.Controllers.BaseControllers;
+using Application.Features.Notifications.Commands.DeleteNotification;
 using Application.Features.Notifications.Commands.MarkAllNotificationsRead;
 using Application.Features.Notifications.Commands.MarkNotificationRead;
 using Application.Features.Notifications.DTOs;
@@ -14,12 +11,7 @@ namespace API.Controllers.Notifications;
 
 [Route("api/retailers/{retailerId:guid}/notifications")]
 [SwaggerTag("Notification inbox — real-time alerts for low stock, orders, subscriptions, and payments.")]
-<<<<<<< HEAD
-public sealed class NotificationsController : BaseApiController
-
-=======
 public sealed class NotificationsController : RetailerBaseApiController
->>>>>>> 5b75d8e (feat(customer-auth): complete Phase 1 identity foundation, auth controller, and database migrations)
 {
     // =========================================================================
     // GET /api/notifications

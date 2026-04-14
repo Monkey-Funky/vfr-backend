@@ -1,10 +1,6 @@
-<<<<<<< HEAD
-﻿using Application.Interfaces.Persistence;
-using Domain.Entities.Analytics;
-=======
 using Application.Interfaces.Persistence;
+using Domain.Entities.Analytics;
 using Domain.Entities.Customer;
->>>>>>> 5b75d8e (feat(customer-auth): complete Phase 1 identity foundation, auth controller, and database migrations)
 using Domain.Entities.Notifications;
 using Domain.Entities.Orders;
 using Domain.Entities.Subscriptions;
