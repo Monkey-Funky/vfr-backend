@@ -1,4 +1,4 @@
-﻿using Application.Interfaces.Services;
+using Application.Interfaces.Services;
 
 namespace API.Controllers.BaseControllers;
 
@@ -8,7 +8,7 @@ namespace API.Controllers.BaseControllers;
 /// All controllers in the Retailer module MUST inherit from this class.
 /// </summary>
 [ApiController]
-[Authorize(Roles = "Retailer")]
+[Authorize(Roles = Domain.Constants.Roles.Retailer)]
 [Produces("application/json")]
 public abstract class RetailerBaseApiController : CoreBaseApiController
 {

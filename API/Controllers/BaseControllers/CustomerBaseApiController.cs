@@ -8,7 +8,7 @@ namespace API.Controllers.BaseControllers;
 /// All controllers in the Customer module MUST inherit from this class.
 /// </summary>
 [ApiController]
-[Authorize(Roles = "Customer")]
+[Authorize(Roles = Domain.Constants.Roles.Customer)]
 [Produces("application/json")]
 public abstract class CustomerBaseApiController : CoreBaseApiController
 {

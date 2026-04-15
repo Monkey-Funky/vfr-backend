@@ -69,7 +69,7 @@ public sealed class TokenService : ITokenService
         return BuildToken(
             account.Id, 
             account.Email, 
-            "Retailer", 
+            Domain.Constants.Roles.Retailer, 
             new Claim("brand_name", account.BrandName));
     }
 
@@ -84,7 +84,7 @@ public sealed class TokenService : ITokenService
         return BuildToken(
             customer.Id, 
             customer.Email, 
-            "Customer", 
+            Domain.Constants.Roles.Customer, 
             new Claim("full_name", customer.FullName));
     }
 
