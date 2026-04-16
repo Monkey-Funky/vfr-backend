@@ -1,4 +1,5 @@
-﻿using Application.Features.Notifications.Commands.DeleteNotification;
+using API.Controllers.BaseControllers;
+using Application.Features.Notifications.Commands.DeleteNotification;
 using Application.Features.Notifications.Commands.MarkAllNotificationsRead;
 using Application.Features.Notifications.Commands.MarkNotificationRead;
 using Application.Features.Notifications.DTOs;
@@ -10,8 +11,7 @@ namespace API.Controllers.Notifications;
 
 [Route("api/retailers/{retailerId:guid}/notifications")]
 [SwaggerTag("Notification inbox — real-time alerts for low stock, orders, subscriptions, and payments.")]
-public sealed class NotificationsController : BaseApiController
-
+public sealed class NotificationsController : RetailerBaseApiController
 {
     // =========================================================================
     // GET /api/notifications

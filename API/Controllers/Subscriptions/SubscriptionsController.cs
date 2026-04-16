@@ -1,4 +1,5 @@
-﻿using Application.Features.Subscriptions.Commands.CancelSubscription;
+using API.Controllers.BaseControllers;
+using Application.Features.Subscriptions.Commands.CancelSubscription;
 using Application.Features.Subscriptions.Commands.DowngradePlan;
 using Application.Features.Subscriptions.Commands.SelectPlan;
 using Application.Features.Subscriptions.Commands.StartTrial;
@@ -34,7 +35,7 @@ public sealed record DowngradePlanRequest(
 /// </summary>
 [Route("api/retailers/{retailerId:guid}")]
 [SwaggerTag("Subscription lifecycle — trial, plan selection, upgrade, downgrade, cancellation, and billing settings.")]
-public sealed class SubscriptionsController : BaseApiController
+public sealed class SubscriptionsController : RetailerBaseApiController
 {
     public SubscriptionsController() { }
 

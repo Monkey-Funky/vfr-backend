@@ -1,6 +1,7 @@
-﻿// src/Infrastructure/Services/TokenService.cs
+// src/Infrastructure/Services/TokenService.cs
 using System.Text;
 using Application.Interfaces.Services;
+using Domain.Entities.Customer;
 using Infrastructure.Settings;
 using Microsoft.Extensions.Options;
 
@@ -58,37 +59,33 @@ public sealed class TokenService : ITokenService
         => _signingCredentials ??= new SigningCredentials(RsaKey, SecurityAlgorithms.RsaSha256);
 
     // =========================================================================
-    // ITokenService.GenerateAccessToken
+    // ITokenService.GenerateRetailerAccessToken (Retailer)
     // =========================================================================
 
     /// <inheritdoc />
     public string GenerateAccessToken(RetailerAccount account)
     {
         ArgumentNullException.ThrowIfNull(account);
+        return BuildToken(
+            account.Id, 
+            account.Email, 
+            Domain.Constants.Roles.Retailer, 
+            new Claim("brand_name", account.BrandName));
+    }
 
-        var now = DateTime.UtcNow;
-        var expiry = now.AddMinutes(_jwtSettings.AccessTokenExpiryMinutes);
+    // =========================================================================
+    // ITokenService.GenerateCustomerAccessToken (Customer)
+    // =========================================================================
 
-        var claims = new[]
-        {
-            new Claim(JwtRegisteredClaimNames.Sub,   account.Id.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, account.Email),
-            new Claim(JwtRegisteredClaimNames.Jti,   Guid.NewGuid().ToString()),
-            new Claim(JwtRegisteredClaimNames.Iat,   DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
-                                                     ClaimValueTypes.Integer64),
-            new Claim("role",       "Retailer"),
-            new Claim("brand_name", account.BrandName),
-        };
-
-        var token = new JwtSecurityToken(
-            issuer: _jwtSettings.Issuer,
-            audience: _jwtSettings.Audience,
-            claims: claims,
-            notBefore: now,
-            expires: expiry,
-            signingCredentials: Rs256Credentials);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
+    /// <inheritdoc />
+    public string GenerateCustomerAccessToken(CustomerAccount customer)
+    {
+        ArgumentNullException.ThrowIfNull(customer);
+        return BuildToken(
+            customer.Id, 
+            customer.Email, 
+            Domain.Constants.Roles.Customer, 
+            new Claim("full_name", customer.FullName));
     }
 
     // =========================================================================
@@ -214,4 +211,30 @@ public sealed class TokenService : ITokenService
 
     private SymmetricSecurityKey BuildStepTokenKey()
         => new(Encoding.UTF8.GetBytes(_jwtSettings.StepTokenSecret!));
+
+    private string BuildToken(Guid id, string email, string role, Claim specificClaim)
+    {
+        var now = DateTime.UtcNow;
+        var expiry = now.AddMinutes(_jwtSettings.AccessTokenExpiryMinutes);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, email),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
+            new Claim("role", role),
+            specificClaim
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: _jwtSettings.Issuer,
+            audience: _jwtSettings.Audience,
+            claims: claims,
+            notBefore: now,
+            expires: expiry,
+            signingCredentials: Rs256Credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
 }

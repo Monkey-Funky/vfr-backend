@@ -1,4 +1,5 @@
 ﻿using Amazon.Runtime.Internal;
+using API.Controllers.BaseControllers;
 using Application.Features.Orders.Commands.UpdateOrderStatus;
 using Application.Features.Orders.DTOs;
 using Application.Features.Orders.Queries.ExportOrdersCsv;
@@ -15,7 +16,7 @@ namespace API.Controllers.Orders;
 /// </summary>
 [SwaggerTag("Orders — view and manage customer orders")]
 [Route("api/retailers/{retailerId:guid}/orders")]
-public sealed class OrdersController : BaseApiController
+public sealed class OrdersController : RetailerBaseApiController
 {
     // =========================================================================
     // GET /api/retailers/{retailerId}/orders

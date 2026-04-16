@@ -1,5 +1,6 @@
-﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Persistence;
 using Domain.Entities.Analytics;
+using Domain.Entities.Customer;
 using Domain.Entities.Notifications;
 using Domain.Entities.Orders;
 using Domain.Entities.Subscriptions;
@@ -30,6 +31,8 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     // ── DbSets ────────────────────────────────────────────────────────────────
 
     public DbSet<RetailerAccount> RetailerAccounts => Set<RetailerAccount>();
+    public DbSet<CustomerAccount> CustomerAccounts => Set<CustomerAccount>();
+    public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
 
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
