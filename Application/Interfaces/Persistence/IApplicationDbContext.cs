@@ -1,4 +1,4 @@
-﻿// Application/Interfaces/Persistence/IApplicationDbContext.cs
+// Application/Interfaces/Persistence/IApplicationDbContext.cs
 using Domain.Entities.Analytics;
 using Domain.Entities.Notifications;
 using Domain.Entities.Orders;
@@ -14,10 +14,14 @@ namespace Application.Interfaces.Persistence;
 /// </summary>
 public interface IApplicationDbContext
 {
-    // ── Auth / Retailer (P-011) ───────────────────────────────────────────────
+    // ── Auth (P-011) ───────────────────────────────────────────────
     DbSet<RetailerAccount> RetailerAccounts { get; }
     DbSet<CustomerAccount> CustomerAccounts { get; }
     DbSet<NotificationPreference> NotificationPreferences { get; }
+    
+    // ── Customer Profile & Avatar (P-Customer) ────────────────────────────────
+    DbSet<Avatar> Avatars { get; }
+    DbSet<AvatarMeasurementHistory> AvatarMeasurementHistory { get; }
 
     // ── Subscriptions (P-015) ─────────────────────────────────────────────────
     DbSet<SubscriptionPlan> SubscriptionPlans { get; }

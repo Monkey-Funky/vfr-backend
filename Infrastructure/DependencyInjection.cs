@@ -10,6 +10,7 @@ using Infrastructure.Persistence.Repositories;
 using Infrastructure.Persistence.Seeders;
 using Infrastructure.Services.Auth;
 using Infrastructure.Services.Communication;
+using Infrastructure.Services.Customer;
 using Infrastructure.Services.Dashboard;
 using Infrastructure.Services.Payment;
 using Infrastructure.Services.Security;
@@ -116,6 +117,7 @@ public static class DependencyInjection
         services.AddScoped<IEmailService, EmailService>();
         services.AddScoped<IFileStorageService, FileStorageService>();
         services.AddScoped<IGoogleAuthService, GoogleAuthService>();
+        services.AddScoped<ISizeRecommendationService, SizeRecommendationService>();
 
         // ── 6. Repository & Unit of Work ──────────────────────────────────────
         // These were incorrectly commented out — they are required by all command handlers.

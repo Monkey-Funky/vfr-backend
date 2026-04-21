@@ -1,4 +1,4 @@
-﻿namespace API.Middleware;
+namespace API.Middleware;
 
 public sealed class ExceptionHandlingMiddleware
 {
@@ -110,6 +110,16 @@ public sealed class ExceptionHandlingMiddleware
                 {
                     Code = "UNAUTHORIZED",
                     Message = "Authentication is required.",
+                    TraceId = traceId
+                }),
+
+            Microsoft.EntityFrameworkCore.DbUpdateException dbEx 
+                when dbEx.InnerException is Npgsql.PostgresException { SqlState: "23505" } => (
+                (int)HttpStatusCode.Conflict,
+                new ApiErrorResponse
+                {
+                    Code = "CONFLICT",
+                    Message = "A resource with the same unique constraint already exists.",
                     TraceId = traceId
                 }),
 
