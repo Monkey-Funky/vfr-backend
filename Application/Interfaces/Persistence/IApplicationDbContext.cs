@@ -22,6 +22,7 @@ public interface IApplicationDbContext
     // ── Customer Profile & Avatar (P-Customer) ────────────────────────────────
     DbSet<Avatar> Avatars { get; }
     DbSet<AvatarMeasurementHistory> AvatarMeasurementHistory { get; }
+    DbSet<VirtualTryOnSession> VirtualTryOnSessions { get; }
 
     // ── Subscriptions (P-015) ─────────────────────────────────────────────────
     DbSet<SubscriptionPlan> SubscriptionPlans { get; }

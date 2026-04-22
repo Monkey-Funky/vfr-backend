@@ -123,6 +123,24 @@ public sealed class ExceptionHandlingMiddleware
                     TraceId = traceId
                 }),
 
+            Polly.Timeout.TimeoutRejectedException => (
+                (int)HttpStatusCode.GatewayTimeout,
+                new ApiErrorResponse
+                {
+                    Code = "SERVICE_TIMEOUT",
+                    Message = "The try-on service did not respond in time. Please try again.",
+                    TraceId = traceId
+                }),
+
+            Polly.CircuitBreaker.BrokenCircuitException => (
+                (int)HttpStatusCode.ServiceUnavailable,
+                new ApiErrorResponse
+                {
+                    Code = "SERVICE_UNAVAILABLE",
+                    Message = "The try-on service is temporarily unavailable. Please try again later.",
+                    TraceId = traceId
+                }),
+
             _ => (
                 (int)HttpStatusCode.InternalServerError,
                 new ApiErrorResponse

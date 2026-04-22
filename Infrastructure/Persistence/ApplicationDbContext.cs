@@ -37,6 +37,7 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
 
     public DbSet<Avatar> Avatars => Set<Avatar>();
     public DbSet<AvatarMeasurementHistory> AvatarMeasurementHistory => Set<AvatarMeasurementHistory>();
+    public DbSet<VirtualTryOnSession> VirtualTryOnSessions => Set<VirtualTryOnSession>();
 
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();

@@ -3,6 +3,7 @@ using Amazon.S3;
 using Application.Interfaces.External;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
+using Application.Interfaces.Services.Customer;
 using Infrastructure.BackgroundJobs;
 using Infrastructure.Hubs;
 using Infrastructure.Persistence;
@@ -105,6 +106,24 @@ public static class DependencyInjection
             });
         });
 
+        services.AddResiliencePipeline("tryon", builder =>
+        {
+            builder
+                .AddTimeout(TimeSpan.FromSeconds(30))
+                .AddRetry(new RetryStrategyOptions
+                {
+                    MaxRetryAttempts = 1,
+                    Delay = TimeSpan.FromSeconds(2)
+                })
+                .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+                {
+                    FailureRatio = 1.0, // Fail on every threshold hit
+                    MinimumThroughput = 3, // 3 failures
+                    SamplingDuration = TimeSpan.FromSeconds(30), // in 30s
+                    BreakDuration = TimeSpan.FromSeconds(30) // open 30s
+                });
+        });
+
         // ── 4. AWS S3 client (Singleton — IAmazonS3 is thread-safe) ──────────
         services.AddSingleton<IAmazonS3>(_ =>
         {
@@ -118,6 +137,7 @@ public static class DependencyInjection
         services.AddScoped<IFileStorageService, FileStorageService>();
         services.AddScoped<IGoogleAuthService, GoogleAuthService>();
         services.AddScoped<ISizeRecommendationService, SizeRecommendationService>();
+        services.AddScoped<IVirtualTryOnService, VirtualTryOnService>();
 
         // ── 6. Repository & Unit of Work ──────────────────────────────────────
         // These were incorrectly commented out — they are required by all command handlers.
