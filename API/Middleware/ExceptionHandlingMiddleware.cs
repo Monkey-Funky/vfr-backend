@@ -1,4 +1,4 @@
-﻿namespace API.Middleware;
+namespace API.Middleware;
 
 public sealed class ExceptionHandlingMiddleware
 {
@@ -110,6 +110,34 @@ public sealed class ExceptionHandlingMiddleware
                 {
                     Code = "UNAUTHORIZED",
                     Message = "Authentication is required.",
+                    TraceId = traceId
+                }),
+
+            Microsoft.EntityFrameworkCore.DbUpdateException dbEx 
+                when dbEx.InnerException is Npgsql.PostgresException { SqlState: "23505" } => (
+                (int)HttpStatusCode.Conflict,
+                new ApiErrorResponse
+                {
+                    Code = "CONFLICT",
+                    Message = "A resource with the same unique constraint already exists.",
+                    TraceId = traceId
+                }),
+
+            Polly.Timeout.TimeoutRejectedException => (
+                (int)HttpStatusCode.GatewayTimeout,
+                new ApiErrorResponse
+                {
+                    Code = "SERVICE_TIMEOUT",
+                    Message = "The try-on service did not respond in time. Please try again.",
+                    TraceId = traceId
+                }),
+
+            Polly.CircuitBreaker.BrokenCircuitException => (
+                (int)HttpStatusCode.ServiceUnavailable,
+                new ApiErrorResponse
+                {
+                    Code = "SERVICE_UNAVAILABLE",
+                    Message = "The try-on service is temporarily unavailable. Please try again later.",
                     TraceId = traceId
                 }),
 
