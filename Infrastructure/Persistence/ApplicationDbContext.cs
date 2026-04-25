@@ -4,24 +4,15 @@ using Domain.Entities.Customer;
 using Domain.Entities.Notifications;
 using Domain.Entities.Orders;
 using Domain.Entities.Subscriptions;
+using Domain.Entities.Retailer;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.Reflection;
+using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Persistence;
 
 /// <summary>
 /// EF Core DbContext for the VFR Retailer module.
-///
-/// CONVENTIONS:
-///   • Snake-case column naming is applied globally via UseSnakeCaseNamingConvention()
-///     on DbContextOptionsBuilder in DependencyInjection.cs — NOT here in OnModelCreating.
-///   • All entity configurations are auto-discovered from this assembly via
-///     ApplyConfigurationsFromAssembly.
-///   • Soft-delete global query filters are set per entity in each
-///     IEntityTypeConfiguration class.
-///   • CreatedAt / UpdatedAt are stamped in SaveChangesAsync using EF Core's
-///     property metadata API (entry.Property(...).CurrentValue) because BaseEntity
-///     exposes only private setters.
 /// </summary>
 public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
 {
@@ -75,14 +66,7 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // NOTE: UseSnakeCaseNamingConvention() is NOT called here.
-        // It is configured on DbContextOptionsBuilder in DependencyInjection.cs:
-        //   options.UseNpgsql(...).UseSnakeCaseNamingConvention()
-        // Calling it here on ModelBuilder causes a compile error.
-
-        // Auto-discover all IEntityTypeConfiguration<T> classes in this assembly.
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
-
         base.OnModelCreating(modelBuilder);
     }
 
@@ -90,16 +74,7 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        // BaseEntity.CreatedAt and UpdatedAt have private setters, so we cannot
-        // write them via normal property assignment (entry.Entity.CreatedAt = ...).
-        //
-        // Instead we use EF Core's property metadata API:
-        //   entry.Property("CreatedAt").CurrentValue = ...
-        // This bypasses the CLR setter entirely and writes the value through EF's
-        // internal state manager — which is exactly how EF Core itself sets
-        // values for shadow properties and value-generated columns.
-
-        foreach (var entry in ChangeTracker.Entries<BaseEntity>()) // FIX-2: BaseEntity now resolves via Domain.Common
+        foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
             switch (entry.State)
             {

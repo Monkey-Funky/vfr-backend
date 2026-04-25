@@ -1,4 +1,6 @@
-﻿using Domain.Enums.Product;
+using Domain.Enums.Product;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore;
 using NpgsqlTypes;
 
 namespace Infrastructure.Persistence.Configurations.Product;

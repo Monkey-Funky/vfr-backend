@@ -1,4 +1,4 @@
-﻿using Domain.Enums.Subscription;
+using Domain.Enums.Subscription;
 using Domain.Exceptions;
 
 namespace Domain.Entities.Subscriptions;
