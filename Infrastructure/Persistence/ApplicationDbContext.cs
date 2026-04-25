@@ -35,6 +35,11 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
 
+    public DbSet<Avatar> Avatars => Set<Avatar>();
+    public DbSet<AvatarMeasurementHistory> AvatarMeasurementHistory => Set<AvatarMeasurementHistory>();
+    public DbSet<VirtualTryOnSession> VirtualTryOnSessions => Set<VirtualTryOnSession>();
+    public DbSet<FitFeedback> FitFeedback => Set<FitFeedback>();
+
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<SubscriptionPayment> SubscriptionPayments => Set<SubscriptionPayment>();

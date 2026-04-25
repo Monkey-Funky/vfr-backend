@@ -3,6 +3,7 @@ using System;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -12,9 +13,11 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260421223110_Customer_AddTryOnEntities")]
+    partial class Customer_AddTryOnEntities
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -759,70 +762,6 @@ namespace Infrastructure.Migrations
                         .HasFilter("is_default = true AND is_deleted = false");
 
                     b.ToTable("customer_addresses", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.Customer.FitFeedback", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("ActualSizeNeeded")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("actual_size_needed");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid>("CustomerId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("customer_id");
-
-                    b.Property<string>("FeedbackNotes")
-                        .HasColumnType("text")
-                        .HasColumnName("feedback_notes");
-
-                    b.Property<int>("FitRating")
-                        .HasColumnType("integer")
-                        .HasColumnName("fit_rating");
-
-                    b.Property<Guid>("OrderItemId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("order_item_id");
-
-                    b.Property<string>("PredictedSize")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("predicted_size");
-
-                    b.Property<Guid>("ProductId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("product_id");
-
-                    b.Property<Guid?>("TryOnSessionId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("try_on_session_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_fit_feedback");
-
-                    b.HasIndex("CustomerId")
-                        .HasDatabaseName("idx_fit_feedback_customer_id");
-
-                    b.HasIndex("OrderItemId")
-                        .IsUnique()
-                        .HasDatabaseName("uq_fit_feedback_order_item");
-
-                    b.HasIndex("ProductId")
-                        .HasDatabaseName("idx_fit_feedback_product_id");
-
-                    b.ToTable("fit_feedback", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_fit_feedback_rating", "fit_rating BETWEEN 1 AND 5");
-                        });
                 });
 
             modelBuilder.Entity("Domain.Entities.Customer.VirtualTryOnSession", b =>
