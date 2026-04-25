@@ -123,14 +123,30 @@ public static class DependencyInjection
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
         // ── 7. Redis / Distributed Cache ──────────────────────────────────────
+        //var redisConnectionString = configuration["Redis:ConnectionString"] ?? "localhost:6379";
+
+        //services.AddSingleton<IConnectionMultiplexer>(_ =>
+        //    ConnectionMultiplexer.Connect(redisConnectionString + ",abortConnect=false"));
+
+        //services.AddStackExchangeRedisCache(options =>
+        //{
+        //    options.Configuration = redisConnectionString + ",abortConnect=false";
+        //    options.InstanceName = "vfr:";
+        //});
+
         var redisConnectionString = configuration["Redis:ConnectionString"] ?? "localhost:6379";
 
+        // Don't append abortConnect if it's already in the connection string
+        var redisConfigString = redisConnectionString.Contains("abortConnect", StringComparison.OrdinalIgnoreCase)
+            ? redisConnectionString
+            : redisConnectionString + ",abortConnect=false";
+
         services.AddSingleton<IConnectionMultiplexer>(_ =>
-            ConnectionMultiplexer.Connect(redisConnectionString + ",abortConnect=false"));
+            ConnectionMultiplexer.Connect(redisConfigString));
 
         services.AddStackExchangeRedisCache(options =>
         {
-            options.Configuration = redisConnectionString + ",abortConnect=false";
+            options.Configuration = redisConfigString;
             options.InstanceName = "vfr:";
         });
 

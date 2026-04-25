@@ -1,0 +1,10 @@
+**/.git
+**/.vs
+**/bin
+**/obj
+**/Logs
+**/Docs
+**/*.pem
+**/*.user
+**/appsettings.Development.json
+.github

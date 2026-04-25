@@ -5,8 +5,14 @@ using Infrastructure.Hubs;
 using Infrastructure.Persistence;
 using Infrastructure.Persistence.Seeders;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
+
+
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
 
 // ── 1. SERILOG ───────────────────────────────────────────────────────────────
 Log.Logger = new LoggerConfiguration()
@@ -57,13 +63,33 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 
-// Generate a fresh RSA key pair in memory
-var rsa = RSA.Create(keySizeInBits: 2048);
+// // Generate a fresh RSA key pair in memory
+// var rsa = RSA.Create(keySizeInBits: 2048);
 
-// Register the RSA instance as a singleton so TokenService (P-012) can
-// use the SAME private key for signing that Program.cs uses for validation.
-// Without this, signing and validation use different keys → 401 on every request.
+// // Register the RSA instance as a singleton so TokenService (P-012) can
+// // use the SAME private key for signing that Program.cs uses for validation.
+// // Without this, signing and validation use different keys → 401 on every request.
+// builder.Services.AddSingleton(rsa);
+
+// ── RSA Key Setup ────────────────────────────────────────────────────────
+RSA rsa;
+if (builder.Environment.IsProduction())
+{
+    // Production: load fixed RSA keys from environment variables
+    var privateKeyPem = Environment.GetEnvironmentVariable("JWT_PRIVATE_KEY_PEM")
+        ?? throw new InvalidOperationException("JWT_PRIVATE_KEY_PEM environment variable is not set.");
+    
+    rsa = RSA.Create();
+    rsa.ImportFromPem(privateKeyPem.ToCharArray());
+}
+else
+{
+    // Development: auto-generate keys (existing behavior)
+    rsa = RSA.Create(keySizeInBits: 2048);
+}
 builder.Services.AddSingleton(rsa);
+
+
 
 var rsaSecurityKey = new RsaSecurityKey(rsa);
 
@@ -213,15 +239,23 @@ await DatabaseSeeder.SeedAsync(app.Services);
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 // Swagger FIRST — before rate limiting so /swagger/* is never throttled
-if (app.Environment.IsDevelopment())
+//if (app.Environment.IsDevelopment())
+//{
+//    app.UseSwagger();
+//    app.UseSwaggerUI(c =>
+//    {
+//        c.SwaggerEndpoint("/swagger/v1/swagger.json", "VFR Retailer API v1");
+//        c.RoutePrefix = string.Empty;
+//    });
+//}
+
+// Enable Swagger in all environments for graduation project demo
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "VFR Retailer API v1");
-        c.RoutePrefix = string.Empty;
-    });
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "VFR Retailer API v1");
+    c.RoutePrefix = string.Empty;
+});
 
 app.UseIpRateLimiting(); // ← after swagger
 
@@ -231,7 +265,22 @@ app.UseSerilogRequestLogging(opts =>
         "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000}ms";
 });
 
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
+
+// In production behind Render's reverse proxy, HTTPS is handled externally
+if (app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
+// Trust proxy headers (Render uses reverse proxy)
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+});
+
+
 app.UseCors("VfrCors");
 
 app.UseAuthentication();
