@@ -20,7 +20,8 @@ public sealed class HealthCheckTests : IntegrationTestBase
         // Instead, hit a known API endpoint to verify the pipeline works.
 
         // Act — hit any public or authenticated endpoint
-        var response = await Client.GetAsync("/api/retailer/products?pageNumber=1&pageSize=10");
+        var retailerId = TestAuthHandler.DefaultRetailerId;
+        var response = await Client.GetAsync($"/api/retailers/{retailerId}/products?pageNumber=1&pageSize=10");
 
         // Assert — we expect 200 (empty list) because auth is handled by TestAuthHandler
         // and the DB is clean. If the app failed to start, we'd get a connection error.
@@ -35,9 +36,10 @@ public sealed class HealthCheckTests : IntegrationTestBase
     {
         // Arrange
         var anonClient = Factory.CreateAnonymousClient();
+        var retailerId = TestAuthHandler.DefaultRetailerId;
 
         // Act — hit an endpoint that requires [Authorize]
-        var response = await anonClient.GetAsync("/api/retailer/products?pageNumber=1&pageSize=10");
+        var response = await anonClient.GetAsync($"/api/retailers/{retailerId}/products?pageNumber=1&pageSize=10");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);

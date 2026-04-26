@@ -1,5 +1,6 @@
 using Application.Interfaces.External;
 using Application.Interfaces.Services;
+using Moq;
 using Application.Interfaces.Services.Customer;
 using DotNet.Testcontainers.Builders;
 using Infrastructure.BackgroundJobs;
@@ -116,8 +117,23 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 new Moq.Mock<Amazon.S3.IAmazonS3>().Object);
 
             ReplaceWithStub<IEmailService>(services);
-            ReplaceWithStub<IFileStorageService>(services);
-            ReplaceWithStub<IS3StorageService>(services);
+
+            // ── 3a. Stub File Storage with default URL returns to satisfy domain guards ──
+            var fileStorageMock = new Mock<IFileStorageService>();
+            fileStorageMock
+                .Setup(x => x.UploadAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("https://cdn.vfr.com/test-file.jpg");
+            services.RemoveAll<IFileStorageService>();
+            services.AddSingleton(fileStorageMock.Object);
+
+            var s3StorageMock = new Mock<IS3StorageService>();
+            s3StorageMock
+                .Setup(x => x.UploadReportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("https://s3.vfr.com/test-file.jpg");
+            services.RemoveAll<IS3StorageService>();
+            services.AddSingleton(s3StorageMock.Object);
+
+            ReplaceWithStub<ICacheService>(services);
             ReplaceWithStub<IGoogleAuthService>(services);
             ReplaceWithStub<IPaymentGatewayService>(services);
             ReplaceWithStub<IVirtualTryOnService>(services);

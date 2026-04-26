@@ -1,4 +1,4 @@
-﻿using Domain.Enums.Product;
+using Domain.Enums.Product;
 using Domain.Exceptions;
 
 namespace Domain.Entities.Retailer;
@@ -172,7 +172,7 @@ public sealed class Product : BaseEntity
     /// </summary>
     /// <param name="imageUrl">Full public S3 URL. Must not be null or whitespace.</param>
     /// <param name="displayOrder">Sort position. Lower = displayed first.</param>
-    public void AddImage(string imageUrl, int displayOrder)
+    public ProductImage AddImage(string imageUrl, int displayOrder)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(imageUrl, nameof(imageUrl));
 
@@ -183,6 +183,8 @@ public sealed class Product : BaseEntity
 
         var image = ProductImage.Create(Id, imageUrl, displayOrder);
         _images.Add(image);
+        
+        return image;
     }
 
     /// <summary>
