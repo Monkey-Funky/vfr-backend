@@ -1,4 +1,4 @@
-﻿using Application.Features.Products.DTOs;
+using Application.Features.Products.DTOs;
 using Application.Features.Products.Mappings;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
@@ -51,15 +51,9 @@ public sealed class AddProductImageCommandHandler
             ct: cancellationToken);
 
         // Add image via domain method (validates URL, creates ProductImage entity)
-        product.AddImage(imageUrl, command.DisplayOrder);
+        var addedImage = product.AddImage(imageUrl, command.DisplayOrder);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        // Return the last-added image DTO
-        var addedImage = product.Images
-            .Where(i => i.ImageUrl == imageUrl && !i.IsDeleted)
-            .OrderByDescending(i => i.DisplayOrder)
-            .First();
 
         return Result<ProductImageDto>.Success(
             addedImage.ToDto(),

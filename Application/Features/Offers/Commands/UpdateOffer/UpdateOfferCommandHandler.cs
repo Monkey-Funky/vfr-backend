@@ -1,4 +1,4 @@
-﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Enums.Offer;
 
@@ -79,7 +79,8 @@ public sealed class UpdateOfferCommandHandler
             endDate: command.EndDate,
             status: command.Status,
             newCoverImageUrl: newCoverImageUrl);
-
+            
+        await _unitOfWork.Repository<Offer>().UpdateAsync(offer, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // ── Invalidate list and single-entity caches ───────────────────────────

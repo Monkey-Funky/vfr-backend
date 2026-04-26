@@ -1,4 +1,4 @@
-﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 
 namespace Application.Features.Offers.Commands.ToggleOfferStatus;
@@ -38,6 +38,7 @@ public sealed class ToggleOfferStatusCommandHandler
         // Domain method enforces the Expired guard and cycles Active ↔ Inactive
         offer.ToggleStatus();
 
+        await _unitOfWork.Repository<Offer>().UpdateAsync(offer, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await _cacheService.RemoveByPrefixAsync($"offers:{retailerId}:", cancellationToken);
 
