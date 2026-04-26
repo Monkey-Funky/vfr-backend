@@ -24,6 +24,7 @@ public interface IApplicationDbContext
     DbSet<AvatarMeasurementHistory> AvatarMeasurementHistory { get; }
     DbSet<VirtualTryOnSession> VirtualTryOnSessions { get; }
     DbSet<FitFeedback> FitFeedback { get; }
+    DbSet<CustomerFavorite> CustomerFavorites { get; }
 
     // ── Subscriptions (P-015) ─────────────────────────────────────────────────
     DbSet<SubscriptionPlan> SubscriptionPlans { get; }
