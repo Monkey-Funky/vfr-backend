@@ -1,0 +1,8 @@
+global using Xunit;
+global using Moq;
+global using FluentAssertions;
+global using Domain.Common;
+global using Domain.Entities.Retailer;
+global using Domain.Entities.Orders;
+global using Domain.Entities.Customer;
+global using Domain.Exceptions;

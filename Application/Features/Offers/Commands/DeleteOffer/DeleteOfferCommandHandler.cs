@@ -1,4 +1,4 @@
-﻿
+
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 
@@ -38,6 +38,7 @@ public sealed class DeleteOfferCommandHandler
 
         offer.SoftDelete();
 
+        await _unitOfWork.Repository<Offer>().UpdateAsync(offer, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await _cacheService.RemoveByPrefixAsync($"offers:{retailerId}:", cancellationToken);
 
