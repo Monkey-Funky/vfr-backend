@@ -25,6 +25,8 @@ public interface IApplicationDbContext
     DbSet<VirtualTryOnSession> VirtualTryOnSessions { get; }
     DbSet<FitFeedback> FitFeedback { get; }
     DbSet<CustomerFavorite> CustomerFavorites { get; }
+    DbSet<CustomerOutfit> CustomerOutfits { get; }
+    DbSet<CustomerOutfitItem> CustomerOutfitItems { get; }
 
     // ── Subscriptions (P-015) ─────────────────────────────────────────────────
     DbSet<SubscriptionPlan> SubscriptionPlans { get; }

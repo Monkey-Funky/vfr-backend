@@ -1,0 +1,53 @@
+using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
+using Domain.Entities.Customer;
+using Microsoft.EntityFrameworkCore;
+
+namespace Application.Features.Customer.Outfits.Commands.CreateOutfit;
+
+internal sealed class CreateOutfitCommandHandler : IRequestHandler<CreateOutfitCommand, Guid>
+{
+    private readonly IApplicationDbContext _context;
+    private readonly ICurrentUserService _currentUserService;
+
+    public CreateOutfitCommandHandler(IApplicationDbContext context, ICurrentUserService currentUserService)
+    {
+        _context = context;
+        _currentUserService = currentUserService;
+    }
+
+    public async Task<Guid> Handle(CreateOutfitCommand request, CancellationToken cancellationToken)
+    {
+        var customerId = _currentUserService.CustomerId 
+            ?? throw new UnauthorizedAccessException("Only authenticated customers can create outfits.");
+
+        // SECURITY MANDATE: Verify all requested products are favorited by this customer
+        var requestedProductIds = request.Items.Select(i => i.ProductId).Distinct().ToList();
+        
+        var favoritedProductIds = await _context.CustomerFavorites
+            .Where(f => f.CustomerId == customerId && requestedProductIds.Contains(f.ProductId))
+            .Select(f => f.ProductId)
+            .ToListAsync(cancellationToken);
+
+        var missingProductIds = requestedProductIds.Except(favoritedProductIds).ToList();
+        
+        if (missingProductIds.Any())
+        {
+            throw new BusinessRuleException(
+                "INVALID_OUTFIT_ITEMS", 
+                $"Cannot create outfit. The following products must be favorited first: {string.Join(", ", missingProductIds)}");
+        }
+
+        var outfit = CustomerOutfit.Create(customerId, request.Name, request.StyleCategory);
+
+        foreach (var item in request.Items)
+        {
+            outfit.AddOrUpdateItem(item.ProductId, item.SlotType, item.DisplayOrder);
+        }
+
+        _context.CustomerOutfits.Add(outfit);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return outfit.Id;
+    }
+}
