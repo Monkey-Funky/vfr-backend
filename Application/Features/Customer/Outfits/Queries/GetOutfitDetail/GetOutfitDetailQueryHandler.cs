@@ -48,6 +48,12 @@ internal sealed class GetOutfitDetailQueryHandler : IRequestHandler<GetOutfitDet
 
         var productDict = products.ToDictionary(p => p.Id);
 
-        return outfit.ToOutfitDetailDto(productDict);
+        // W-4 Fix: Fetch InventoryRecords for stock status computation
+        var inventoryDict = await _context.InventoryRecords
+            .AsNoTracking()
+            .Where(ir => productIds.Contains(ir.ProductId))
+            .ToDictionaryAsync(ir => ir.ProductId, cancellationToken);
+
+        return outfit.ToOutfitDetailDto(productDict, inventoryDict);
     }
 }

@@ -38,6 +38,30 @@ internal sealed class CreateOutfitCommandHandler : IRequestHandler<CreateOutfitC
                 $"Cannot create outfit. The following products must be favorited first: {string.Join(", ", missingProductIds)}");
         }
 
+        // 2. THE SILENT MERGE (Duplicate Detection)
+        // Load the user's existing outfits and their active items
+        var existingOutfits = await _context.CustomerOutfits
+            .Include(o => o.Items.Where(i => !i.IsDeleted))
+            .Where(o => o.CustomerId == customerId)
+            .ToListAsync(cancellationToken);
+
+        // Find an outfit that has the EXACT same item count, 
+        // where every incoming item matches an existing item in both ProductId and SlotType.
+        var duplicateOutfit = existingOutfits.FirstOrDefault(o =>
+            o.Items.Count == request.Items.Count &&
+            request.Items.All(reqItem => o.Items.Any(existingItem =>
+                existingItem.ProductId == reqItem.ProductId &&
+                existingItem.SlotType == reqItem.SlotType))
+        );
+
+        // If an exact match exists, silently return its ID. 
+        // The UI receives a 200 OK success, but the database writes nothing!
+        if (duplicateOutfit != null)
+        {
+            return duplicateOutfit.Id;
+        }
+
+        // 3. CREATE NEW OUTFIT (If no duplicate was found)
         var outfit = CustomerOutfit.Create(customerId, request.Name, request.StyleCategory);
 
         foreach (var item in request.Items)

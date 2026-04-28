@@ -11,5 +11,6 @@ public sealed record OutfitItemDto(
     string? BrandName,
     decimal? Price,
     string? PrimaryImageUrl,
-    string[]? AvailableColors
+    string[]? AvailableColors,
+    string? StockStatus
 );

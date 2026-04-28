@@ -27,7 +27,7 @@ internal sealed class GetOutfitsQueryHandler : IRequestHandler<GetOutfitsQuery, 
             .AsNoTracking()
             .Where(o => o.CustomerId == customerId)
             .OrderByDescending(o => o.CreatedAt)
-            .Include(o => o.Items)
+            .Include(o => o.Items.Where(i => !i.IsDeleted))
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
 

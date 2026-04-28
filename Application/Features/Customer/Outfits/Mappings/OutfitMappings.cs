@@ -1,5 +1,6 @@
 using Application.Features.Customer.Outfits.DTOs;
 using Domain.Entities.Customer;
+using Domain.Entities.Retailer;
 
 namespace Application.Features.Customer.Outfits.Mappings;
 
@@ -10,7 +11,10 @@ internal static class OutfitMappings
         Dictionary<Guid, string?> productsImages)
     {
         var slotPreviews = new Dictionary<string, string?>();
-        foreach (var item in outfit.Items.OrderBy(i => i.DisplayOrder))
+        // W-7 Fix: Only iterate non-deleted items
+        var activeItems = outfit.Items.Where(i => !i.IsDeleted).OrderBy(i => i.DisplayOrder).ToList();
+        
+        foreach (var item in activeItems)
         {
             var slotName = item.SlotType.ToString();
             
@@ -25,18 +29,19 @@ internal static class OutfitMappings
             outfit.Id,
             outfit.Name,
             outfit.StyleCategory,
-            outfit.Items.Count,
+            activeItems.Count,
             slotPreviews
         );
     }
 
     public static OutfitDetailDto ToOutfitDetailDto(
         this CustomerOutfit outfit,
-        Dictionary<Guid, Product> productsDict)
+        Dictionary<Guid, Product> productsDict,
+        Dictionary<Guid, InventoryRecord>? inventoryDict = null)
     {
         var itemDtos = new List<OutfitItemDto>();
 
-        foreach (var item in outfit.Items.OrderBy(i => i.DisplayOrder))
+        foreach (var item in outfit.Items.Where(i => !i.IsDeleted).OrderBy(i => i.DisplayOrder))
         {
             if (productsDict.TryGetValue(item.ProductId, out var product))
             {
@@ -45,6 +50,17 @@ internal static class OutfitMappings
                     continue;
 
                 var primaryImage = product.Images.OrderBy(i => i.DisplayOrder).Select(i => i.ImageUrl).FirstOrDefault();
+
+                // W-4 Fix: Compute stock status from InventoryRecord
+                string? stockStatus = null;
+                if (inventoryDict != null && inventoryDict.TryGetValue(product.Id, out var inventory))
+                {
+                    stockStatus = inventory.CurrentStock <= 0
+                        ? "Out of Stock"
+                        : inventory.CurrentStock <= inventory.LowStockThreshold
+                            ? "Low Stock"
+                            : "In Stock";
+                }
 
                 itemDtos.Add(new OutfitItemDto(
                     item.Id,
@@ -55,7 +71,8 @@ internal static class OutfitMappings
                     product.Brand,
                     product.Price,
                     primaryImage,
-                    product.AvailableColors
+                    product.AvailableColors,
+                    stockStatus
                 ));
             }
         }
