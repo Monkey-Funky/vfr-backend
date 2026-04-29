@@ -124,6 +124,29 @@ public static class DependencyInjection
                 });
         });
 
+        // ── 3a. Stripe resilience pipeline ─────────────────────────────────────
+        //
+        // Required by StripePaymentGatewayService. Retry with exponential backoff
+        // and circuit breaker for Stripe API reliability.
+        services.AddResiliencePipeline("stripe", builder =>
+        {
+            builder
+                .AddRetry(new RetryStrategyOptions
+                {
+                    MaxRetryAttempts = 3,
+                    Delay = TimeSpan.FromMilliseconds(500),
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true,
+                })
+                .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+                {
+                    FailureRatio = 0.5,
+                    SamplingDuration = TimeSpan.FromSeconds(30),
+                    MinimumThroughput = 5,
+                    BreakDuration = TimeSpan.FromSeconds(30),
+                });
+        });
+
         // ── 3b. External API resilience (Weather + AI Suggestions) ─────────────
         //
         // W-1 Fix: Shared pipeline for IWeatherService / IOutfitSuggestionService.
@@ -151,10 +174,36 @@ public static class DependencyInjection
                 });
             });
 
-        // ── 4. AWS S3 client (Singleton — IAmazonS3 is thread-safe) ──────────
-        services.AddSingleton<IAmazonS3>(_ =>
+        // ── 4. S3-Compatible Client (AWS S3 / Cloudflare R2) ─────────────────
+        //
+        // Cloudflare R2 is fully S3-compatible. When S3:ServiceUrl is set,
+        // the client uses that endpoint instead of AWS. This enables
+        // the same FileStorageService to work with both AWS S3 and R2.
+        services.AddSingleton<IAmazonS3>(sp =>
         {
-            var region = configuration["S3:Region"] ?? "us-east-1";
+            var s3Config = configuration.GetSection("S3");
+            var serviceUrl = s3Config["ServiceUrl"];
+            var accessKey = s3Config["AccessKey"];
+            var secretKey = s3Config["SecretKey"];
+            var region = s3Config["Region"] ?? "us-east-1";
+
+            if (!string.IsNullOrWhiteSpace(serviceUrl) &&
+                !string.IsNullOrWhiteSpace(accessKey) &&
+                !string.IsNullOrWhiteSpace(secretKey))
+            {
+                // ── Cloudflare R2 / Custom S3-compatible endpoint ──────────────
+                var config = new AmazonS3Config
+                {
+                    ServiceURL = serviceUrl,
+                    ForcePathStyle = true,  // R2 requires path-style addressing
+                    RequestChecksumCalculation = Amazon.Runtime.RequestChecksumCalculation.WHEN_REQUIRED,
+                    ResponseChecksumValidation = Amazon.Runtime.ResponseChecksumValidation.WHEN_REQUIRED,
+                };
+
+                return new AmazonS3Client(accessKey, secretKey, config);
+            }
+
+            // ── Default AWS S3 (for development with IAM roles) ────────────────
             return new AmazonS3Client(RegionEndpoint.GetBySystemName(region));
         });
 
@@ -172,17 +221,6 @@ public static class DependencyInjection
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
         // ── 7. Redis / Distributed Cache ──────────────────────────────────────
-        //var redisConnectionString = configuration["Redis:ConnectionString"] ?? "localhost:6379";
-
-        //services.AddSingleton<IConnectionMultiplexer>(_ =>
-        //    ConnectionMultiplexer.Connect(redisConnectionString + ",abortConnect=false"));
-
-        //services.AddStackExchangeRedisCache(options =>
-        //{
-        //    options.Configuration = redisConnectionString + ",abortConnect=false";
-        //    options.InstanceName = "vfr:";
-        //});
-
         var redisConnectionString = configuration["Redis:ConnectionString"] ?? "localhost:6379";
 
         // Don't append abortConnect if it's already in the connection string

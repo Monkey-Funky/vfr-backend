@@ -1,0 +1,68 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # ── Build & Test ──────────────────────────────────────────────────────────
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore vfr-backend.sln
+
+      - name: Build (Release)
+        run: dotnet build vfr-backend.sln --no-restore -c Release
+
+      - name: Run Unit Tests
+        run: dotnet test Tests.Unit/Tests.Unit.csproj --no-build -c Release --verbosity normal --logger "trx;LogFileName=unit-test-results.trx"
+
+      - name: Run Integration Tests
+        run: dotnet test Tests.Integration/Tests.Integration.csproj --no-build -c Release --verbosity normal --logger "trx;LogFileName=integration-test-results.trx"
+        continue-on-error: true  # Integration tests may need external services
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            **/TestResults/*.trx
+          retention-days: 7
+
+  # ── Deploy to Render ──────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Render
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger Render Deploy
+        run: |
+          echo "Triggering Render.com deploy hook..."
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}")
+          echo "Render responded with HTTP $RESPONSE"
+          if [ "$RESPONSE" -ne 200 ] && [ "$RESPONSE" -ne 201 ]; then
+            echo "::error::Render deploy hook failed with HTTP $RESPONSE"
+            exit 1
+          fi
+          echo "Deploy triggered successfully!"

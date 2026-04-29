@@ -1,0 +1,16 @@
+**/.git
+**/.vs
+**/.vscode
+**/.gitignore
+**/bin
+**/obj
+**/Logs
+**/Docs
+**/*.pem
+**/*.user
+**/appsettings.Development.json
+**/node_modules
+**/.dockerignore
+**/Dockerfile
+**/*.md
+**/.github

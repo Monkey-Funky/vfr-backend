@@ -5,3 +5,21 @@ obj/
 *.pem
 **/Logs/
 Docs/
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Secrets
+*.pfx
+*.key
