@@ -124,6 +124,33 @@ public static class DependencyInjection
                 });
         });
 
+        // ── 3b. External API resilience (Weather + AI Suggestions) ─────────────
+        //
+        // W-1 Fix: Shared pipeline for IWeatherService / IOutfitSuggestionService.
+        // When swapping mocks to real HttpClient implementations, register via:
+        //   services.AddHttpClient<IWeatherService, RealWeatherService>()
+        //           .AddResilienceHandler("external-api", ...);
+        services.AddHttpClient<IWeatherService, WeatherService>()
+            .AddResilienceHandler("external-api", builder =>
+            {
+                builder
+                    .AddTimeout(TimeSpan.FromSeconds(10))
+                .AddRetry(new Microsoft.Extensions.Http.Resilience.HttpRetryStrategyOptions
+                {
+                    MaxRetryAttempts = 3,
+                    Delay = TimeSpan.FromMilliseconds(500),
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true,
+                })
+                .AddCircuitBreaker(new Microsoft.Extensions.Http.Resilience.HttpCircuitBreakerStrategyOptions
+                {
+                    FailureRatio = 0.5,
+                    SamplingDuration = TimeSpan.FromSeconds(30),
+                    MinimumThroughput = 5,
+                    BreakDuration = TimeSpan.FromSeconds(30),
+                });
+            });
+
         // ── 4. AWS S3 client (Singleton — IAmazonS3 is thread-safe) ──────────
         services.AddSingleton<IAmazonS3>(_ =>
         {
@@ -195,6 +222,9 @@ public static class DependencyInjection
 
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<ISubscriptionService, SubscriptionService>();
+
+        
+        services.AddScoped<IOutfitSuggestionService, MockOutfitSuggestionService>();
 
         services.AddScoped<SubscriptionPlanSeeder>();
 

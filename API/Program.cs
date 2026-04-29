@@ -179,6 +179,7 @@ c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
             []
         }
     });
+    c.CustomSchemaIds(type => type.FullName); // Use full type names to avoid conflicts in Swagger schema IDs
 });
 
 // ── 8. BUILD ─────────────────────────────────────────────────────────────────
