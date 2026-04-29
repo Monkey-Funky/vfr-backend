@@ -157,13 +157,15 @@ builder.Services.AddSwaggerGen(c =>
 {
 c.EnableAnnotations();
 
-// FIX (F-Swagger-A): IFormFile must be explicitly mapped to a binary schema.
-// Without this, Swashbuckle 7.x throws an InvalidOperationException during
-// startup when it encounters IFormFile on RegisterStep2Request.BrandLogoFile.
-// That exception is caught by ExceptionHandlingMiddleware, which returns
-// {"code":"INTERNAL_ERROR",...} — a JSON body with no openapi version field —
-// causing Swagger UI to display "does not specify a valid version field".
-c.MapType<IFormFile>(() => new Microsoft.OpenApi.Models.OpenApiSchema
+
+    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
+    // FIX (F-Swagger-A): IFormFile must be explicitly mapped to a binary schema.
+    // Without this, Swashbuckle 7.x throws an InvalidOperationException during
+    // startup when it encounters IFormFile on RegisterStep2Request.BrandLogoFile.
+    // That exception is caught by ExceptionHandlingMiddleware, which returns
+    // {"code":"INTERNAL_ERROR",...} — a JSON body with no openapi version field —
+    // causing Swagger UI to display "does not specify a valid version field".
+    c.MapType<IFormFile>(() => new Microsoft.OpenApi.Models.OpenApiSchema
 {
     Type = "string",
     Format = "binary"
