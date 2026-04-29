@@ -3,6 +3,7 @@ using System;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -12,9 +13,11 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260426145259_Customer_AddCustomerFavorite")]
+    partial class Customer_AddCustomerFavorite
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -822,122 +825,6 @@ namespace Infrastructure.Migrations
                         .HasFilter("is_deleted = false");
 
                     b.ToTable("customer_favorites", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfit", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("created_by");
-
-                    b.Property<Guid>("CustomerId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("customer_id");
-
-                    b.Property<bool>("IsDeleted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_deleted");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("character varying(150)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("StyleCategory")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("style");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_customer_outfits");
-
-                    b.HasIndex("CustomerId")
-                        .HasDatabaseName("ix_customer_outfits_customer_id");
-
-                    b.ToTable("customer_outfits", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfitItem", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("created_by");
-
-                    b.Property<int>("DisplayOrder")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("display_order");
-
-                    b.Property<bool>("IsDeleted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_deleted");
-
-                    b.Property<Guid>("OutfitId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("outfit_id");
-
-                    b.Property<Guid>("ProductId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("product_id");
-
-                    b.Property<string>("SlotType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)")
-                        .HasColumnName("slot");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_customer_outfit_items");
-
-                    b.HasIndex("ProductId")
-                        .HasDatabaseName("ix_customer_outfit_items_product_id");
-
-                    b.HasIndex("OutfitId", "SlotType", "ProductId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_customer_outfit_items_outfit_id_slot_product_id")
-                        .HasFilter("is_deleted = false");
-
-                    b.ToTable("customer_outfit_items", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Customer.FitFeedback", b =>
@@ -1811,30 +1698,14 @@ namespace Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.PrimitiveCollection<string[]>("AvailableColors")
-                        .HasColumnType("text[]")
-                        .HasColumnName("available_colors");
-
-                    b.PrimitiveCollection<string[]>("AvailableSizes")
-                        .HasColumnType("text[]")
-                        .HasColumnName("available_sizes");
-
                     b.Property<string>("Barcode")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("barcode");
 
-                    b.Property<string>("Brand")
-                        .HasColumnType("text")
-                        .HasColumnName("brand");
-
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("uuid")
                         .HasColumnName("category_id");
-
-                    b.Property<string>("Closure")
-                        .HasColumnType("text")
-                        .HasColumnName("closure");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -1857,45 +1728,17 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
-                    b.Property<string>("Features")
-                        .HasColumnType("text")
-                        .HasColumnName("features");
-
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false)
                         .HasColumnName("is_deleted");
 
-                    b.Property<string>("Length")
-                        .HasColumnType("text")
-                        .HasColumnName("length");
-
-                    b.Property<string>("Lining")
-                        .HasColumnType("text")
-                        .HasColumnName("lining");
-
-                    b.Property<string>("Material")
-                        .HasColumnType("text")
-                        .HasColumnName("material");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
-
-                    b.Property<string>("Neckline")
-                        .HasColumnType("text")
-                        .HasColumnName("neckline");
-
-                    b.Property<string>("Occasion")
-                        .HasColumnType("text")
-                        .HasColumnName("occasion");
-
-                    b.Property<string>("Pattern")
-                        .HasColumnType("text")
-                        .HasColumnName("pattern");
 
                     b.Property<decimal?>("Price")
                         .HasColumnType("numeric(18,2)")
@@ -1910,10 +1753,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("tsvector")
                         .HasColumnName("search_vector")
                         .HasComputedColumnSql("to_tsvector('english', coalesce(name, '') || ' ' || coalesce(description, '') || ' ' || coalesce(barcode, ''))", true);
-
-                    b.Property<string>("Sleeves")
-                        .HasColumnType("text")
-                        .HasColumnName("sleeves");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1935,14 +1774,6 @@ namespace Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("updated_by");
-
-                    b.Property<int>("ViewsCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("views_count");
-
-                    b.Property<string>("WashInstructions")
-                        .HasColumnType("text")
-                        .HasColumnName("wash_instructions");
 
                     b.HasKey("Id")
                         .HasName("pk_products");
@@ -2688,33 +2519,6 @@ namespace Infrastructure.Migrations
                         .HasConstraintName("fk_customer_favorites_products");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfit", b =>
-                {
-                    b.HasOne("Domain.Entities.Customer.CustomerAccount", null)
-                        .WithMany()
-                        .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_customer_outfits_customer_accounts");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfitItem", b =>
-                {
-                    b.HasOne("Domain.Entities.Customer.CustomerOutfit", null)
-                        .WithMany("Items")
-                        .HasForeignKey("OutfitId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_customer_outfit_items_customer_outfits_outfit_id");
-
-                    b.HasOne("Domain.Entities.Retailer.Product", null)
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_customer_outfit_items_products_product_id");
-                });
-
             modelBuilder.Entity("Domain.Entities.Customer.VirtualTryOnSession", b =>
                 {
                     b.HasOne("Domain.Entities.Customer.Avatar", null)
@@ -2995,11 +2799,6 @@ namespace Infrastructure.Migrations
                         .HasConstraintName("fk_subscription_payments_subscription_plan_id");
 
                     b.Navigation("Plan");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfit", b =>
-                {
-                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("Domain.Entities.Orders.Order", b =>

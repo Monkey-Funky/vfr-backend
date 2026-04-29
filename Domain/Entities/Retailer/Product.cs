@@ -67,6 +67,25 @@ public sealed class Product : BaseEntity
     public string Status { get; private set; } = ProductStatus.Draft;
 
     // =========================================================================
+    // Phase 3 Extensions (UI-driven attributes)
+    // =========================================================================
+
+    public string? Brand { get; private set; }
+    public string? Material { get; private set; }
+    public string? Pattern { get; private set; }
+    public string? Lining { get; private set; }
+    public string? Length { get; private set; }
+    public string? Occasion { get; private set; }
+    public string? Neckline { get; private set; }
+    public string? Closure { get; private set; }
+    public string? Sleeves { get; private set; }
+    public string? Features { get; private set; }
+    public string? WashInstructions { get; private set; }
+    public int ViewsCount { get; private set; } = 0;
+    public string[]? AvailableColors { get; private set; }
+    public string[]? AvailableSizes { get; private set; }
+
+    // =========================================================================
     // Navigation — Images
     // =========================================================================
 
