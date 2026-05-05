@@ -6,6 +6,8 @@ public sealed class CheckFavoritesQueryValidator : AbstractValidator<CheckFavori
     {
         RuleFor(x => x.ProductIds)
             .NotEmpty().WithMessage("At least one product must be selected.")
+            .Must(ids => ids.Length <= 50)
+            .WithMessage("Cannot check more than 50 products at once.")
             .Must(ids => ids.All(id => id != Guid.Empty))
             .WithMessage("All product identifiers must be valid.");
 

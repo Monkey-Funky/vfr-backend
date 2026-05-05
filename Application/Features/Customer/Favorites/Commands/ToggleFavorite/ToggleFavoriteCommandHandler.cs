@@ -43,6 +43,16 @@ internal sealed class ToggleFavoriteCommandHandler : IRequestHandler<ToggleFavor
             {
                 // Unfavorite
                 existingFavorite.SoftDelete();
+
+                // Cascade: soft-delete all collection items referencing this favorite
+                // to prevent orphaned rows inflating ItemCount in collection listings.
+                var orphanedItems = await _context.WardrobeCollectionItems
+                    .Where(i => i.FavoriteId == existingFavorite.Id)
+                    .ToListAsync(cancellationToken);
+
+                foreach (var item in orphanedItems)
+                    item.SoftDelete();
+
                 isFavoriteNow = false;
             }
             else

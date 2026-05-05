@@ -21,13 +21,8 @@ internal sealed class DeleteCollectionCommandHandler : IRequestHandler<DeleteCol
             ?? throw new UnauthorizedAccessException("Only authenticated customers can delete collections.");
 
         var collection = await _context.WardrobeCollections
-            .FirstOrDefaultAsync(c => c.Id == request.CollectionId, cancellationToken)
+            .FirstOrDefaultAsync(c => c.Id == request.CollectionId && c.CustomerId == customerId, cancellationToken)
             ?? throw new NotFoundException("WardrobeCollection", request.CollectionId);
-
-        if (collection is null)
-        {
-            throw new NotFoundException("WardrobeCollection", request.CollectionId);
-        }
 
         collection.SoftDelete();
 

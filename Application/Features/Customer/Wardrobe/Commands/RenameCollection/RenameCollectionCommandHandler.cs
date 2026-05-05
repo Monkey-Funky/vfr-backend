@@ -22,7 +22,7 @@ internal sealed class RenameCollectionCommandHandler : IRequestHandler<RenameCol
             ?? throw new UnauthorizedAccessException("Only authenticated customers can rename collections.");
 
         var collection = await _context.WardrobeCollections
-            .FirstOrDefaultAsync(c => c.Id == request.CollectionId, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == request.CollectionId && c.CustomerId == customerId, cancellationToken);
 
         if (collection is null)
         {
