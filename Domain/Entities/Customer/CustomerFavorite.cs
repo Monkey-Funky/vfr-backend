@@ -64,4 +64,9 @@ public sealed class CustomerFavorite : BaseEntity
     /// Soft-deletes this favorite (e.g., when a user unfavorites a product).
     /// </summary>
     public void SoftDelete() => MarkAsDeleted();
+
+    /// <summary>
+    /// Restores a previously soft-deleted favorite.
+    /// </summary>
+    public void Restore() => IsDeleted = false;
 }

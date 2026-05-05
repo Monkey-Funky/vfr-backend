@@ -27,6 +27,8 @@ public interface IApplicationDbContext
     DbSet<CustomerFavorite> CustomerFavorites { get; }
     DbSet<CustomerOutfit> CustomerOutfits { get; }
     DbSet<CustomerOutfitItem> CustomerOutfitItems { get; }
+    DbSet<WardrobeCollection> WardrobeCollections { get; }
+    DbSet<WardrobeCollectionItem> WardrobeCollectionItems { get; }
 
     // ── Subscriptions (P-015) ─────────────────────────────────────────────────
     DbSet<SubscriptionPlan> SubscriptionPlans { get; }

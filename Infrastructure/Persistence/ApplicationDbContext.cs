@@ -33,6 +33,8 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<CustomerFavorite> CustomerFavorites => Set<CustomerFavorite>();
     public DbSet<CustomerOutfit> CustomerOutfits => Set<CustomerOutfit>();
     public DbSet<CustomerOutfitItem> CustomerOutfitItems => Set<CustomerOutfitItem>();
+    public DbSet<WardrobeCollection> WardrobeCollections => Set<WardrobeCollection>();
+    public DbSet<WardrobeCollectionItem> WardrobeCollectionItems => Set<WardrobeCollectionItem>();
 
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
