@@ -174,6 +174,20 @@ public static class DependencyInjection
                 });
             });
 
+        // Register the AI Extraction service with a longer timeout (AI processing can take 10-30s)
+        services.AddHttpClient<IBodyMeasurementExtractionService, BodyMeasurementExtractionService>()
+            .AddResilienceHandler("ai-extraction-api", builder =>
+            {
+                builder
+                    .AddTimeout(TimeSpan.FromSeconds(60)) // Longer timeout for image processing
+                    .AddRetry(new Microsoft.Extensions.Http.Resilience.HttpRetryStrategyOptions
+                    {
+                        MaxRetryAttempts = 2,
+                        Delay = TimeSpan.FromSeconds(2),
+                        BackoffType = DelayBackoffType.Exponential
+                    });
+            });
+
         // ── 4. S3-Compatible Client (AWS S3 / Cloudflare R2) ─────────────────
         //
         // Cloudflare R2 is fully S3-compatible. When S3:ServiceUrl is set,
