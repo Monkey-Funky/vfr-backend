@@ -2,6 +2,7 @@ using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Customer;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Application.Features.Customer.Avatar.Commands.UpdateAvatarMeasurements;
 
@@ -9,16 +10,13 @@ public sealed class UpdateAvatarMeasurementsCommandHandler : IRequestHandler<Upd
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
-    private readonly IPublisher _publisher;
 
     public UpdateAvatarMeasurementsCommandHandler(
         IApplicationDbContext context,
-        ICurrentUserService currentUserService,
-        IPublisher publisher)
+        ICurrentUserService currentUserService)
     {
         _context = context;
         _currentUserService = currentUserService;
-        _publisher = publisher;
     }
 
     public async Task Handle(UpdateAvatarMeasurementsCommand request, CancellationToken cancellationToken)
@@ -46,14 +44,19 @@ public sealed class UpdateAvatarMeasurementsCommandHandler : IRequestHandler<Upd
             request.BodyShape
         );
 
-        avatar.UpdateMeasurements(measurements, request.Source);
+        avatar.UpdateMeasurements(measurements);
 
-        foreach (var domainEvent in avatar.DomainEvents)
-        {
-            await _publisher.Publish(domainEvent, cancellationToken);
-        }
-        avatar.DomainEvents.Clear();
+        // Record history snapshot in the same transaction — pure procedural CQRS.
+        // The handler owns the side-effect, not the domain entity.
+        var measurementsJson = JsonSerializer.Serialize(measurements);
+        var history = AvatarMeasurementHistory.CreateSnapshot(
+            avatarId: avatar.Id,
+            measurementDataJson: measurementsJson,
+            source: request.Source);
+
+        _context.AvatarMeasurementHistory.Add(history);
 
         await _context.SaveChangesAsync(cancellationToken);
     }
 }
+

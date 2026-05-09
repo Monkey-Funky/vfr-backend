@@ -1,6 +1,8 @@
 using API.Controllers.BaseControllers;
+using Application.Common;
 using Application.Features.Customer.Avatar.Commands.CreateAvatar;
 using Application.Features.Customer.Avatar.Commands.DeleteAvatar;
+using Application.Features.Customer.Avatar.Commands.ExtractMeasurementsFromImage;
 using Application.Features.Customer.Avatar.Commands.UpdateAvatarMeasurements;
 using Application.Features.Customer.Avatar.DTOs;
 using Application.Features.Customer.Avatar.Queries.GetAvatar;
@@ -111,23 +113,73 @@ public sealed class AvatarController : CustomerBaseApiController
         return NoContentResponse();
     }
 
+    //// ==============================================================
+    //// GET api/customers/{customerId}/avatar/size-recommendation/{productId}
+    //// ==============================================================
+    //[HttpGet("size-recommendation/{productId:guid}")]
+    //[SwaggerOperation(
+    //    Summary = "Get a size recommendation",
+    //    Description = "Uses ML mapping limits (placeholder) to match customer's body measurements to the product sizing chart.")]
+    //[ProducesResponseType(typeof(ApiResponse<SizeRecommendationDto>), StatusCodes.Status200OK)]
+    //[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    //[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    //public async Task<IActionResult> GetSizeRecommendation(
+    //    Guid customerId,
+    //    Guid productId,
+    //    CancellationToken cancellationToken)
+    //{
+    //    EnsureCustomerOwnership(customerId);
+    //    var result = await Sender.Send(new GetSizeRecommendationQuery(productId), cancellationToken);
+    //    return OkResponse(result);
+    //}
+
     // ==============================================================
-    // GET api/customers/{customerId}/avatar/size-recommendation/{productId}
+    // POST api/customers/{customerId}/avatar/extract-from-image
     // ==============================================================
-    [HttpGet("size-recommendation/{productId:guid}")]
+    [HttpPost("extract-from-image")]
+    [Consumes("multipart/form-data")]
     [SwaggerOperation(
-        Summary = "Get a size recommendation",
-        Description = "Uses ML mapping limits (placeholder) to match customer's body measurements to the product sizing chart.")]
-    [ProducesResponseType(typeof(ApiResponse<SizeRecommendationDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetSizeRecommendation(
+        Summary = "Extract measurements from image",
+        Description = "Uploads a full-body photo to an AI model that extracts body measurements. " +
+                      "Creates a new avatar if none exists, or updates the existing one. " +
+                      "The image is NOT persisted — it is streamed to the AI model and discarded.")]
+    [ProducesResponseType(typeof(ApiResponse<AvatarDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ExtractMeasurementsFromImage(
         Guid customerId,
-        Guid productId,
+        [FromForm] ExtractMeasurementsFromImageRequest request,
         CancellationToken cancellationToken)
     {
         EnsureCustomerOwnership(customerId);
-        var result = await Sender.Send(new GetSizeRecommendationQuery(productId), cancellationToken);
-        return OkResponse(result);
+
+        // Map IFormFile → FileUploadDto in the API layer (same pattern as ProductsController).
+        var imageUpload = new FileUploadDto(
+            Content: request.ImageFile.OpenReadStream(),
+            FileName: request.ImageFile.FileName,
+            ContentType: request.ImageFile.ContentType,
+            Length: request.ImageFile.Length);
+
+        var command = new ExtractMeasurementsFromImageCommand(imageUpload, request.HeightCm);
+        var result = await Sender.Send(command, cancellationToken);
+
+        return OkResponse(result, "Measurements extracted and saved successfully.");
     }
+}
+
+/// <summary>
+/// Request model for POST /api/customers/{customerId}/avatar/extract-from-image.
+/// Bound from multipart/form-data.
+/// </summary>
+public sealed class ExtractMeasurementsFromImageRequest
+{
+    /// <summary>
+    /// Full-body photo of the customer. JPEG or PNG. Max 5 MB.
+    /// </summary>
+    public IFormFile ImageFile { get; init; } = null!;
+
+    /// <summary>
+    /// The customer's actual height in centimeters (required for the AI model to scale estimates).
+    /// </summary>
+    public decimal HeightCm { get; init; }
 }

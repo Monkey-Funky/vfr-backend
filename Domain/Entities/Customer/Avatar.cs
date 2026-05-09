@@ -1,5 +1,3 @@
-using Domain.Events;
-using Domain.Events.Customer;
 using Domain.Exceptions;
 
 namespace Domain.Entities.Customer;
@@ -24,13 +22,7 @@ public sealed class Avatar : BaseEntity
     public string? Avatar3dModelUrl { get; private set; }
     public DateTime LastMeasuredAt { get; private set; }
 
-    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
-    public List<IDomainEvent> DomainEvents { get; } = new();
 
-    public void AddDomainEvent(IDomainEvent domainEvent)
-    {
-        DomainEvents.Add(domainEvent);
-    }
 
     private Avatar() { }
 
@@ -74,7 +66,7 @@ public sealed class Avatar : BaseEntity
         return avatar;
     }
 
-    public void UpdateMeasurements(BodyMeasurements measurements, string source)
+    public void UpdateMeasurements(BodyMeasurements measurements)
     {
         ArgumentNullException.ThrowIfNull(measurements);
         
@@ -95,9 +87,6 @@ public sealed class Avatar : BaseEntity
 
         LastMeasuredAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
-
-        var measurementDataJson = System.Text.Json.JsonSerializer.Serialize(measurements);
-        AddDomainEvent(new AvatarMeasurementsUpdatedDomainEvent(Id, measurementDataJson, source));
     }
 
     public void SetAvatar3dModelUrl(string url)
