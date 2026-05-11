@@ -4,6 +4,7 @@ using Application.Interfaces.External;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Application.Interfaces.Services.Customer;
+using CloudinaryDotNet;
 using Infrastructure.BackgroundJobs;
 using Infrastructure.Hubs;
 using Infrastructure.Persistence;
@@ -58,19 +59,19 @@ public static class DependencyInjection
             sp.GetRequiredService<ApplicationDbContext>());
 
         // ── 2. Options bindings ───────────────────────────────────────────────
-        //
-        // Using the lambda bind form (options => section.Bind(options)) is always
-        // safe regardless of which Configure<T> overload the compiler resolves.
-        // The IConfiguration overload requires Microsoft.Extensions.Options.ConfigurationExtensions;
-        // the lambda form never has that dependency.
         services.Configure<JwtSettings>(options =>
     configuration.GetSection("JwtSettings").Bind(options));
 
         services.Configure<EmailSettings>(options =>
             configuration.GetSection("Email").Bind(options));
 
+        // S3Settings — لسه محتاجينه علشان IS3StorageService (reports)
         services.Configure<S3Settings>(options =>
             configuration.GetSection("S3").Bind(options));
+
+        // Cloudinary Settings — الجديد للصور
+        services.Configure<CloudinarySettings>(options =>
+            configuration.GetSection("Cloudinary").Bind(options));
 
         services.Configure<GoogleSettings>(options =>
             configuration.GetSection("Google").Bind(options));
@@ -125,9 +126,6 @@ public static class DependencyInjection
         });
 
         // ── 3a. Stripe resilience pipeline ─────────────────────────────────────
-        //
-        // Required by StripePaymentGatewayService. Retry with exponential backoff
-        // and circuit breaker for Stripe API reliability.
         services.AddResiliencePipeline("stripe", builder =>
         {
             builder
@@ -148,11 +146,6 @@ public static class DependencyInjection
         });
 
         // ── 3b. External API resilience (Weather + AI Suggestions) ─────────────
-        //
-        // W-1 Fix: Shared pipeline for IWeatherService / IOutfitSuggestionService.
-        // When swapping mocks to real HttpClient implementations, register via:
-        //   services.AddHttpClient<IWeatherService, RealWeatherService>()
-        //           .AddResilienceHandler("external-api", ...);
         services.AddHttpClient<IWeatherService, WeatherService>()
             .AddResilienceHandler("external-api", builder =>
             {
@@ -190,9 +183,8 @@ public static class DependencyInjection
 
         // ── 4. S3-Compatible Client (AWS S3 / Cloudflare R2) ─────────────────
         //
-        // Cloudflare R2 is fully S3-compatible. When S3:ServiceUrl is set,
-        // the client uses that endpoint instead of AWS. This enables
-        // the same FileStorageService to work with both AWS S3 and R2.
+        // لسه محتاجين S3 client علشان IS3StorageService (reports).
+        // الـ client ده بيستخدمه S3StorageService بس — مش الصور.
         services.AddSingleton<IAmazonS3>(sp =>
         {
             var s3Config = configuration.GetSection("S3");
@@ -205,11 +197,10 @@ public static class DependencyInjection
                 !string.IsNullOrWhiteSpace(accessKey) &&
                 !string.IsNullOrWhiteSpace(secretKey))
             {
-                // ── Cloudflare R2 / Custom S3-compatible endpoint ──────────────
                 var config = new AmazonS3Config
                 {
                     ServiceURL = serviceUrl,
-                    ForcePathStyle = true,  // R2 requires path-style addressing
+                    ForcePathStyle = true,
                     RequestChecksumCalculation = Amazon.Runtime.RequestChecksumCalculation.WHEN_REQUIRED,
                     ResponseChecksumValidation = Amazon.Runtime.ResponseChecksumValidation.WHEN_REQUIRED,
                 };
@@ -217,27 +208,41 @@ public static class DependencyInjection
                 return new AmazonS3Client(accessKey, secretKey, config);
             }
 
-            // ── Default AWS S3 (for development with IAM roles) ────────────────
             return new AmazonS3Client(RegionEndpoint.GetBySystemName(region));
+        });
+
+        // ── 4b. Cloudinary Client ────────────────────────────────────────────
+        //
+        // ده الـ client الجديد للصور (brand logos, products, categories, etc.)
+        services.AddSingleton<Cloudinary>(sp =>
+        {
+            var cloudinaryConfig = configuration.GetSection("Cloudinary");
+            var cloudName = cloudinaryConfig["CloudName"];
+            var apiKey = cloudinaryConfig["ApiKey"];
+            var apiSecret = cloudinaryConfig["ApiSecret"];
+
+            var account = new Account(cloudName, apiKey, apiSecret);
+            return new Cloudinary(account) { Api = { Secure = true } };
         });
 
         // ── 5. Application services ───────────────────────────────────────────
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IEmailService, EmailService>();
-        services.AddScoped<IFileStorageService, FileStorageService>();
+
+        // ✅ Cloudinary
+        services.AddScoped<IFileStorageService, CloudinaryFileStorageService>();
+
         services.AddScoped<IGoogleAuthService, GoogleAuthService>();
         services.AddScoped<ISizeRecommendationService, SizeRecommendationService>();
         services.AddScoped<IVirtualTryOnService, VirtualTryOnService>();
 
         // ── 6. Repository & Unit of Work ──────────────────────────────────────
-        // These were incorrectly commented out — they are required by all command handlers.
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
         // ── 7. Redis / Distributed Cache ──────────────────────────────────────
         var redisConnectionString = configuration["Redis:ConnectionString"] ?? "localhost:6379";
 
-        // Don't append abortConnect if it's already in the connection string
         var redisConfigString = redisConnectionString.Contains("abortConnect", StringComparison.OrdinalIgnoreCase)
             ? redisConnectionString
             : redisConnectionString + ",abortConnect=false";
@@ -263,24 +268,19 @@ public static class DependencyInjection
             configuration.GetSection(StripeSettings.SectionName));
 
         // ── Application Services ──────────────────────────────────────────────
-
-        // IPaymentGatewayService — Scoped: one instance per HTTP request.
-        // Uses Polly resilience pipeline "stripe" (registered in P-049).
         services.AddScoped<IPaymentGatewayService, StripePaymentGatewayService>();
-
-        // IEncryptionService — Singleton: stateless, thread-safe AES-256 service.
         services.AddSingleton<IEncryptionService, AesEncryptionService>();
 
 
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<ISubscriptionService, SubscriptionService>();
 
-        
+
         services.AddScoped<IOutfitSuggestionService, MockOutfitSuggestionService>();
 
         services.AddScoped<SubscriptionPlanSeeder>();
 
-        services.AddScoped<IOrderRepository, OrderRepository>();  
+        services.AddScoped<IOrderRepository, OrderRepository>();
 
         services.AddScoped<IInventoryRepository, InventoryRepository>();
 
@@ -289,17 +289,12 @@ public static class DependencyInjection
 
 
         // ── Analytics / Dashboard (P-041) ────────────────────────────────────────────
-
-        // IDashboardRepository — scoped (one per request, uses scoped IApplicationDbContext).
         services.AddScoped<IDashboardRepository, DashboardRepository>();
 
-        // IS3StorageService — scoped (holds no mutable state per request).
+        // IS3StorageService — لسه شغال للـ reports (مش الصور)
         services.AddScoped<IS3StorageService, S3StorageService>();
 
-        // IReportQueue — singleton (shared Channel between HTTP requests and BackgroundService).
         services.AddSingleton<IReportQueue, ReportQueue>();
-
-        // ReportGenerationJob — hosted service (singleton, reads from IReportQueue.ReadAllAsync).
         services.AddHostedService<ReportGenerationJob>();
 
         services.AddScoped<IPlanLimitService, PlanLimitService>();
