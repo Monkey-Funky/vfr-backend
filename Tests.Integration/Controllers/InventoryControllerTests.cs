@@ -151,4 +151,74 @@ public sealed class InventoryControllerTests : IntegrationTestBase
         var content = await response.Content.ReadAsStringAsync();
         content.Should().Contain("Export Product");
     }
+
+    [Fact]
+    public async Task GetInventoryByProductId_ReturnsDetail_WhenProductExists()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid productId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var p = Product.Create(retailerId, "Detail Product", price: 50m);
+            db.Products.Add(p);
+            await db.SaveChangesAsync();
+            productId = p.Id;
+
+            db.InventoryRecords.Add(InventoryRecord.Create(retailerId, p.Id, p.Name, 30, lowStockThreshold: 5));
+            await db.SaveChangesAsync();
+        });
+
+        var response = await Client.GetAsync(
+            $"/api/retailers/{retailerId}/inventory/product/{productId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ApiResponse<InventoryDetailDto>>();
+        result!.Data.Should().NotBeNull();
+        result.Data!.CurrentStock.Should().Be(30);
+    }
+
+    [Fact]
+    public async Task GetInventoryByProductId_ReturnsNotFound_WhenProductDoesNotExist()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+
+        var response = await Client.GetAsync(
+            $"/api/retailers/{retailerId}/inventory/product/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DeleteInventoryRecord_SoftDeletes_WhenRecordExists()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid inventoryId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var p = Product.Create(retailerId, "Delete Inventory Product", price: 25m);
+            db.Products.Add(p);
+            await db.SaveChangesAsync();
+
+            var inv = InventoryRecord.Create(retailerId, p.Id, p.Name, 20);
+            db.InventoryRecords.Add(inv);
+            await db.SaveChangesAsync();
+            inventoryId = inv.Id;
+        });
+
+        var response = await Client.DeleteAsync(
+            $"/api/retailers/{retailerId}/inventory/{inventoryId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var inv = await db.InventoryRecords
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(i => i.Id == inventoryId);
+            inv!.IsDeleted.Should().BeTrue();
+        });
+    }
 }
+

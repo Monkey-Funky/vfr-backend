@@ -180,4 +180,83 @@ public sealed class OffersControllerTests : IntegrationTestBase
             offer!.IsDeleted.Should().BeTrue();
         });
     }
+
+    [Fact]
+    public async Task GetOfferById_ReturnsOffer_WhenExists()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid offerId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var product = Product.Create(retailerId, "Offer Detail Product", price: 200m, status: Domain.Enums.Product.ProductStatus.Active);
+            db.Products.Add(product);
+            await db.SaveChangesAsync();
+
+            var offer = Offer.Create(
+                retailerId, "Detail Offer", "A detailed offer", OfferType.Product, product.Id, null,
+                DiscountType.Percentage, 15, DateOnly.FromDateTime(DateTime.UtcNow), null, "http://img.com");
+
+            db.Offers.Add(offer);
+            await db.SaveChangesAsync();
+            offerId = offer.Id;
+        });
+
+        var response = await Client.GetAsync($"/api/retailers/{retailerId}/offers/{offerId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ApiResponse<OfferDto>>();
+        result!.Data.Should().NotBeNull();
+        result.Data!.Title.Should().Be("Detail Offer");
+    }
+
+    [Fact]
+    public async Task GetOfferById_ReturnsNotFound_WhenDoesNotExist()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+
+        var response = await Client.GetAsync($"/api/retailers/{retailerId}/offers/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task UpdateOffer_UpdatesFields_WhenOfferIsActive()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid offerId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var product = Product.Create(retailerId, "Update Offer Product", price: 300m, status: Domain.Enums.Product.ProductStatus.Active);
+            db.Products.Add(product);
+            await db.SaveChangesAsync();
+
+            var offer = Offer.Create(
+                retailerId, "Original Title", null, OfferType.Product, product.Id, null,
+                DiscountType.Percentage, 10, DateOnly.FromDateTime(DateTime.UtcNow), null, "http://img.com");
+
+            db.Offers.Add(offer);
+            await db.SaveChangesAsync();
+            offerId = offer.Id;
+        });
+
+        using var content = new MultipartFormDataContent();
+        content.Add(new StringContent("Updated Title"), "Title");
+        content.Add(new StringContent(DiscountType.Percentage), "DiscountType");
+        content.Add(new StringContent("20"), "DiscountValue");
+        content.Add(new StringContent(DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")), "StartDate");
+        content.Add(new StringContent("Active"), "Status");
+
+        var response = await Client.PutAsync($"/api/retailers/{retailerId}/offers/{offerId}", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var offer = await db.Offers.FindAsync(offerId);
+            offer!.Title.Should().Be("Updated Title");
+            offer.DiscountValue.Should().Be(20);
+        });
+    }
 }

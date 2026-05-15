@@ -279,6 +279,7 @@ public static class DependencyInjection
         services.AddScoped<IOutfitSuggestionService, MockOutfitSuggestionService>();
 
         services.AddScoped<SubscriptionPlanSeeder>();
+        services.AddScoped<ExcelDataSeeder>();
 
         services.AddScoped<IOrderRepository, OrderRepository>();
 

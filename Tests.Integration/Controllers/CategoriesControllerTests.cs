@@ -18,9 +18,9 @@ namespace Tests.Integration.Controllers;
 [Collection(IntegrationTestCollection.Name)]
 public sealed class CategoriesControllerTests : IntegrationTestBase
 {
-    public CategoriesControllerTests(CustomWebApplicationFactory factory) 
-        : base(factory) 
-    { 
+    public CategoriesControllerTests(CustomWebApplicationFactory factory)
+        : base(factory)
+    {
     }
 
     // ── 1. GET /categories ───────────────────────────────────────────────────
@@ -43,7 +43,7 @@ public sealed class CategoriesControllerTests : IntegrationTestBase
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await response.Content.ReadFromJsonAsync<ApiResponse<PagedResult<CategoryDto>>>();
-        
+
         result!.Data!.Items.Should().HaveCount(2);
         result.Data.TotalCount.Should().Be(2);
     }
@@ -55,12 +55,12 @@ public sealed class CategoriesControllerTests : IntegrationTestBase
     {
         // Arrange
         var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
-        
+
         using var content = new MultipartFormDataContent();
         content.Add(new StringContent("Home & Garden"), "Name");
         content.Add(new StringContent("Decor and plants"), "Description");
         content.Add(new StringContent(Category.CategoryStatus.Active), "Status");
-        
+
         var fileContent = new ByteArrayContent("fake-image"u8.ToArray());
         fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("image/jpeg");
         content.Add(fileContent, "CoverImageFile", "home.jpg");
@@ -71,7 +71,7 @@ public sealed class CategoriesControllerTests : IntegrationTestBase
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var result = await response.Content.ReadFromJsonAsync<ApiResponse<Guid>>();
-        
+
         result!.Data.Should().NotBeEmpty();
 
         await Factory.ExecuteDbContextAsync(async db =>
@@ -111,7 +111,7 @@ public sealed class CategoriesControllerTests : IntegrationTestBase
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        
+
         await Factory.ExecuteDbContextAsync(async db =>
         {
             var category = await db.Categories.FindAsync(categoryId);
@@ -165,12 +165,12 @@ public sealed class CategoriesControllerTests : IntegrationTestBase
             var cat = Category.Create(retailerId, "Electronics", null, "https://img.com", Category.CategoryStatus.Active);
             db.Categories.Add(cat);
             await db.SaveChangesAsync();
-            
+
             var sub1 = SubCategory.Create(cat.Id, retailerId, "Smartphones", SubCategory.SubCategoryStatus.Active);
             var sub2 = SubCategory.Create(cat.Id, retailerId, "Tablets", SubCategory.SubCategoryStatus.Active);
             db.SubCategories.AddRange(sub1, sub2);
             await db.SaveChangesAsync();
-            
+
             categoryId = cat.Id;
         });
 
@@ -198,10 +198,10 @@ public sealed class CategoriesControllerTests : IntegrationTestBase
             categoryId = cat.Id;
         });
 
-        var request = new CreateSubCategoryRequest 
-        { 
-            Name = "Sub Category 1", 
-            Status = SubCategory.SubCategoryStatus.Active 
+        var request = new CreateSubCategoryRequest
+        {
+            Name = "Sub Category 1",
+            Status = SubCategory.SubCategoryStatus.Active
         };
 
         // Act
@@ -218,6 +218,137 @@ public sealed class CategoriesControllerTests : IntegrationTestBase
             sub.Should().NotBeNull();
             sub!.Name.Should().Be("Sub Category 1");
             sub.CategoryId.Should().Be(categoryId);
+        });
+    }
+
+    [Fact]
+    public async Task GetCategoryById_ReturnsCategory_WhenExists()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid categoryId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var cat = Category.Create(retailerId, "Findable Category", "Desc", "https://img.com", Category.CategoryStatus.Active);
+            db.Categories.Add(cat);
+            await db.SaveChangesAsync();
+            categoryId = cat.Id;
+        });
+
+        var response = await Client.GetAsync($"/api/retailers/{retailerId}/categories/{categoryId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ApiResponse<CategoryDto>>();
+        result!.Data.Should().NotBeNull();
+        result.Data!.Name.Should().Be("Findable Category");
+    }
+
+    [Fact]
+    public async Task GetCategoryById_ReturnsNotFound_WhenDoesNotExist()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+
+        var response = await Client.GetAsync($"/api/retailers/{retailerId}/categories/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task ToggleCategoryStatus_TogglesFromActiveToInactive_WhenCategoryExists()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid categoryId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var cat = Category.Create(retailerId, "Toggle Category", null, "https://img.com", Category.CategoryStatus.Active);
+            db.Categories.Add(cat);
+            await db.SaveChangesAsync();
+            categoryId = cat.Id;
+        });
+
+        var response = await Client.PatchAsync(
+            $"/api/retailers/{retailerId}/categories/{categoryId}/toggle-status", null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var category = await db.Categories.FindAsync(categoryId);
+            category!.Status.Should().Be(Category.CategoryStatus.Inactive);
+        });
+    }
+
+    [Fact]
+    public async Task UpdateSubCategory_UpdatesFields_WhenRequestIsValid()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid categoryId = Guid.Empty;
+        Guid subCategoryId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var cat = Category.Create(retailerId, "Parent Cat", null, "https://img.com", Category.CategoryStatus.Active);
+            db.Categories.Add(cat);
+            await db.SaveChangesAsync();
+            categoryId = cat.Id;
+
+            var sub = SubCategory.Create(cat.Id, retailerId, "Old Sub Name", SubCategory.SubCategoryStatus.Active);
+            db.SubCategories.Add(sub);
+            await db.SaveChangesAsync();
+            subCategoryId = sub.Id;
+        });
+
+        var request = new UpdateSubCategoryRequest
+        {
+            NewName = "Updated Sub Name",
+            Status = SubCategory.SubCategoryStatus.Inactive
+        };
+
+        var response = await Client.PutAsJsonAsync(
+            $"/api/retailers/{retailerId}/categories/{categoryId}/sub-categories/{subCategoryId}", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var sub = await db.SubCategories.FindAsync(subCategoryId);
+            sub!.Name.Should().Be("Updated Sub Name");
+            sub.Status.Should().Be(SubCategory.SubCategoryStatus.Inactive);
+        });
+    }
+
+    [Fact]
+    public async Task DeleteSubCategory_SoftDeletes_WhenSubCategoryExists()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid categoryId = Guid.Empty;
+        Guid subCategoryId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var cat = Category.Create(retailerId, "Delete Sub Parent", null, "https://img.com", Category.CategoryStatus.Active);
+            db.Categories.Add(cat);
+            await db.SaveChangesAsync();
+            categoryId = cat.Id;
+
+            var sub = SubCategory.Create(cat.Id, retailerId, "Delete Me Sub", SubCategory.SubCategoryStatus.Active);
+            db.SubCategories.Add(sub);
+            await db.SaveChangesAsync();
+            subCategoryId = sub.Id;
+        });
+
+        var response = await Client.DeleteAsync(
+            $"/api/retailers/{retailerId}/categories/{categoryId}/sub-categories/{subCategoryId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var sub = await db.SubCategories
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(s => s.Id == subCategoryId);
+            sub!.IsDeleted.Should().BeTrue();
         });
     }
 }

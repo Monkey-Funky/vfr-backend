@@ -1,4 +1,4 @@
-﻿// src/Infrastructure/Persistence/Seeders/DatabaseSeeder.cs
+// src/Infrastructure/Persistence/Seeders/DatabaseSeeder.cs
 namespace Infrastructure.Persistence.Seeders;
 
 /// <summary>
@@ -44,6 +44,7 @@ public static class DatabaseSeeder
         // Keep SubscriptionPlanSeeder first — other seeders may depend on plan IDs.
 
         await RunSeederAsync<SubscriptionPlanSeeder>(scope, logger, cancellationToken);
+        await RunSeederAsync<ExcelDataSeeder>(scope, logger, cancellationToken);
 
         // Future seeders go here:
         // await RunSeederAsync<AdminAccountSeeder>(scope, logger, cancellationToken);
