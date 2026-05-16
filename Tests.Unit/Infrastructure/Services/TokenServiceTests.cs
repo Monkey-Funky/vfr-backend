@@ -4,6 +4,7 @@ using Infrastructure.Services.Auth;
 using Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using Domain.Entities.Retailer;
 using Domain.Entities.Customer;
 using System.IdentityModel.Tokens.Jwt;
@@ -12,13 +13,25 @@ namespace Tests.Unit.Infrastructure.Services;
 
 public sealed class TokenServiceTests
 {
-    private readonly RSA _rsa = RSA.Create(2048);
+    // Wrap the raw RSA key in an RsaSecurityKey with a stable KeyId,
+    // mirroring exactly what Program.cs does in production so that the
+    // constructor signature (RsaSecurityKey, not RSA) is satisfied and
+    // the kid header written into every JWT can be matched during validation.
+    private readonly RsaSecurityKey _rsaSecurityKey;
     private readonly Mock<ILogger<TokenService>> _loggerMock = new();
     private readonly IOptions<JwtSettings> _jwtOptions;
     private readonly TokenService _sut;
 
     public TokenServiceTests()
     {
+        var rsa = RSA.Create(2048);
+        _rsaSecurityKey = new RsaSecurityKey(rsa)
+        {
+            // A deterministic kid keeps the test hermetic and mirrors
+            // the thumbprint-based KeyId assigned in Program.cs.
+            KeyId = "test-signing-key"
+        };
+
         var settings = new JwtSettings
         {
             Issuer = "TestIssuer",
@@ -28,7 +41,7 @@ public sealed class TokenServiceTests
             StepTokenSecret = "this-is-a-very-long-secret-for-testing-purposes-32-chars"
         };
         _jwtOptions = Options.Create(settings);
-        _sut = new TokenService(_rsa, _jwtOptions, _loggerMock.Object);
+        _sut = new TokenService(_rsaSecurityKey, _jwtOptions, _loggerMock.Object);
     }
 
     [Fact]
