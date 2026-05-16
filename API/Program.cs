@@ -27,12 +27,12 @@ builder.Host.UseSerilog();
 // ── 2. CORE SERVICES ─────────────────────────────────────────────────────────
 builder.Services.AddControllers()
     .AddJsonOptions(opts =>
-{
-opts.JsonSerializerOptions.PropertyNamingPolicy =
-    System.Text.Json.JsonNamingPolicy.CamelCase;
-opts.JsonSerializerOptions.DefaultIgnoreCondition =
-    System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
-});
+    {
+        opts.JsonSerializerOptions.PropertyNamingPolicy =
+            System.Text.Json.JsonNamingPolicy.CamelCase;
+        opts.JsonSerializerOptions.DefaultIgnoreCondition =
+            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+    });
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHttpContextAccessor();
@@ -58,48 +58,117 @@ var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 
 RSA rsa;
 var privateKeyPem = jwtSettings["PrivateKeyPem"];
-var publicKeyPem = jwtSettings["PublicKeyPem"];
 
 if (!string.IsNullOrWhiteSpace(privateKeyPem))
 {
-    // ── PRODUCTION: Load RSA keys from configuration / environment variables ──
-    rsa = RSA.Create();
-    rsa.ImportFromPem(privateKeyPem.AsSpan());
-    Log.Information("JWT: Using RSA keys from configuration (tokens survive restarts).");
+    // ── PRODUCTION / DEVELOPMENT with configured keys ─────────────────────────
+    //
+    // ROOT CAUSE FIX: Environment variables on Render.com / Windows store newlines
+    // as the two-character sequence backslash-n (\\n) rather than an actual newline
+    // character (\n / 0x0A). ImportFromPem requires real newlines between the
+    // base-64 lines and the PEM header/footer — if they are missing it throws:
+    //   "No supported key formats were found."
+    //
+    // We also normalise \r\n → \n so CRLF files (edited on Windows) work correctly
+    // in both development and production.
+    //
+    privateKeyPem = privateKeyPem
+        .Replace("\\n", "\n")   // literal backslash-n  →  real newline  (env-var edge case)
+        .Replace("\r\n", "\n")  // CRLF                 →  LF            (Windows file edge case)
+        .Trim();                // remove any surrounding whitespace / stray blank lines
+
+    try
+    {
+        rsa = RSA.Create();
+        rsa.ImportFromPem(privateKeyPem.AsSpan());
+        Log.Information("JWT: RSA key loaded from configuration — tokens survive restarts.");
+    }
+    catch (ArgumentException ex)
+    {
+        // Provide a clear diagnostic message instead of the cryptic framework one.
+        Log.Fatal(ex,
+            "JWT: ImportFromPem failed. " +
+            "Verify that JwtSettings:PrivateKeyPem contains the full PEM text " +
+            "(including -----BEGIN PRIVATE KEY----- / -----END PRIVATE KEY----- lines) " +
+            "with real newlines, not literal \\n characters. " +
+            "On Render.com use a Secret File or replace \\n with actual newlines in the env var.");
+        throw;
+    }
 }
 else
 {
     // ── DEVELOPMENT: Auto-generate ephemeral RSA keys ─────────────────────────
+    //
+    // Tokens are invalidated on every restart — acceptable for local dev.
+    // To get persistent tokens locally, add JwtSettings:PrivateKeyPem to
+    // appsettings.Development.json (see private.pem at the solution root).
+    //
     rsa = RSA.Create(keySizeInBits: 2048);
-    Log.Warning("JWT: Using auto-generated RSA keys (tokens invalidated on restart). " +
-                "Set JwtSettings:PrivateKeyPem for production.");
+    Log.Warning("JWT: Using ephemeral RSA keys (tokens invalidated on restart). " +
+                "Set JwtSettings:PrivateKeyPem to make tokens survive restarts.");
 }
 
-// Register the RSA instance as a singleton so TokenService uses the SAME
-// private key for signing that Program.cs uses for validation.
+// Register the RSA instance as a singleton so TokenService uses the SAME key
+// for signing that the JwtBearer middleware uses for validation.
 builder.Services.AddSingleton(rsa);
 
 var rsaSecurityKey = new RsaSecurityKey(rsa);
 
 builder.Services.AddAuthentication(options =>
 {
-options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 })
 .AddJwtBearer(options =>
 {
-options.TokenValidationParameters = new TokenValidationParameters
-{
-    ValidateIssuer = true,
-    ValidateAudience = true,
-    ValidateLifetime = true,
-    ValidateIssuerSigningKey = true,
-    ValidIssuer = jwtSettings["Issuer"],
-    ValidAudience = jwtSettings["Audience"],
-    IssuerSigningKey = rsaSecurityKey,
-    ValidAlgorithms = ["RS256"],   // Explicit algorithm whitelist — prevents alg:none attack
-    ClockSkew = TimeSpan.Zero
-};
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtSettings["Issuer"],
+        ValidAudience = jwtSettings["Audience"],
+        IssuerSigningKey = rsaSecurityKey,
+        ValidAlgorithms = ["RS256"],   // Explicit whitelist — prevents alg:none attack
+        ClockSkew = TimeSpan.Zero
+    };
+
+    // ── FIX: Handle "Bearer Bearer <token>" sent by some API clients ──────────
+    //
+    // Swagger UI's Http/bearer scheme automatically prepends "Bearer " to whatever
+    // the user types in the Authorize dialog.  If the user also types "Bearer "
+    // manually (a very common mistake) the header arrives as:
+    //   Authorization: Bearer Bearer eyJhbGci...
+    // which fails validation.  The event below strips the duplicate prefix so that
+    // the token is accepted regardless of whether the user included "Bearer " or not.
+    //
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(authHeader))
+            {
+                // Collapse "Bearer Bearer <token>" → "Bearer <token>"
+                const string prefix = "Bearer ";
+                var token = authHeader;
+                while (token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    token = token[prefix.Length..].TrimStart();
+
+                context.Token = token;
+            }
+            return Task.CompletedTask;
+        },
+
+        OnAuthenticationFailed = context =>
+        {
+            // Surface the real failure reason in development logs so the root
+            // cause is obvious without attaching a debugger.
+            Log.Warning("JWT authentication failed: {Error}", context.Exception.Message);
+            return Task.CompletedTask;
+        }
+    };
 });
 
 builder.Services.AddAuthorization();
@@ -116,46 +185,46 @@ builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>()
 // ── 6. CORS ──────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
 {
-options.AddPolicy("VfrCors", policy =>
-{
-if (builder.Environment.IsDevelopment())
-{
-    // Development: allow everything so Swagger / Postman / frontend all work
-    policy.AllowAnyOrigin()
-          .AllowAnyMethod()
-          .AllowAnyHeader();
-}
-else
-{
-    // Production: read from configuration, fall back to allow all
-    // until the frontend team deploys their app.
-    var allowedOrigins = builder.Configuration
-        .GetSection("Cors:AllowedOrigins")
-        .Get<string[]>();
+    options.AddPolicy("VfrCors", policy =>
+    {
+        if (builder.Environment.IsDevelopment())
+        {
+            // Development: allow everything so Swagger / Postman / frontend all work
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        }
+        else
+        {
+            // Production: read from configuration, fall back to allow all
+            // until the frontend team deploys their app.
+            var allowedOrigins = builder.Configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>();
 
-    if (allowedOrigins is { Length: > 0 })
-    {
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials();
-    }
-    else
-    {
-        // No frontend URLs configured yet — allow all origins temporarily.
-        // IMPORTANT: Restrict this once the frontend is deployed.
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
-    }
-}
-});
+            if (allowedOrigins is { Length: > 0 })
+            {
+                policy.WithOrigins(allowedOrigins)
+                      .AllowAnyMethod()
+                      .AllowAnyHeader()
+                      .AllowCredentials();
+            }
+            else
+            {
+                // No frontend URLs configured yet — allow all origins temporarily.
+                // IMPORTANT: Restrict this once the frontend is deployed.
+                policy.AllowAnyOrigin()
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            }
+        }
+    });
 });
 
 // ── 7. SWAGGER ───────────────────────────────────────────────────────────────
 builder.Services.AddSwaggerGen(c =>
 {
-c.EnableAnnotations();
+    c.EnableAnnotations();
 
 
     c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
@@ -166,38 +235,41 @@ c.EnableAnnotations();
     // {"code":"INTERNAL_ERROR",...} — a JSON body with no openapi version field —
     // causing Swagger UI to display "does not specify a valid version field".
     c.MapType<IFormFile>(() => new Microsoft.OpenApi.Models.OpenApiSchema
-{
-    Type = "string",
-    Format = "binary"
-});
+    {
+        Type = "string",
+        Format = "binary"
+    });
 
-// Safety net: if any action ever exposes Stream in its schema,
-// map it to a binary file field instead of crashing.
-c.MapType<Stream>(() => new Microsoft.OpenApi.Models.OpenApiSchema
-{
-    Type = "string",
-    Format = "binary"
-});
+    // Safety net: if any action ever exposes Stream in its schema,
+    // map it to a binary file field instead of crashing.
+    c.MapType<Stream>(() => new Microsoft.OpenApi.Models.OpenApiSchema
+    {
+        Type = "string",
+        Format = "binary"
+    });
 
-c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
-{
-    Title = "VFR Retailer API",
-    Version = "v1",
-    Description = "Virtual Fitting Room — Retailer Module API. " +
-                  "Use the Authorize button to paste your JWT Bearer token."
-});
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    {
+        Title = "VFR Retailer API",
+        Version = "v1",
+        Description = "Virtual Fitting Room — Retailer Module API. " +
+                      "Use the Authorize button to paste your JWT Bearer token."
+    });
 
-c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
-{
-    Description = "Paste your JWT token here. Example: Bearer eyJhbGci...",
-    Name = "Authorization",
-    In = Microsoft.OpenApi.Models.ParameterLocation.Header,
-    Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
-    Scheme = "bearer",
-    BearerFormat = "JWT"
-});
+    c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        // Paste ONLY the token — do NOT type "Bearer " yourself. Swagger adds it automatically.
+        // Correct:  eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+        // Wrong:    Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9... (gives 401!)
+        Description = "Paste your JWT token ONLY — do NOT add Bearer yourself. Swagger adds it automatically.",
+        Name = "Authorization",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
 
-c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
     {
         {
             new Microsoft.OpenApi.Models.OpenApiSecurityScheme
@@ -262,8 +334,8 @@ var app = builder.Build();
 //
 using (var scope = app.Services.CreateScope())
 {
-var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-await db.Database.MigrateAsync();
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    await db.Database.MigrateAsync();
 }
 
 // ── 2. Seed reference data ────────────────────────────────────────────────────
@@ -301,8 +373,8 @@ app.UseIpRateLimiting(); // ← after swagger
 
 app.UseSerilogRequestLogging(opts =>
 {
-opts.MessageTemplate =
-    "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000}ms";
+    opts.MessageTemplate =
+        "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000}ms";
 });
 
 // Do NOT use HTTPS redirection — Render.com terminates TLS at the proxy.
@@ -341,17 +413,17 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
 // ── 13. RUN ──────────────────────────────────────────────────────────────────
 try
 {
-Log.Information("Starting VFR Retailer API — Environment: {Env}", app.Environment.EnvironmentName);
-await app.RunAsync();
+    Log.Information("Starting VFR Retailer API — Environment: {Env}", app.Environment.EnvironmentName);
+    await app.RunAsync();
 }
 catch (Exception ex)
 {
-Log.Fatal(ex, "VFR Retailer API failed to start");
-throw;
+    Log.Fatal(ex, "VFR Retailer API failed to start");
+    throw;
 }
 finally
 {
-await Log.CloseAndFlushAsync();
+    await Log.CloseAndFlushAsync();
 }
 
 public partial class Program { }

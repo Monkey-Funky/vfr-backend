@@ -280,7 +280,7 @@ public static class DependencyInjection
 
         services.AddScoped<SubscriptionPlanSeeder>();
         services.AddScoped<ExcelDataSeeder>();
-
+        services.AddScoped<TransactionalDataSeeder>();
         services.AddScoped<IOrderRepository, OrderRepository>();
 
         services.AddScoped<IInventoryRepository, InventoryRepository>();

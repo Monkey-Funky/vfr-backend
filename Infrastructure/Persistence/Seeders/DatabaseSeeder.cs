@@ -46,6 +46,9 @@ public static class DatabaseSeeder
         await RunSeederAsync<SubscriptionPlanSeeder>(scope, logger, cancellationToken);
         await RunSeederAsync<ExcelDataSeeder>(scope, logger, cancellationToken);
 
+        // Transactional / analytics data — depends on ExcelDataSeeder products being present.
+        await RunSeederAsync<TransactionalDataSeeder>(scope, logger, cancellationToken);
+
         // Future seeders go here:
         // await RunSeederAsync<AdminAccountSeeder>(scope, logger, cancellationToken);
 
