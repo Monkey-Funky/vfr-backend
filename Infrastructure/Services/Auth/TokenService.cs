@@ -13,7 +13,10 @@ namespace Infrastructure.Services.Auth;
 /// for refresh tokens.
 ///
 /// SECURITY RULES:
-///   • Access tokens : RS256, signed with the singleton RSA private key.
+///   • Access tokens : RS256, signed with the singleton RsaSecurityKey (KeyId is set).
+///                     The SAME RsaSecurityKey instance registered in Program.cs is
+///                     injected here, so signing and validation always use the same key
+///                     object — no more IDX10517 "kid missing / no matching key" errors.
 ///   • Step tokens   : HS256, signed with JwtSettings:StepTokenSecret (separate secret).
 ///                     Carry a "token_type":"step" claim to prevent semantic misuse.
 ///   • Refresh tokens: 64 random bytes — NOT a JWT, not parseable by clients.
@@ -21,20 +24,30 @@ namespace Infrastructure.Services.Auth;
 /// </summary>
 public sealed class TokenService : ITokenService
 {
-    private readonly RSA _signingRsa;
+    // ROOT CAUSE FIX:
+    //   Previously, TokenService injected RSA and created its OWN new RsaSecurityKey(rsa).
+    //   Program.cs created a SEPARATE new RsaSecurityKey(rsa) for JwtBearer validation.
+    //   Two different RsaSecurityKey instances wrapping the same RSA, both with no KeyId,
+    //   caused IDX10517 "Signature validation failed – the token's kid is missing" for some
+    //   users because the JWT library could not reliably match the signing key.
+    //
+    //   FIX: inject the RsaSecurityKey singleton registered in Program.cs directly.
+    //   Now exactly ONE RsaSecurityKey object exists in the process; it has a stable KeyId
+    //   (SHA-256 thumbprint), the `kid` header is written into every JWT, and the JwtBearer
+    //   middleware matches it instantly without falling back to exhaustive key iteration.
+    private readonly RsaSecurityKey _signingKey;
     private readonly JwtSettings _jwtSettings;
     private readonly ILogger<TokenService> _logger;
 
-    // Lazy-initialised; created once per TokenService lifetime.
-    private RsaSecurityKey? _rsaSecurityKey;
+    // Cached once per TokenService lifetime — SigningCredentials is cheap to hold.
     private SigningCredentials? _signingCredentials;
 
     public TokenService(
-    RSA signingRsa,
-    IOptions<JwtSettings> jwtSettings,
-    ILogger<TokenService> logger)
+        RsaSecurityKey signingKey,           // singleton from Program.cs — same object used for validation
+        IOptions<JwtSettings> jwtSettings,
+        ILogger<TokenService> logger)
     {
-        _signingRsa = signingRsa ?? throw new ArgumentNullException(nameof(signingRsa));
+        _signingKey = signingKey ?? throw new ArgumentNullException(nameof(signingKey));
         _jwtSettings = jwtSettings?.Value ?? throw new ArgumentNullException(nameof(jwtSettings));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -50,13 +63,10 @@ public sealed class TokenService : ITokenService
                 "Generate one with: openssl rand -base64 48");
     }
 
-    // ── Lazy RS256 key / credentials ──────────────────────────────────────────
-
-    private RsaSecurityKey RsaKey
-        => _rsaSecurityKey ??= new RsaSecurityKey(_signingRsa);
+    // ── RS256 credentials (lazily cached, reuses the singleton key) ───────────
 
     private SigningCredentials Rs256Credentials
-        => _signingCredentials ??= new SigningCredentials(RsaKey, SecurityAlgorithms.RsaSha256);
+        => _signingCredentials ??= new SigningCredentials(_signingKey, SecurityAlgorithms.RsaSha256);
 
     // =========================================================================
     // ITokenService.GenerateRetailerAccessToken (Retailer)
@@ -67,9 +77,9 @@ public sealed class TokenService : ITokenService
     {
         ArgumentNullException.ThrowIfNull(account);
         return BuildToken(
-            account.Id, 
-            account.Email, 
-            Domain.Constants.Roles.Retailer, 
+            account.Id,
+            account.Email,
+            Domain.Constants.Roles.Retailer,
             new Claim("brand_name", account.BrandName));
     }
 
@@ -82,9 +92,9 @@ public sealed class TokenService : ITokenService
     {
         ArgumentNullException.ThrowIfNull(customer);
         return BuildToken(
-            customer.Id, 
-            customer.Email, 
-            Domain.Constants.Roles.Customer, 
+            customer.Id,
+            customer.Email,
+            Domain.Constants.Roles.Customer,
             new Claim("full_name", customer.FullName));
     }
 
@@ -190,7 +200,7 @@ public sealed class TokenService : ITokenService
             ValidateIssuerSigningKey = true,
             ValidIssuer = _jwtSettings.Issuer,
             ValidAudience = _jwtSettings.Audience,
-            IssuerSigningKey = RsaKey,        // Reuse cached key — no RSA leak
+            IssuerSigningKey = _signingKey,   // The singleton — same key used for signing
             ClockSkew = TimeSpan.Zero,
             ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
         };

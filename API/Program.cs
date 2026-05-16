@@ -108,11 +108,34 @@ else
                 "Set JwtSettings:PrivateKeyPem to make tokens survive restarts.");
 }
 
-// Register the RSA instance as a singleton so TokenService uses the SAME key
-// for signing that the JwtBearer middleware uses for validation.
-builder.Services.AddSingleton(rsa);
+// ── ROOT CAUSE FIX: Single RsaSecurityKey singleton shared between signing and validation ──
+//
+// PROBLEM (was): Program.cs created  new RsaSecurityKey(rsa)  for validation,
+//               while TokenService created its OWN new RsaSecurityKey(_signingRsa)
+//               for signing. Both wrapped the same RSA object but were different
+//               instances with no KeyId set.  The JWT library therefore could not
+//               find a matching key when the token's `kid` header was absent, and
+//               IDX10517 "Signature validation failed – kid missing" was thrown.
+//
+// FIX: Create ONE RsaSecurityKey instance with a stable, deterministic KeyId
+//      (SHA-256 thumbprint of the SubjectPublicKeyInfo DER bytes, base64url-encoded
+//      per RFC 7638).  Register it as a singleton so TokenService and the JwtBearer
+//      middleware use the EXACT SAME object — same KeyId, same key material, same
+//      CryptoProviderFactory entry.  The `kid` claim is now written into every JWT
+//      header, and validation matches it immediately without trying all keys.
+//
+var keyId = Convert.ToBase64String(
+    SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()))
+    .Replace("+", "-").Replace("/", "_").TrimEnd('='); // base64url, RFC 7638 style
 
-var rsaSecurityKey = new RsaSecurityKey(rsa);
+var rsaSecurityKey = new RsaSecurityKey(rsa) { KeyId = keyId };
+
+// Register BOTH the RSA instance and the RsaSecurityKey as singletons.
+// TokenService will inject RsaSecurityKey directly — no more dual-instance problem.
+builder.Services.AddSingleton(rsa);
+builder.Services.AddSingleton(rsaSecurityKey);
+
+Log.Information("JWT: RsaSecurityKey registered with KeyId={KeyId}", keyId);
 
 builder.Services.AddAuthentication(options =>
 {
@@ -129,8 +152,8 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         ValidIssuer = jwtSettings["Issuer"],
         ValidAudience = jwtSettings["Audience"],
-        IssuerSigningKey = rsaSecurityKey,
-        ValidAlgorithms = ["RS256"],   // Explicit whitelist — prevents alg:none attack
+        IssuerSigningKey = rsaSecurityKey, // The singleton — same object used for signing
+        ValidAlgorithms = ["RS256"],       // Explicit whitelist — prevents alg:none attack
         ClockSkew = TimeSpan.Zero
     };
 
