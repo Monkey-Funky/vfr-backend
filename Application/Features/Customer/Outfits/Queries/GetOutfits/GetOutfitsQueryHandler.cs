@@ -7,7 +7,7 @@ using Application.Features.Customer.Outfits.Mappings;
 
 namespace Application.Features.Customer.Outfits.Queries.GetOutfits;
 
-internal sealed class GetOutfitsQueryHandler : IRequestHandler<GetOutfitsQuery, List<OutfitSummaryDto>>
+internal sealed class GetOutfitsQueryHandler : IRequestHandler<GetOutfitsQuery, PagedResult<OutfitSummaryDto>>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
@@ -18,9 +18,9 @@ internal sealed class GetOutfitsQueryHandler : IRequestHandler<GetOutfitsQuery, 
         _currentUserService = currentUserService;
     }
 
-    public async Task<List<OutfitSummaryDto>> Handle(GetOutfitsQuery request, CancellationToken cancellationToken)
+    public async Task<PagedResult<OutfitSummaryDto>> Handle(GetOutfitsQuery request, CancellationToken cancellationToken)
     {
-        var customerId = _currentUserService.CustomerId 
+        var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedAccessException("Only authenticated customers can view outfits.");
 
         var outfits = await _context.CustomerOutfits
@@ -31,8 +31,9 @@ internal sealed class GetOutfitsQueryHandler : IRequestHandler<GetOutfitsQuery, 
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
-        // Fetch products associated with these items to get PrimaryImageUrl
-        var productIds = outfits.SelectMany(o => o.Items)
+        // Fetch primary images for each product referenced by these outfits
+        var productIds = outfits
+            .SelectMany(o => o.Items)
             .Select(i => i.ProductId)
             .Distinct()
             .ToList();
@@ -47,8 +48,18 @@ internal sealed class GetOutfitsQueryHandler : IRequestHandler<GetOutfitsQuery, 
             })
             .ToDictionaryAsync(p => p.Id, p => p.PrimaryImage, cancellationToken);
 
-        var result = outfits.Select(o => o.ToOutfitSummaryDto(productsImages)).ToList();
+        var items = outfits.Select(o => o.ToOutfitSummaryDto(productsImages)).ToList();
 
-        return result;
+        // Wrap in PagedResult so the response shape is consistent with other list
+        // endpoints and integration-test assertions can deserialise correctly.
+        // All outfits are returned as a single page (no server-side pagination needed
+        // for personal outfit collections which are naturally bounded in size).
+        return new PagedResult<OutfitSummaryDto>
+        {
+            Items = items,
+            PageNumber = 1,
+            PageSize = items.Count > 0 ? items.Count : 1,
+            TotalCount = items.Count
+        };
     }
 }

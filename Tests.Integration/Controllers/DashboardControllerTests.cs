@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using Application.Features.Dashboard.DTOs;
 using Shared.DTOs;
@@ -10,11 +10,28 @@ namespace Tests.Integration.Controllers;
 public sealed class DashboardControllerTests : IntegrationTestBase
 {
     private readonly Guid _retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
-    private readonly string _dateRange = "from=2024-01-01&to=2026-12-31";
+
+    // Date range fields are computed at construction time from DateTime.UtcNow so that
+    // every test run satisfies ALL five DateRangeQueryValidator rules:
+    //   1. From  is not default(DateOnly)          — guaranteed (UtcNow - 30 days)
+    //   2. To    is not default(DateOnly)          — guaranteed (UtcNow)
+    //   3. From  ≤ To                              — always true
+    //   4. Range ≤ 365 days                        — 30 days is well inside the limit
+    //   5. From  ≥ DateTime.UtcNow.AddYears(-2)   — 30 days ago is always within 2 years
+    //
+    // The original hardcoded "from=2024-01-01&to=2026-12-31" violated both rule 4
+    // (1095 days > 365) and rule 5 (2024-01-01 is more than 2 years before today),
+    // causing every date-range endpoint to return 422 UnprocessableEntity.
+    private readonly string _from;
+    private readonly string _to;
+    private readonly string _dateRange;
 
     public DashboardControllerTests(CustomWebApplicationFactory factory)
         : base(factory)
     {
+        _from = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-30)).ToString("yyyy-MM-dd");
+        _to = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd");
+        _dateRange = $"from={_from}&to={_to}";
     }
 
     [Fact]
@@ -161,7 +178,9 @@ public sealed class DashboardControllerTests : IntegrationTestBase
     [Fact]
     public async Task GenerateReport_ReturnsAccepted_WhenRequestIsValid()
     {
-        var request = new { From = "2024-01-01", To = "2026-12-31" };
+        // Use the same dynamic date window as _dateRange so the POST body satisfies
+        // GenerateReportCommandValidator (which inherits DateRangeQueryValidator).
+        var request = new { From = _from, To = _to };
 
         var response = await Client.PostAsJsonAsync(
             $"/api/retailers/{_retailerId}/dashboard/reports", request);

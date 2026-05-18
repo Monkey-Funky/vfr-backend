@@ -191,6 +191,27 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         await action(db);
     }
 
+    /// <summary>
+    /// Provides a full scoped <see cref="IServiceProvider"/> for test-side operations
+    /// that require access to more services than just <see cref="ApplicationDbContext"/>.
+    /// Use this when seed helpers need to resolve additional services — for example,
+    /// <see cref="IEncryptionService"/> to produce a valid AES-256 ciphertext before
+    /// inserting an entity whose encrypted column will later be decrypted by a handler.
+    /// </summary>
+    /// <example>
+    /// await Factory.ExecuteInScopeAsync(async sp =>
+    /// {
+    ///     var db         = sp.GetRequiredService&lt;ApplicationDbContext&gt;();
+    ///     var encryption = sp.GetRequiredService&lt;IEncryptionService&gt;();
+    ///     // ...seed with properly encrypted data...
+    /// });
+    /// </example>
+    public async Task ExecuteInScopeAsync(Func<IServiceProvider, Task> action)
+    {
+        using var scope = Services.CreateScope();
+        await action(scope.ServiceProvider);
+    }
+
     private static void ReplaceWithStub<TService>(IServiceCollection services)
         where TService : class
     {

@@ -1,9 +1,10 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using API.Controllers.Customer;
 using Application.Features.Customer.Catalog.DTOs;
 using Domain.Entities.Customer;
 using Domain.Entities.Retailer;
+using Domain.Enums.Product;
 using Tests.Integration.Fixtures;
 using Microsoft.EntityFrameworkCore;
 using Shared.DTOs;
@@ -96,7 +97,16 @@ public sealed class FavoritesControllerTests : IntegrationTestBase
         Guid productId = Guid.Empty;
         await Factory.ExecuteDbContextAsync(async db =>
         {
-            var product = Product.Create(_retailerId, "Favorite Test Product", price: 199.99m);
+            // ToggleFavoriteCommandHandler enforces that only Active products can be
+            // favorited. Product.Create defaults to ProductStatus.Draft, which causes
+            // the handler to throw BusinessRuleException → 422 UnprocessableEntity.
+            // Explicitly seeding as Active satisfies the business rule.
+            var product = Product.Create(
+                _retailerId,
+                "Favorite Test Product",
+                price: 199.99m,
+                status: ProductStatus.Active);
+
             db.Products.Add(product);
             await db.SaveChangesAsync();
             productId = product.Id;

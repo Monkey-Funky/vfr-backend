@@ -2,8 +2,11 @@ using System.Net;
 using System.Net.Http.Json;
 using API.Controllers.PaymentMethods;
 using Application.Features.PaymentMethods.DTOs;
+using Application.Interfaces.Services;
 using Domain.Common;
 using Domain.Entities.Retailer;
+using Infrastructure.Persistence;
+using Microsoft.Extensions.DependencyInjection;
 using Shared.DTOs;
 using Tests.Integration.Fixtures;
 using Microsoft.EntityFrameworkCore;
@@ -104,19 +107,33 @@ public sealed class PaymentMethodsControllerTests : IntegrationTestBase
     private async Task<Guid> SeedPaymentMethodAsync()
     {
         Guid id = Guid.Empty;
-        await Factory.ExecuteDbContextAsync(async db =>
+
+        // SeedPaymentMethodAsync must produce a valid AES-256 ciphertext for
+        // CardholderNameEncrypted so that GetPaymentMethodsQueryHandler can call
+        // IEncryptionService.Decrypt() without throwing FormatException / CryptographicException.
+        //
+        // We resolve the real AesEncryptionService (registered in the test host —
+        // EncryptionSettings:Key is configured in CustomWebApplicationFactory) together with
+        // the DbContext inside a single DI scope, keeping both the encryption key context
+        // and the EF transaction consistent.
+        await Factory.ExecuteInScopeAsync(async sp =>
         {
+            var db = sp.GetRequiredService<ApplicationDbContext>();
+            var encryption = sp.GetRequiredService<IEncryptionService>();
+
             var method = PaymentMethod.Create(
                 _retailerId,
                 "Visa",
-                "encrypted-name",
+                encryption.Encrypt("Test User"),   // valid AES-256-CBC ciphertext
                 "4242",
                 "12/2028",
                 "pm_test_seed");
+
             db.PaymentMethods.Add(method);
             await db.SaveChangesAsync();
             id = method.Id;
         });
+
         return id;
     }
 }

@@ -86,6 +86,21 @@ public sealed class ExceptionHandlingMiddleware
                     TraceId = traceId
                 }),
 
+            // 401 — authentication failures (invalid credentials / expired or malformed tokens).
+            // AuthenticationException is the domain-layer equivalent of HTTP 401:
+            //   "I don't know who you are."
+            // It is intentionally separate from UnauthorizedException (403):
+            //   "I know who you are, but you can't do that."
+            AuthenticationException ex => (
+                (int)HttpStatusCode.Unauthorized,
+                new ApiErrorResponse
+                {
+                    Code = "UNAUTHORIZED",
+                    Message = ex.Message,
+                    TraceId = traceId
+                }),
+
+            // 403 — IDOR / access-control violations on resources the caller may not access.
             UnauthorizedException ex => (
                 (int)HttpStatusCode.Forbidden,
                 new ApiErrorResponse
@@ -113,7 +128,7 @@ public sealed class ExceptionHandlingMiddleware
                     TraceId = traceId
                 }),
 
-            Microsoft.EntityFrameworkCore.DbUpdateException dbEx 
+            Microsoft.EntityFrameworkCore.DbUpdateException dbEx
                 when dbEx.InnerException is Npgsql.PostgresException { SqlState: "23505" } => (
                 (int)HttpStatusCode.Conflict,
                 new ApiErrorResponse

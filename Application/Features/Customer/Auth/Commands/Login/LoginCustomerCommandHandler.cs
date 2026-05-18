@@ -35,7 +35,9 @@ public sealed class LoginCustomerCommandHandler
         if (customer is null)
         {
             _logger.LogWarning("Login failed — invalid credentials | Email: {Email}", command.Email);
-            throw new UnauthorizedException("Invalid email or password.");
+            // AuthenticationException → HTTP 401 Unauthorized.
+            // UnauthorizedException is reserved for IDOR / access-control (HTTP 403).
+            throw new AuthenticationException("Invalid email or password.");
         }
 
         if (customer.IsLockedOut())
@@ -49,7 +51,8 @@ public sealed class LoginCustomerCommandHandler
         if (customer.PasswordHash is null)
         {
             _logger.LogWarning("Login failed — account has no password (Google-only). Email: {Email}", command.Email);
-            throw new UnauthorizedException("Invalid email or password.");
+            // Generic message to prevent revealing the account's auth method.
+            throw new AuthenticationException("Invalid email or password.");
         }
 
         bool isValid = BCrypt.Net.BCrypt.Verify(command.Password, customer.PasswordHash);
@@ -74,7 +77,7 @@ public sealed class LoginCustomerCommandHandler
             }
             await _unitOfWork.Repository<CustomerAccount>().UpdateAsync(customer, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            throw new UnauthorizedException("Invalid email or password.");
+            throw new AuthenticationException("Invalid email or password.");
         }
         // PendingEmailVerification = customer started Step 1 but never completed Step 2.
         // Login is blocked until the account transitions to Active via completeProfile.

@@ -35,7 +35,8 @@ public sealed class RefreshCustomerTokenCommandHandler
         if (principal is null)
         {
             _logger.LogWarning("RefreshCustomerToken failed — access token is structurally invalid.");
-            throw new UnauthorizedException("The access token is invalid.");
+            // AuthenticationException → HTTP 401; UnauthorizedException is for IDOR / 403.
+            throw new AuthenticationException("The access token is invalid.");
         }
 
         string? subClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
@@ -44,7 +45,7 @@ public sealed class RefreshCustomerTokenCommandHandler
         if (!Guid.TryParse(subClaim, out Guid customerId) || customerId == Guid.Empty)
         {
             _logger.LogWarning("RefreshCustomerToken failed — 'sub' claim is missing or invalid.");
-            throw new UnauthorizedException("The access token does not contain a valid identity.");
+            throw new AuthenticationException("The access token does not contain a valid identity.");
         }
 
         // FIX F-02: Validate role claim to prevent cross-role attacks
@@ -54,7 +55,7 @@ public sealed class RefreshCustomerTokenCommandHandler
         if (roleClaim != "Customer")
         {
             _logger.LogWarning("RefreshCustomerToken — role claim is '{Role}', expected 'Customer'.", roleClaim);
-            throw new UnauthorizedException("The access token is not a valid Customer token.");
+            throw new AuthenticationException("The access token is not a valid Customer token.");
         }
 
         // 2. Load the CustomerAccount
@@ -65,16 +66,16 @@ public sealed class RefreshCustomerTokenCommandHandler
         {
             _logger.LogWarning(
                 "RefreshCustomerToken failed — account not found or deleted. CustomerId: {CustomerId}", customerId);
-            throw new UnauthorizedException("Account not found.");
+            throw new AuthenticationException("Account not found.");
         }
 
         // Guard: account must be Active
         if (customer.Status != CustomerStatus.Active)
         {
             _logger.LogWarning(
-                "RefreshCustomerToken failed — account status is {Status}. CustomerId: {CustomerId}", 
+                "RefreshCustomerToken failed — account status is {Status}. CustomerId: {CustomerId}",
                 customer.Status, customerId);
-            throw new UnauthorizedException("Your account is no longer active. Please log in again.");
+            throw new AuthenticationException("Your account is no longer active. Please log in again.");
         }
 
         // 3. Verify RefreshToken matches hash using EnhancedVerify as requested
@@ -82,7 +83,7 @@ public sealed class RefreshCustomerTokenCommandHandler
         {
             _logger.LogWarning(
                 "RefreshCustomerToken failed — no active refresh token. CustomerId: {CustomerId}", customerId);
-            throw new UnauthorizedException("No active refresh token found. Please log in again.");
+            throw new AuthenticationException("No active refresh token found. Please log in again.");
         }
 
         bool isTokenValid = BCrypt.Net.BCrypt.EnhancedVerify(command.RefreshToken, customer.RefreshTokenHash);
@@ -90,20 +91,20 @@ public sealed class RefreshCustomerTokenCommandHandler
         {
             _logger.LogWarning(
                 "RefreshCustomerToken failed — hash mismatch. CustomerId: {CustomerId}", customerId);
-            throw new UnauthorizedException("The refresh token is invalid. Please log in again.");
+            throw new AuthenticationException("The refresh token is invalid. Please log in again.");
         }
 
         // 4. Verify refresh token has not expired
         if (customer.RefreshTokenExpiresAt.Value < DateTime.UtcNow)
         {
             _logger.LogInformation("RefreshCustomerToken failed — token expired. CustomerId: {CustomerId}", customerId);
-            throw new UnauthorizedException("The refresh token has expired. Please log in again.");
+            throw new AuthenticationException("The refresh token has expired. Please log in again.");
         }
 
         // 5. Generate new access + refresh tokens (Rotation)
         string newAccessToken = _tokenService.GenerateCustomerAccessToken(customer);
         string newRawRefreshToken = _tokenService.GenerateRefreshToken();
-        
+
         // Preserve RememberMe TTL (30 days vs 7 days)
         int refreshExpiryDays = customer.RememberMe ? 30 : 7;
         DateTime newRefreshExpiry = DateTime.UtcNow.AddDays(refreshExpiryDays);
@@ -123,11 +124,13 @@ public sealed class RefreshCustomerTokenCommandHandler
         {
             _logger.LogWarning(
                 "RefreshCustomerToken — concurrent rotation detected. CustomerId: {CustomerId}", customerId);
-            throw new UnauthorizedException("A concurrent session refresh was detected. Please retry.");
+            // Concurrent rotation means a second device/request beat us to it.
+            // The caller must re-authenticate — this is an authentication flow failure.
+            throw new AuthenticationException("A concurrent session refresh was detected. Please retry.");
         }
 
         _logger.LogInformation(
-            "Customer token rotated successfully. CustomerId: {CustomerId}. RememberMe: {RememberMe}", 
+            "Customer token rotated successfully. CustomerId: {CustomerId}. RememberMe: {RememberMe}",
             customerId, customer.RememberMe);
 
         // 8. Return response

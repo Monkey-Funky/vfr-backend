@@ -1,4 +1,4 @@
-using Application.Features.Customer.Auth.DTOs;
+﻿using Application.Features.Customer.Auth.DTOs;
 using Application.Features.Customer.Auth.Mappings;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
@@ -33,7 +33,9 @@ public sealed class CompleteCustomerProfileCommandHandler
         ClaimsPrincipal? principal = _tokenService.ValidateTempStepToken(command.TempStepToken);
         if (principal is null || principal.FindFirst("token_type")?.Value != "step" || principal.FindFirst("step")?.Value != "1")
         {
-            throw new UnauthorizedException("The registration step token is invalid or has expired.");
+            // AuthenticationException → HTTP 401: the caller cannot prove their identity
+            // via the registration step token. UnauthorizedException is for IDOR / 403.
+            throw new AuthenticationException("The registration step token is invalid or has expired.");
         }
 
         Guid tempAccountId = Guid.Parse(principal.FindFirst("temp_account_id")!.Value);
@@ -61,21 +63,22 @@ public sealed class CompleteCustomerProfileCommandHandler
 
         _ = Task.Run(async () =>
         {
-            try { 
+            try
+            {
                 await _emailService.SendEmailAsync(
                     account.Email,
                     "Welcome to VFR!",
                     "Your account is active.",
-                    CancellationToken.None); 
+                    CancellationToken.None);
             }
-            catch (Exception ex) 
-            { 
-                _logger.LogError(ex, 
-                    "Welcome email failed for CustomerId: {CustomerId}", account.Id); 
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Welcome email failed for CustomerId: {CustomerId}", account.Id);
             }
         });
 
-        string accessToken = _tokenService.GenerateCustomerAccessToken(account); 
+        string accessToken = _tokenService.GenerateCustomerAccessToken(account);
         string rawRefreshToken = _tokenService.GenerateRefreshToken();
         string hashedRefreshToken = BCrypt.Net.BCrypt.HashPassword(rawRefreshToken, workFactor: 12);
 

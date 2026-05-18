@@ -6,3 +6,4 @@ global using Domain.Entities.Retailer;
 global using Domain.Entities.Orders;
 global using Domain.Entities.Customer;
 global using Domain.Exceptions;
+global using MockQueryable.Moq;

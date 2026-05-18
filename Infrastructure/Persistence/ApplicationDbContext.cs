@@ -76,20 +76,43 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     }
 
     // ── Audit timestamp stamping ──────────────────────────────────────────────
+    //
+    // IMPORTANT: Some entities extend BaseEntity but intentionally omit certain
+    // audit columns from their DB schema (e.g. OrderItem, StockAdjustment,
+    // Notification, AvatarMeasurementHistory, VirtualTryOnSession all call
+    // builder.Ignore(e => e.UpdatedAt) in their EF configurations because those
+    // tables have no updated_at column).
+    //
+    // Calling entry.Property(...) on a property that has been Ignored by EF throws
+    // InvalidOperationException at runtime. We therefore use entry.Metadata.FindProperty()
+    // — which returns null for unmapped/ignored properties — to guard every access
+    // before stamping the value. This makes the auditing loop safe for ALL current
+    // and future entities regardless of their individual column mappings.
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        // Capture once so every entity in this unit of work shares the same timestamp.
+        var now = DateTime.UtcNow;
+
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
             switch (entry.State)
             {
                 case EntityState.Added:
-                    entry.Property(nameof(BaseEntity.CreatedAt)).CurrentValue = DateTime.UtcNow;
-                    entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = DateTime.UtcNow;
+                    // Guard each property: FindProperty returns null when the property
+                    // is ignored in EF configuration and must not be accessed.
+                    if (entry.Metadata.FindProperty(nameof(BaseEntity.CreatedAt)) is not null)
+                        entry.Property(nameof(BaseEntity.CreatedAt)).CurrentValue = now;
+
+                    if (entry.Metadata.FindProperty(nameof(BaseEntity.UpdatedAt)) is not null)
+                        entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = now;
+
                     break;
 
                 case EntityState.Modified:
-                    entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = DateTime.UtcNow;
+                    if (entry.Metadata.FindProperty(nameof(BaseEntity.UpdatedAt)) is not null)
+                        entry.Property(nameof(BaseEntity.UpdatedAt)).CurrentValue = now;
+
                     break;
             }
         }

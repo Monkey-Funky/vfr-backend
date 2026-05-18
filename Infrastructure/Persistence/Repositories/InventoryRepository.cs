@@ -55,8 +55,12 @@ public sealed class InventoryRepository : IInventoryRepository
     {
         return await _context.InventoryRecords
             .AsNoTracking()
-            // AdjustedAt returns CreatedAt — valid after StockAdjustment fix
-            .Include(r => r.StockAdjustments.OrderByDescending(a => a.AdjustedAt))
+            // StockAdjustment.AdjustedAt is a C# computed property (AdjustedAt => CreatedAt)
+            // with no corresponding DB column. EF Core cannot translate computed properties
+            // to SQL inside Include ordering — it can only translate mapped properties.
+            // BaseEntity.CreatedAt is mapped to the "adjusted_at" column via
+            // StockAdjustmentConfiguration, so the sort order is semantically identical.
+            .Include(r => r.StockAdjustments.OrderByDescending(a => a.CreatedAt))
             .FirstOrDefaultAsync(
                 r => r.RetailerId == retailerId
                   && r.ProductId == productId
