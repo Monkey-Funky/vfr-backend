@@ -1,5 +1,4 @@
-﻿
-using Application.Interfaces.Persistence;
+﻿using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using System.Security.Cryptography;
 
@@ -54,6 +53,9 @@ public sealed class ForgotPasswordCommandHandler
         //
         // Only Active accounts can reset their password. PendingEmailVerification,
         // Suspended, and PendingDeletion accounts are not eligible.
+        //
+        // Email is a unique column (guaranteed 0 or 1 rows). FirstOrDefaultAsync is used
+        // here because it matches the IRepository contract used by all tests and callers.
         RetailerAccount? account = await _unitOfWork
             .Repository<RetailerAccount>()
             .FirstOrDefaultAsync(

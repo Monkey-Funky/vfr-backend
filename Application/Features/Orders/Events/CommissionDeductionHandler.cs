@@ -1,6 +1,7 @@
 ﻿using Application.Interfaces.Persistence;
 using Domain.Entities.Notifications;
 using Domain.Enums.Orders;
+using Domain.Enums.Subscription;
 using Microsoft.EntityFrameworkCore;
 
 
@@ -48,9 +49,16 @@ public sealed class CommissionDeductionHandler
         // Join Subscriptions → SubscriptionPlans to get the CommissionRate snapshot.
         // IMPORTANT: We read the plan at delivery time so the rate is correct
         // even if the retailer later changes plans.
+        //
+        // NOTE: s.IsActive is a computed C# property and cannot be translated to SQL
+        // by EF Core. We expand it inline using its two underlying mapped columns:
+        //   Status == Active  OR  (Status == Trial AND TrialEndsAt > UtcNow)
+        var now = DateTime.UtcNow;
         var subscriptionInfo = await _context.Subscriptions
             .AsNoTracking()
-            .Where(s => s.RetailerId == notification.RetailerId && s.IsActive)
+            .Where(s => s.RetailerId == notification.RetailerId &&
+                        (s.Status == SubscriptionStatus.Active ||
+                         (s.Status == SubscriptionStatus.Trial && s.TrialEndsAt > now)))
             .OrderByDescending(s => s.CreatedAt)
             .Select(s => new { s.PlanId, s.Plan.CommissionRate, s.Plan.Currency })
             .FirstOrDefaultAsync(cancellationToken);

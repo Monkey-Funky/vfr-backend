@@ -1,5 +1,4 @@
-﻿
-namespace Domain.Entities.Retailer;
+﻿namespace Domain.Entities.Retailer;
 
 // src/Domain/Entities/Retailer/Category.cs
 
@@ -168,5 +167,21 @@ public sealed class Category : BaseEntity
             : CategoryStatus.Active;
 
         return Status;
+    }
+
+    public void AddSubCategory(SubCategory subCategory)
+    {
+        ArgumentNullException.ThrowIfNull(subCategory);
+
+        var isDuplicate = _subCategories.Any(s =>
+            !s.IsDeleted &&
+            string.Equals(s.Name, subCategory.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (isDuplicate)
+            throw new Domain.Exceptions.BusinessRuleException(
+                "DUPLICATE_SUBCATEGORY_NAME",
+                $"A sub-category named '{subCategory.Name}' already exists in this category.");
+
+        _subCategories.Add(subCategory);
     }
 }

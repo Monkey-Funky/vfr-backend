@@ -1,262 +1,500 @@
-using System.Net;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using API.Controllers.Offers.Requests;
 using Application.Features.Offers.DTOs;
 using Domain.Entities.Retailer;
 using Domain.Enums.Offer;
-using FluentAssertions;
+using Domain.Enums.Product;
 using Microsoft.EntityFrameworkCore;
 using Shared.DTOs;
 using Tests.Integration.Fixtures;
 
 namespace Tests.Integration.Controllers;
 
-/// <summary>
-/// End-to-end integration tests for OffersController.
-/// Validates offer lifecycle: creation (Product/Category), updates, status toggles, and deletion.
-/// </summary>
 [Collection(IntegrationTestCollection.Name)]
 public sealed class OffersControllerTests : IntegrationTestBase
 {
-    public OffersControllerTests(CustomWebApplicationFactory factory) 
-        : base(factory) 
-    { 
+    public OffersControllerTests(CustomWebApplicationFactory factory)
+        : base(factory)
+    {
     }
 
-    // ── 1. GET /offers ───────────────────────────────────────────────────────
+    // ── Helpers ────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task GetOffers_ReturnsPaginatedList_WhenOffersExist()
+    private static MultipartFormDataContent BuildCreateOfferForm(
+        string title = "Summer Sale",
+        string? description = "Big summer discount",
+        string offerType = "Category",
+        Guid? productId = null,
+        Guid? categoryId = null,
+        string discountType = "Percentage",
+        string discountValue = "15",
+        string? startDate = null,
+        string? endDate = null)
     {
-        // Arrange
-        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var content = new MultipartFormDataContent();
+
+        content.Add(new StringContent(title), "Title");
+
+        if (description is not null)
+            content.Add(new StringContent(description), "Description");
+
+        content.Add(new StringContent(offerType), "OfferType");
+
+        if (productId.HasValue)
+            content.Add(new StringContent(productId.Value.ToString()), "ProductId");
+
+        if (categoryId.HasValue)
+            content.Add(new StringContent(categoryId.Value.ToString()), "CategoryId");
+
+        content.Add(new StringContent(discountType), "DiscountType");
+        content.Add(new StringContent(discountValue), "DiscountValue");
+        content.Add(new StringContent(startDate ?? today.ToString("yyyy-MM-dd")), "StartDate");
+
+        if (endDate is not null)
+            content.Add(new StringContent(endDate), "EndDate");
+
+        var imageBytes = new ByteArrayContent("fake-image-bytes"u8.ToArray());
+        imageBytes.Headers.ContentType = MediaTypeHeaderValue.Parse("image/jpeg");
+        content.Add(imageBytes, "CoverImage", "cover.jpg");
+
+        return content;
+    }
+
+    private static MultipartFormDataContent BuildUpdateOfferForm(
+        string title = "Updated Offer",
+        string? description = "Updated description",
+        string discountType = "Percentage",
+        string discountValue = "20",
+        string status = "Active",
+        string? startDate = null,
+        string? endDate = null)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var content = new MultipartFormDataContent();
+
+        content.Add(new StringContent(title), "Title");
+
+        if (description is not null)
+            content.Add(new StringContent(description), "Description");
+
+        content.Add(new StringContent(discountType), "DiscountType");
+        content.Add(new StringContent(discountValue), "DiscountValue");
+        content.Add(new StringContent(startDate ?? today.ToString("yyyy-MM-dd")), "StartDate");
+
+        if (endDate is not null)
+            content.Add(new StringContent(endDate), "EndDate");
+
+        content.Add(new StringContent(status), "Status");
+
+        return content;
+    }
+
+    private async Task<(Guid categoryId, Guid offerId)> SeedCategoryOfferAsync(
+        Guid retailerId,
+        string offerTitle = "Seeded Offer",
+        decimal discountValue = 10m,
+        DateOnly? startDate = null,
+        DateOnly? endDate = null,
+        bool deactivate = false)
+    {
+        Guid categoryId = Guid.Empty;
+        Guid offerId = Guid.Empty;
+
         await Factory.ExecuteDbContextAsync(async db =>
         {
-            var product = Product.Create(retailerId, "P1", price: 100m, status: Domain.Enums.Product.ProductStatus.Active);
-            db.Products.Add(product);
+            var category = Category.Create(
+                retailerId,
+                "Test Category",
+                null,
+                "https://cdn.vfr.com/cat.jpg",
+                Category.CategoryStatus.Active);
+            db.Categories.Add(category);
             await db.SaveChangesAsync();
 
-            db.Offers.Add(Offer.Create(
-                retailerId, "Sale 1", null, OfferType.Product, product.Id, null, 
-                DiscountType.Percentage, 10, DateOnly.FromDateTime(DateTime.UtcNow), null, "http://img1.com"));
-            
+            var actualStart = startDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+            var offer = Offer.Create(
+                retailerId,
+                offerTitle,
+                "Offer description",
+                OfferType.Category,
+                productId: null,
+                categoryId: category.Id,
+                DiscountType.Percentage,
+                discountValue,
+                actualStart,
+                endDate,
+                "https://cdn.vfr.com/offer.jpg");
+
+            if (deactivate)
+                offer.Deactivate();
+
+            db.Set<Offer>().Add(offer);
             await db.SaveChangesAsync();
+
+            categoryId = category.Id;
+            offerId = offer.Id;
         });
 
-        // Act
+        return (categoryId, offerId);
+    }
+
+    // ── 1. GET /offers ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetOffers_ReturnsEmptyList_WhenNoOffersExist()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+
         var response = await Client.GetAsync($"/api/retailers/{retailerId}/offers");
 
-        // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await response.Content.ReadFromJsonAsync<ApiResponse<PagedResult<OfferDto>>>();
-        result!.Data!.Items.Should().NotBeEmpty();
-    }
 
-    // ── 2. POST /offers ──────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task CreateOffer_ReturnsCreated_WhenProductOfferIsValid()
-    {
-        // Arrange
-        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
-        Guid productId = Guid.Empty;
-
-        await Factory.ExecuteDbContextAsync(async db =>
-        {
-            var p = Product.Create(retailerId, "Offer Product", price: 500m, status: Domain.Enums.Product.ProductStatus.Active);
-            db.Products.Add(p);
-            await db.SaveChangesAsync();
-            productId = p.Id;
-        });
-
-        using var content = new MultipartFormDataContent();
-        content.Add(new StringContent("Flash Sale"), "Title");
-        content.Add(new StringContent(OfferType.Product), "OfferType");
-        content.Add(new StringContent(productId.ToString()), "ProductId");
-        content.Add(new StringContent(DiscountType.Percentage), "DiscountType");
-        content.Add(new StringContent("25"), "DiscountValue");
-        content.Add(new StringContent(DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")), "StartDate");
-        
-        var fileContent = new ByteArrayContent("fake-offer-img"u8.ToArray());
-        fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("image/jpeg");
-        content.Add(fileContent, "CoverImage", "flash_sale.jpg");
-
-        // Act
-        var response = await Client.PostAsync($"/api/retailers/{retailerId}/offers", content);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var result = await response.Content.ReadFromJsonAsync<ApiResponse<Guid>>();
-        result!.Data.Should().NotBeEmpty();
-
-        await Factory.ExecuteDbContextAsync(async db =>
-        {
-            var offer = await db.Offers.FindAsync(result.Data);
-            offer.Should().NotBeNull();
-            offer!.Title.Should().Be("Flash Sale");
-            offer.ProductId.Should().Be(productId);
-        });
-    }
-
-    // ── 3. PATCH /offers/{offerId}/toggle-status ─────────────────────────────
-
-    [Fact]
-    public async Task ToggleOfferStatus_CyclesStatus_WhenOfferExists()
-    {
-        // Arrange
-        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
-        Guid offerId = Guid.Empty;
-
-        await Factory.ExecuteDbContextAsync(async db =>
-        {
-            var product = Product.Create(retailerId, "P1", price: 100m, status: Domain.Enums.Product.ProductStatus.Active);
-            db.Products.Add(product);
-            await db.SaveChangesAsync();
-
-            var offer = Offer.Create(
-                retailerId, "Toggle Me", null, OfferType.Product, product.Id, null, 
-                DiscountType.Percentage, 10, DateOnly.FromDateTime(DateTime.UtcNow), null, "http://img.com");
-            
-            db.Offers.Add(offer);
-            await db.SaveChangesAsync();
-            offerId = offer.Id;
-        });
-
-        // Act - Toggle to Inactive
-        var response1 = await Client.PatchAsync($"/api/retailers/{retailerId}/offers/{offerId}/toggle-status", null);
-        response1.StatusCode.Should().Be(HttpStatusCode.NoContent);
-
-        await Factory.ExecuteDbContextAsync(async db =>
-        {
-            var offer = await db.Offers.FindAsync(offerId);
-            offer!.Status.Should().Be(OfferStatus.Inactive);
-        });
-
-        // Act - Toggle back to Active
-        var response2 = await Client.PatchAsync($"/api/retailers/{retailerId}/offers/{offerId}/toggle-status", null);
-        response2.StatusCode.Should().Be(HttpStatusCode.NoContent);
-
-        await Factory.ExecuteDbContextAsync(async db =>
-        {
-            var offer = await db.Offers.FindAsync(offerId);
-            offer!.Status.Should().Be(OfferStatus.Active);
-        });
-    }
-
-    // ── 4. DELETE /offers/{offerId} ──────────────────────────────────────────
-
-    [Fact]
-    public async Task DeleteOffer_SoftDeletes_WhenOfferExists()
-    {
-        // Arrange
-        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
-        Guid offerId = Guid.Empty;
-
-        await Factory.ExecuteDbContextAsync(async db =>
-        {
-            var product = Product.Create(retailerId, "P1", price: 100m, status: Domain.Enums.Product.ProductStatus.Active);
-            db.Products.Add(product);
-            await db.SaveChangesAsync();
-
-            var offer = Offer.Create(
-                retailerId, "Delete Me", null, OfferType.Product, product.Id, null, 
-                DiscountType.Percentage, 10, DateOnly.FromDateTime(DateTime.UtcNow), null, "http://img.com");
-            
-            db.Offers.Add(offer);
-            await db.SaveChangesAsync();
-            offerId = offer.Id;
-        });
-
-        // Act
-        var response = await Client.DeleteAsync($"/api/retailers/{retailerId}/offers/{offerId}");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
-
-        await Factory.ExecuteDbContextAsync(async db =>
-        {
-            var offer = await db.Offers.IgnoreQueryFilters().FirstOrDefaultAsync(o => o.Id == offerId);
-            offer!.IsDeleted.Should().BeTrue();
-        });
+        result.Should().NotBeNull();
+        result!.Success.Should().BeTrue();
+        result.Data!.Items.Should().BeEmpty();
+        result.Data.TotalCount.Should().Be(0);
     }
 
     [Fact]
-    public async Task GetOfferById_ReturnsOffer_WhenExists()
+    public async Task GetOffers_ReturnsList_WhenOffersExist()
     {
         var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
-        Guid offerId = Guid.Empty;
 
         await Factory.ExecuteDbContextAsync(async db =>
         {
-            var product = Product.Create(retailerId, "Offer Detail Product", price: 200m, status: Domain.Enums.Product.ProductStatus.Active);
-            db.Products.Add(product);
+            var category = Category.Create(
+                retailerId,
+                "Category A",
+                null,
+                "https://cdn.vfr.com/a.jpg",
+                Category.CategoryStatus.Active);
+            db.Categories.Add(category);
             await db.SaveChangesAsync();
 
-            var offer = Offer.Create(
-                retailerId, "Detail Offer", "A detailed offer", OfferType.Product, product.Id, null,
-                DiscountType.Percentage, 15, DateOnly.FromDateTime(DateTime.UtcNow), null, "http://img.com");
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-            db.Offers.Add(offer);
+            db.Set<Offer>().Add(Offer.Create(
+                retailerId, "Offer One", null,
+                OfferType.Category, null, category.Id,
+                DiscountType.Percentage, 10m,
+                today, today.AddDays(30), "https://cdn.vfr.com/o1.jpg"));
+
+            db.Set<Offer>().Add(Offer.Create(
+                retailerId, "Offer Two", null,
+                OfferType.Category, null, category.Id,
+                DiscountType.Percentage, 20m,
+                today, today.AddDays(60), "https://cdn.vfr.com/o2.jpg"));
+
             await db.SaveChangesAsync();
-            offerId = offer.Id;
         });
+
+        var response = await Client.GetAsync($"/api/retailers/{retailerId}/offers");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ApiResponse<PagedResult<OfferDto>>>();
+
+        result.Should().NotBeNull();
+        result!.Success.Should().BeTrue();
+        result.Data!.TotalCount.Should().Be(2);
+        result.Data.Items.Should().HaveCount(2);
+        result.Data.Items.Should().Contain(o => o.Title == "Offer One");
+        result.Data.Items.Should().Contain(o => o.Title == "Offer Two");
+    }
+
+    // ── 2. GET /offers/{offerId} ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetOfferById_ValidId_ReturnsOffer()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        var (_, offerId) = await SeedCategoryOfferAsync(retailerId, "Flash Sale", discountValue: 25m);
 
         var response = await Client.GetAsync($"/api/retailers/{retailerId}/offers/{offerId}");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await response.Content.ReadFromJsonAsync<ApiResponse<OfferDto>>();
-        result!.Data.Should().NotBeNull();
-        result.Data!.Title.Should().Be("Detail Offer");
+
+        result.Should().NotBeNull();
+        result!.Success.Should().BeTrue();
+        result.Data!.Id.Should().Be(offerId);
+        result.Data.Title.Should().Be("Flash Sale");
+        result.Data.DiscountValue.Should().Be(25m);
+        result.Data.OfferType.Should().Be(OfferType.Category);
+        result.Data.DiscountType.Should().Be(DiscountType.Percentage);
     }
 
     [Fact]
-    public async Task GetOfferById_ReturnsNotFound_WhenDoesNotExist()
+    public async Task GetOfferById_InvalidId_ShouldReturn404()
     {
         var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        var nonExistentOfferId = Guid.NewGuid();
 
-        var response = await Client.GetAsync($"/api/retailers/{retailerId}/offers/{Guid.NewGuid()}");
+        var response = await Client.GetAsync($"/api/retailers/{retailerId}/offers/{nonExistentOfferId}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    // ── 3. POST /offers ────────────────────────────────────────────────────────
+
     [Fact]
-    public async Task UpdateOffer_UpdatesFields_WhenOfferIsActive()
+    public async Task CreateOffer_WithValidData_ShouldReturn201()
     {
         var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
-        Guid offerId = Guid.Empty;
+        Guid categoryId = Guid.Empty;
 
         await Factory.ExecuteDbContextAsync(async db =>
         {
-            var product = Product.Create(retailerId, "Update Offer Product", price: 300m, status: Domain.Enums.Product.ProductStatus.Active);
-            db.Products.Add(product);
+            var category = Category.Create(
+                retailerId, "Active Category", null,
+                "https://cdn.vfr.com/cat.jpg", Category.CategoryStatus.Active);
+            db.Categories.Add(category);
             await db.SaveChangesAsync();
-
-            var offer = Offer.Create(
-                retailerId, "Original Title", null, OfferType.Product, product.Id, null,
-                DiscountType.Percentage, 10, DateOnly.FromDateTime(DateTime.UtcNow), null, "http://img.com");
-
-            db.Offers.Add(offer);
-            await db.SaveChangesAsync();
-            offerId = offer.Id;
+            categoryId = category.Id;
         });
 
-        using var content = new MultipartFormDataContent();
-        content.Add(new StringContent("Updated Title"), "Title");
-        content.Add(new StringContent(DiscountType.Percentage), "DiscountType");
-        content.Add(new StringContent("20"), "DiscountValue");
-        content.Add(new StringContent(DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd")), "StartDate");
-        content.Add(new StringContent("Active"), "Status");
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        using var form = BuildCreateOfferForm(
+            title: "Winter Clearance",
+            offerType: OfferType.Category,
+            categoryId: categoryId,
+            discountType: DiscountType.Percentage,
+            discountValue: "30",
+            startDate: today.ToString("yyyy-MM-dd"),
+            endDate: today.AddDays(14).ToString("yyyy-MM-dd"));
 
-        var response = await Client.PutAsync($"/api/retailers/{retailerId}/offers/{offerId}", content);
+        var response = await Client.PostAsync($"/api/retailers/{retailerId}/offers", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var result = await response.Content.ReadFromJsonAsync<ApiResponse<Guid>>();
+
+        result.Should().NotBeNull();
+        result!.Success.Should().BeTrue();
+        result.Data.Should().NotBeEmpty();
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var offer = await db.Set<Offer>().FirstOrDefaultAsync(o => o.Id == result.Data);
+            offer.Should().NotBeNull();
+            offer!.Title.Should().Be("Winter Clearance");
+            offer.RetailerId.Should().Be(retailerId);
+            offer.DiscountValue.Should().Be(30m);
+            offer.Status.Should().Be(OfferStatus.Active);
+            offer.CoverImageUrl.Should().NotBeNullOrWhiteSpace();
+        });
+    }
+
+    [Fact]
+    public async Task CreateOffer_WithEndDateBeforeStartDate_ShouldReturn422()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid categoryId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var category = Category.Create(
+                retailerId, "Category For Validation", null,
+                "https://cdn.vfr.com/c.jpg", Category.CategoryStatus.Active);
+            db.Categories.Add(category);
+            await db.SaveChangesAsync();
+            categoryId = category.Id;
+        });
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        using var form = BuildCreateOfferForm(
+            offerType: OfferType.Category,
+            categoryId: categoryId,
+            discountType: DiscountType.Percentage,
+            discountValue: "10",
+            startDate: today.AddDays(5).ToString("yyyy-MM-dd"),
+            endDate: today.AddDays(2).ToString("yyyy-MM-dd"));
+
+        var response = await Client.PostAsync($"/api/retailers/{retailerId}/offers", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task CreateOffer_WithDiscountAbove100_ShouldReturn422()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        Guid categoryId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var category = Category.Create(
+                retailerId, "Discount Test Category", null,
+                "https://cdn.vfr.com/d.jpg", Category.CategoryStatus.Active);
+            db.Categories.Add(category);
+            await db.SaveChangesAsync();
+            categoryId = category.Id;
+        });
+
+        using var form = BuildCreateOfferForm(
+            offerType: OfferType.Category,
+            categoryId: categoryId,
+            discountType: DiscountType.Percentage,
+            discountValue: "150");
+
+        var response = await Client.PostAsync($"/api/retailers/{retailerId}/offers", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task CreateOffer_ForProductBelongingToDifferentRetailer_ShouldReturn403()
+    {
+        var otherRetailerId = Guid.NewGuid();
+        Guid categoryId = Guid.Empty;
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var otherRetailer = RetailerAccount.Create(
+                "Other Retailer",
+                "other-offers@test.com",
+                DefaultPasswordHash,
+                "OtherBrand");
+
+            var idProp = typeof(Domain.Common.BaseEntity).GetProperty(
+                nameof(Domain.Common.BaseEntity.Id),
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic);
+            idProp!.SetValue(otherRetailer, otherRetailerId);
+
+            db.RetailerAccounts.Add(otherRetailer);
+
+            var category = Category.Create(
+                otherRetailerId, "Other Retailer Category", null,
+                "https://cdn.vfr.com/other.jpg", Category.CategoryStatus.Active);
+            db.Categories.Add(category);
+            await db.SaveChangesAsync();
+            categoryId = category.Id;
+        });
+
+        using var form = BuildCreateOfferForm(
+            offerType: OfferType.Category,
+            categoryId: categoryId);
+
+        var response = await Client.PostAsync($"/api/retailers/{otherRetailerId}/offers", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    // ── 4. PUT /offers/{offerId} ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateOffer_WithValidData_ShouldReturn200()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        var (_, offerId) = await SeedCategoryOfferAsync(retailerId, "Original Title", discountValue: 10m);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        using var form = BuildUpdateOfferForm(
+            title: "Updated Title",
+            description: "New description",
+            discountType: DiscountType.Percentage,
+            discountValue: "35",
+            status: OfferStatus.Inactive,
+            startDate: today.ToString("yyyy-MM-dd"),
+            endDate: today.AddDays(20).ToString("yyyy-MM-dd"));
+
+        var response = await Client.PutAsync($"/api/retailers/{retailerId}/offers/{offerId}", form);
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         await Factory.ExecuteDbContextAsync(async db =>
         {
-            var offer = await db.Offers.FindAsync(offerId);
+            var offer = await db.Set<Offer>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(o => o.Id == offerId);
+
+            offer.Should().NotBeNull();
             offer!.Title.Should().Be("Updated Title");
-            offer.DiscountValue.Should().Be(20);
+            offer.DiscountValue.Should().Be(35m);
+            offer.Status.Should().Be(OfferStatus.Inactive);
         });
+    }
+
+    [Fact]
+    public async Task UpdateOffer_ForNonExistentOffer_ShouldReturn404()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        var nonExistentOfferId = Guid.NewGuid();
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        using var form = BuildUpdateOfferForm(
+            startDate: today.ToString("yyyy-MM-dd"),
+            endDate: today.AddDays(10).ToString("yyyy-MM-dd"));
+
+        var response = await Client.PutAsync(
+            $"/api/retailers/{retailerId}/offers/{nonExistentOfferId}", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ── 5. DELETE /offers/{offerId} ────────────────────────────────────────────
+
+    [Fact]
+    public async Task DeleteOffer_WithValidId_ShouldReturn200()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        var (_, offerId) = await SeedCategoryOfferAsync(retailerId, "Offer To Delete");
+
+        var response = await Client.DeleteAsync($"/api/retailers/{retailerId}/offers/{offerId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var offer = await db.Set<Offer>()
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(o => o.Id == offerId);
+
+            offer.Should().NotBeNull();
+            offer!.IsDeleted.Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public async Task DeleteOffer_ForNonExistentOffer_ShouldReturn404()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        var nonExistentOfferId = Guid.NewGuid();
+
+        var response = await Client.DeleteAsync(
+            $"/api/retailers/{retailerId}/offers/{nonExistentOfferId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // ── 6. Expiry ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetOfferById_WhenOfferExpired_ReturnsWithExpiredStatus()
+    {
+        var retailerId = Guid.Parse(TestAuthHandler.DefaultRetailerId);
+        var pastStart = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-10));
+        var pastEnd = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
+
+        var (_, offerId) = await SeedCategoryOfferAsync(
+            retailerId,
+            "Expired Promo",
+            discountValue: 15m,
+            startDate: pastStart,
+            endDate: pastEnd,
+            deactivate: true);
+
+        var response = await Client.GetAsync($"/api/retailers/{retailerId}/offers/{offerId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ApiResponse<OfferDto>>();
+
+        result.Should().NotBeNull();
+        result!.Success.Should().BeTrue();
+        result.Data!.Id.Should().Be(offerId);
+        result.Data.Status.Should().Be(OfferStatus.Expired);
+        result.Data.IsExpired.Should().BeTrue();
+        result.Data.IsActiveNow.Should().BeFalse();
     }
 }

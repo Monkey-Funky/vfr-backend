@@ -42,6 +42,9 @@ public sealed class ResetPasswordCommandHandler
         // ── 1. Look up the retailer ───────────────────────────────────────────
         //
         // Only Active accounts are eligible for password reset.
+        //
+        // Email is a unique column (guaranteed 0 or 1 rows). FirstOrDefaultAsync is used
+        // here because it matches the IRepository contract used by all tests and callers.
         RetailerAccount? account = await _unitOfWork
             .Repository<RetailerAccount>()
             .FirstOrDefaultAsync(

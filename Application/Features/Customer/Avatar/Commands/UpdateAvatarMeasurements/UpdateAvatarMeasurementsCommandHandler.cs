@@ -2,7 +2,6 @@ using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Customer;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace Application.Features.Customer.Avatar.Commands.UpdateAvatarMeasurements;
 
@@ -21,10 +20,11 @@ public sealed class UpdateAvatarMeasurementsCommandHandler : IRequestHandler<Upd
 
     public async Task Handle(UpdateAvatarMeasurementsCommand request, CancellationToken cancellationToken)
     {
-        var customerId = _currentUserService.CustomerId 
+        var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedException("Customer identity missing.");
 
         var avatar = await _context.Avatars
+            .Include(a => a.MeasurementHistories)
             .FirstOrDefaultAsync(a => a.Id == request.AvatarId, cancellationToken);
 
         if (avatar is null || avatar.CustomerId != customerId)
@@ -44,19 +44,12 @@ public sealed class UpdateAvatarMeasurementsCommandHandler : IRequestHandler<Upd
             request.BodyShape
         );
 
-        avatar.UpdateMeasurements(measurements);
-
-        // Record history snapshot in the same transaction — pure procedural CQRS.
-        // The handler owns the side-effect, not the domain entity.
-        var measurementsJson = JsonSerializer.Serialize(measurements);
-        var history = AvatarMeasurementHistory.CreateSnapshot(
-            avatarId: avatar.Id,
-            measurementDataJson: measurementsJson,
-            source: request.Source);
-
-        _context.AvatarMeasurementHistory.Add(history);
+        // The domain entity owns the measurement update AND the history snapshot.
+        // UpdateMeasurements appends the snapshot to _measurementHistories; EF Core
+        // detects the addition through the ".WithMany("_measurementHistories")" relationship
+        // configuration and inserts the new row in the same transaction as the avatar UPDATE.
+        avatar.UpdateMeasurements(measurements, request.Source);
 
         await _context.SaveChangesAsync(cancellationToken);
     }
 }
-

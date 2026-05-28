@@ -1,4 +1,5 @@
 ﻿using Domain.Entities.Subscriptions;
+using Domain.Enums.Subscription;
 
 namespace Infrastructure.Persistence.Configurations.Subscription;
 
@@ -47,13 +48,29 @@ public sealed class SubscriptionPaymentConfiguration
             .HasMaxLength(10)
             .IsRequired();
 
-        // FIX-003: HasConversion<string>() first, then HasDefaultValueSql (raw SQL literal).
+        // ── W-3 FIX ────────────────────────────────────────────────────────────
+        // SubscriptionPaymentStatus.Pending has numeric value 0 — the CLR default.
+        // Without a sentinel, a new payment explicitly set to Processing, Failed,
+        // etc. before its first INSERT would have the column omitted by EF Core,
+        // letting the DB default ('Pending') silently override the application value.
+        //
+        // Setting Metadata.Sentinel = SubscriptionPaymentStatus.Pending instructs EF:
+        //   "Treat Pending as the unset/default marker; include the column in INSERT
+        //    for all other statuses so the application-assigned status is persisted."
+        //
+        // This is the direct Metadata-API equivalent of HasSentinelValue() and is
+        // fully supported in EF Core 8+. It avoids the generic type-inference issue
+        // that prevents the HasSentinelValue extension method from resolving on
+        // PropertyBuilder<SubscriptionPaymentStatus> when EF Core package versions are mixed.
         builder.Property(x => x.Status)
             .HasColumnName("status")
-            .HasConversion<string>()             // ← Always before default value
+            .HasConversion<string>()            // ← Always before default value config
             .HasMaxLength(30)
             .IsRequired()
-            .HasDefaultValueSql("'Pending'");    // ← SQL literal, not CLR enum value
+            .HasDefaultValueSql("'Pending'");   // ← SQL literal, not CLR enum value
+
+        // W-3 fix: set sentinel via Metadata API (equivalent to HasSentinelValue).
+        builder.Property(x => x.Status).Metadata.Sentinel = SubscriptionPaymentStatus.Pending;
 
         builder.Property(x => x.IsRecurring)
             .HasColumnName("is_recurring")

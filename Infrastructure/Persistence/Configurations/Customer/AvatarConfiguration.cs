@@ -1,4 +1,4 @@
-using Domain.Entities.Customer;
+﻿using Domain.Entities.Customer;
 
 namespace Infrastructure.Persistence.Configurations.Customer;
 
@@ -43,5 +43,20 @@ public sealed class AvatarConfiguration : IEntityTypeConfiguration<Avatar>
                .IsUnique()
                .HasFilter("is_deleted = false")
                .HasDatabaseName("uq_avatars_customer_id");
+
+        // Configure the one-to-many relationship with measurement history from the owning side.
+        // Doing this here (HasMany → WithOne) prevents EF Core convention from registering
+        // a second relationship when it encounters AvatarMeasurementHistory.AvatarId.
+        // UsePropertyAccessMode.Field tells EF Core to write directly to the private
+        // _measurementHistories backing field for relationship fixup and loading.
+        builder.HasMany(a => a.MeasurementHistories)
+            .WithOne()
+            .HasForeignKey(h => h.AvatarId)
+            .OnDelete(DeleteBehavior.Cascade)
+            .IsRequired()
+            .HasConstraintName("fk_avatar_measurement_history_avatars_avatar_id");
+
+        builder.Navigation(a => a.MeasurementHistories)
+            .UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

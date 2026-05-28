@@ -11,6 +11,7 @@ namespace Tests.Unit.Application.Features.Orders;
 public sealed class UpdateOrderStatusCommandHandlerTests
 {
     private readonly Mock<IUnitOfWork> _uowMock = new();
+    private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<IMediator> _mediatorMock = new();
     private readonly Mock<ILogger<UpdateOrderStatusCommandHandler>> _loggerMock = new();
     private readonly UpdateOrderStatusCommandHandler _sut;
@@ -22,6 +23,7 @@ public sealed class UpdateOrderStatusCommandHandlerTests
     {
         _sut = new UpdateOrderStatusCommandHandler(
             _uowMock.Object,
+            _contextMock.Object,
             _mediatorMock.Object,
             _loggerMock.Object);
 
@@ -63,11 +65,16 @@ public sealed class UpdateOrderStatusCommandHandlerTests
         return order;
     }
 
+    /// <summary>
+    /// Sets up IApplicationDbContext.Orders so the handler can load the order via
+    /// .Include(o => o.Items).FirstOrDefaultAsync(...).
+    /// Passing null simulates "order not found" (empty DbSet ? returns null).
+    /// </summary>
     private void SetupTrackedOrder(Order? order)
     {
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Order>(OrderId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(order);
+        var data = order is null ? new List<Order>() : new List<Order> { order };
+        var mockDbSet = data.AsQueryable().BuildMockDbSet();
+        _contextMock.Setup(x => x.Orders).Returns(mockDbSet.Object);
     }
 
     [Fact]
@@ -245,6 +252,7 @@ public sealed class UpdateOrderStatusCommandHandlerTests
     {
         var callCount = 0;
 
+        // Override the constructor-level ExecuteInTransactionAsync mock.
         _uowMock
             .Setup(x => x.ExecuteInTransactionAsync(
                 It.IsAny<Func<CancellationToken, Task>>(),
@@ -255,11 +263,15 @@ public sealed class UpdateOrderStatusCommandHandlerTests
                 await action(ct);
             });
 
-        var order = BuildOrder(OrderStatus.NotProcessed);
-
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Order>(OrderId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(order);
+        // Return a fresh NotProcessed order on every retry so the handler can re-load
+        // it without seeing a mutated Status from the previous (failed) attempt.
+        _contextMock
+            .Setup(x => x.Orders)
+            .Returns(() =>
+            {
+                var fresh = BuildOrder(OrderStatus.NotProcessed);
+                return new List<Order> { fresh }.AsQueryable().BuildMockDbSet().Object;
+            });
 
         _uowMock
             .Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))

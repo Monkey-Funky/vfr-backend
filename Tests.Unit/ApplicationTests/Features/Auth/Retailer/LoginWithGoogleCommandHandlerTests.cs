@@ -62,10 +62,16 @@ public sealed class LoginWithGoogleCommandHandlerTests
                 .ReturnsAsync(ValidGoogleUser);
     }
 
+    // FIX: The handler calls the 3-param overload of FirstOrDefaultAsync (with orderBy) to
+    // produce deterministic results when the OR predicate could match multiple rows (W-4 fix).
+    // The previous mock only matched the 2-param overload, so Moq returned null for every
+    // lookup, silently routing all calls into the "new account" path regardless of setup.
+    // The mock must now match the 3-param signature: (predicate, orderBy, cancellationToken).
     private void SetupRetailerLookup(RetailerAccount? retailer)
     {
         _retailerRepoMock.Setup(x => x.FirstOrDefaultAsync(
                 It.IsAny<Expression<Func<RetailerAccount, bool>>>(),
+                It.IsAny<Func<IQueryable<RetailerAccount>, IOrderedQueryable<RetailerAccount>>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(retailer);
     }

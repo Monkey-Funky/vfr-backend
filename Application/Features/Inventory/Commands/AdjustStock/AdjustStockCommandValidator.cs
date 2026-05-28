@@ -1,5 +1,4 @@
-﻿
-namespace Application.Features.Inventory.Commands.AdjustStock;
+﻿namespace Application.Features.Inventory.Commands.AdjustStock;
 
 public sealed class AdjustStockCommandValidator : AbstractValidator<AdjustStockCommand>
 {
@@ -18,8 +17,8 @@ public sealed class AdjustStockCommandValidator : AbstractValidator<AdjustStockC
             .WithMessage("InventoryRecordId is required.");
 
         RuleFor(c => c.NewQuantity)
-            .GreaterThanOrEqualTo(0)
-            .WithMessage("NewQuantity must be 0 or greater.");
+            .GreaterThan(0)
+            .WithMessage("NewQuantity must be greater than zero.");
 
         RuleFor(c => c.Type)
             .NotEmpty()

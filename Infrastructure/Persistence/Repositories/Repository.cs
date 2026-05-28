@@ -39,6 +39,36 @@ public class Repository<T> : IRepository<T> where T : BaseEntity
             .AsNoTracking()
             .FirstOrDefaultAsync(predicate, cancellationToken);
 
+    // ── W-4 FIX — ordered overload ────────────────────────────────────────────
+    /// <inheritdoc />
+    /// <remarks>
+    /// Use this overload when the predicate can return more than one row (e.g. an OR
+    /// predicate across multiple unique columns). The caller-supplied <paramref name="orderBy"/>
+    /// makes the result deterministic and suppresses the EF Core W-4 runtime warning.
+    /// </remarks>
+    public Task<T?> FirstOrDefaultAsync(
+        System.Linq.Expressions.Expression<Func<T, bool>> predicate,
+        Func<IQueryable<T>, IOrderedQueryable<T>> orderBy,
+        CancellationToken cancellationToken = default)
+        => orderBy(DbSet.AsNoTracking().Where(predicate))
+            .FirstOrDefaultAsync(cancellationToken);
+
+    // ── W-4 FIX — SingleOrDefaultAsync ───────────────────────────────────────
+    /// <inheritdoc />
+    /// <remarks>
+    /// Use for queries on primary keys or unique indexes where exactly 0 or 1 rows
+    /// are expected. EF Core does not emit the "no OrderBy" warning for
+    /// Single/SingleOrDefault. Throws <see cref="InvalidOperationException"/> if
+    /// more than one row matches (which would indicate a data integrity violation).
+    /// </remarks>
+    public Task<T?> SingleOrDefaultAsync(
+        System.Linq.Expressions.Expression<Func<T, bool>> predicate,
+        CancellationToken cancellationToken = default)
+        => DbSet
+            .AsNoTracking()
+            .Where(predicate)
+            .SingleOrDefaultAsync(cancellationToken);
+
     public async Task<(IReadOnlyList<T> Items, int TotalCount)> GetPagedAsync(
         int pageNumber,
         int pageSize,
@@ -100,8 +130,8 @@ public class Repository<T> : IRepository<T> where T : BaseEntity
     }
 
     public Task SoftDeleteRangeAsync(
-    IEnumerable<T> entities,
-    CancellationToken cancellationToken = default)
+        IEnumerable<T> entities,
+        CancellationToken cancellationToken = default)
     {
         DbSet.RemoveRange(entities);
         return Task.CompletedTask;

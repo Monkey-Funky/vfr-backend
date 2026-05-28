@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Application.Features.Customer.Outfits.Commands.CreateOutfit;
 using Application.Features.Customer.Outfits.DTOs;
 using Domain.Entities.Customer;
 using Domain.Entities.Retailer;
@@ -36,18 +37,20 @@ public sealed class OutfitsControllerTests : IntegrationTestBase
     public async Task CreateOutfit_ReturnsCreated_WhenDataIsValid()
     {
         var productId = await SeedProductAsync();
-        var request = new
-        {
-            Name = "Summer Outfit",
-            StyleCategory = "Casual",
-            Items = new[]
+
+        // The handler requires products to be favorited before creating an outfit
+        await SeedFavoriteAsync(productId);
+
+        var command = new CreateOutfitCommand(
+            Name: "Summer Outfit",
+            StyleCategory: "Casual",
+            Items: new List<CreateOutfitItemDto>
             {
-                new { ProductId = productId, SlotType = "Top", DisplayOrder = 0 }
-            }
-        };
+                new(productId, SlotType.Top, 0)
+            });
 
         var response = await CustomerClient.PostAsJsonAsync(
-            $"/api/customers/{_customerId}/outfits", request);
+            $"/api/customers/{_customerId}/outfits", command);
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
     }
@@ -126,5 +129,15 @@ public sealed class OutfitsControllerTests : IntegrationTestBase
             productId = product.Id;
         });
         return productId;
+    }
+
+    private async Task SeedFavoriteAsync(Guid productId)
+    {
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var favorite = CustomerFavorite.Create(_customerId, productId, _retailerId);
+            db.CustomerFavorites.Add(favorite);
+            await db.SaveChangesAsync();
+        });
     }
 }

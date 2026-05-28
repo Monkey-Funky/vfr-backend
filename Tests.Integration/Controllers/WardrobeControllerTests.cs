@@ -8,6 +8,7 @@ using Domain.Entities.Retailer;
 using Tests.Integration.Fixtures;
 using Microsoft.EntityFrameworkCore;
 using Shared.DTOs;
+using Domain.Enums.Product;
 
 namespace Tests.Integration.Controllers;
 
@@ -137,7 +138,8 @@ public sealed class WardrobeControllerTests : IntegrationTestBase
         Guid productId = Guid.Empty;
         await Factory.ExecuteDbContextAsync(async db =>
         {
-            var product = Product.Create(_retailerId, "Wardrobe Test Product", price: 149.99m);
+            var product = Product.Create(_retailerId, "Wardrobe Test Product", price: 149.99m,
+                status: ProductStatus.Active);
             db.Products.Add(product);
             await db.SaveChangesAsync();
             productId = product.Id;

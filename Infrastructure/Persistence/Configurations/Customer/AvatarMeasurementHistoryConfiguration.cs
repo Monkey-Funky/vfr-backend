@@ -1,4 +1,4 @@
-using Domain.Entities.Customer;
+﻿using Domain.Entities.Customer;
 
 namespace Infrastructure.Persistence.Configurations.Customer;
 
@@ -29,17 +29,17 @@ public sealed class AvatarMeasurementHistoryConfiguration : IEntityTypeConfigura
             .IsRequired()
             .HasDefaultValueSql("now()");
 
-        // Ignore Auditing fields not present in immutable table
+        // Ignore auditing fields not present in the immutable history table.
         builder.Ignore(h => h.UpdatedAt);
         builder.Ignore(h => h.CreatedBy);
         builder.Ignore(h => h.UpdatedBy);
         builder.Ignore(h => h.IsDeleted);
 
-        // Configure relationship with Avatar
-        builder.HasOne<Avatar>()
-            .WithMany() 
-            .HasForeignKey(h => h.AvatarId)
-            .HasConstraintName("fk_avatar_measurement_history_avatars_avatar_id");
+        // Note: the HasOne/WithMany relationship is configured from the Avatar side
+        // in AvatarConfiguration using HasMany → WithOne. Configuring it here too
+        // (even with .WithMany(a => a.MeasurementHistories)) caused EF Core to register
+        // two relationships — one from convention (FK = AvatarId) and one from the explicit
+        // config — resulting in the shadow FK column "avatar_id1".
 
         builder.HasIndex(h => new { h.AvatarId, h.RecordedAt })
             .IsDescending(false, true)

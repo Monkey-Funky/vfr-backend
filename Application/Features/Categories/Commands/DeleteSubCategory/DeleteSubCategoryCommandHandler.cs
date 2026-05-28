@@ -47,14 +47,16 @@ public sealed class DeleteSubCategoryCommandHandler
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
-            // Step 1: Null out products.SubCategoryId (+ stamp UpdatedAt)
-            await _context.Products
+            // Step 1: Null out products.SubCategoryId (+ let SaveChanges stamp UpdatedAt).
+            // Load into the change tracker and mutate via the domain method so EF Core
+            // detects the change. This replaces the previous ExecuteUpdateAsync call,
+            // which is not supported by the in-memory / mocked DbSet in unit tests.
+            var affectedProducts = await _context.Products
                 .Where(p => p.SubCategoryId == command.SubCategoryId)
-                .ExecuteUpdateAsync(
-                    setters => setters
-                        .SetProperty(p => p.SubCategoryId, (Guid?)null)
-                        .SetProperty(p => p.UpdatedAt, DateTime.UtcNow),
-                    ct);
+                .ToListAsync(ct);
+
+            foreach (var product in affectedProducts)
+                product.UpdateCategory(product.CategoryId, null); // clear SubCategoryId only
 
             // Step 2: Soft-delete the sub-category itself
             subCategory.MarkAsDeleted();

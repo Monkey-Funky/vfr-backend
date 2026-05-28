@@ -2757,7 +2757,7 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("Domain.Entities.Customer.AvatarMeasurementHistory", b =>
                 {
                     b.HasOne("Domain.Entities.Customer.Avatar", null)
-                        .WithMany()
+                        .WithMany("MeasurementHistories")
                         .HasForeignKey("AvatarId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
@@ -3127,6 +3127,11 @@ namespace Infrastructure.Migrations
                         .HasConstraintName("fk_subscription_payments_subscription_plan_id");
 
                     b.Navigation("Plan");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Customer.Avatar", b =>
+                {
+                    b.Navigation("MeasurementHistories");
                 });
 
             modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfit", b =>

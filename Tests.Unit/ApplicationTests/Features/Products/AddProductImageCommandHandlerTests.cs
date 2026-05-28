@@ -4,6 +4,7 @@ using Application.Features.Products.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Enums.Product;
+using Moq.EntityFrameworkCore;
 
 namespace Tests.Unit.Application.Features.Products;
 
@@ -12,6 +13,7 @@ public sealed class AddProductImageCommandHandlerTests
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<IFileStorageService> _fileStorageMock = new();
     private readonly Mock<ICurrentUserService> _userServiceMock = new();
+    private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly AddProductImageCommandHandler _sut;
 
     private static readonly Guid RetailerId = Guid.NewGuid();
@@ -23,7 +25,8 @@ public sealed class AddProductImageCommandHandlerTests
         _sut = new AddProductImageCommandHandler(
             _uowMock.Object,
             _fileStorageMock.Object,
-            _userServiceMock.Object);
+            _userServiceMock.Object,
+            _contextMock.Object);
 
         _userServiceMock.SetupGet(x => x.RetailerId).Returns(RetailerId);
         _fileStorageMock
@@ -54,10 +57,25 @@ public sealed class AddProductImageCommandHandlerTests
         return new AddProductImageCommand(productId ?? ProductId, fileUpload, displayOrder);
     }
 
+    /// <summary>
+    /// Configures the mock IApplicationDbContext.Products DbSet to return the given product.
+    /// Uses Moq.EntityFrameworkCore's ReturnsDbSet so that Include(...) and
+    /// FirstOrDefaultAsync(...) work correctly in the handler under test.
+    /// </summary>
+    private void SetupProductInContext(Product? product)
+    {
+        var products = product is not null
+            ? new List<Product> { product }
+            : new List<Product>();
+
+        _contextMock.Setup(x => x.Products).ReturnsDbSet(products);
+    }
+
     [Fact]
     public async Task Handle_RetailerIdIsNull_ThrowsUnauthorizedException()
     {
         _userServiceMock.SetupGet(x => x.RetailerId).Returns((Guid?)null);
+        // No Products setup needed — auth guard fires first.
         var command = BuildCommand();
 
         var act = () => _sut.Handle(command, default);
@@ -68,10 +86,7 @@ public sealed class AddProductImageCommandHandlerTests
     [Fact]
     public async Task Handle_ProductNotFound_ThrowsNotFoundException()
     {
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Product?)null);
-
+        SetupProductInContext(null);
         var command = BuildCommand();
 
         var act = () => _sut.Handle(command, default);
@@ -82,11 +97,8 @@ public sealed class AddProductImageCommandHandlerTests
     [Fact]
     public async Task Handle_ProductBelongsToDifferentRetailer_ThrowsUnauthorizedException()
     {
-        var product = BuildProduct(ProductId, Guid.NewGuid());
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        var product = BuildProduct(ProductId, Guid.NewGuid()); // different retailer
+        SetupProductInContext(product);
         var command = BuildCommand();
 
         var act = () => _sut.Handle(command, default);
@@ -98,10 +110,7 @@ public sealed class AddProductImageCommandHandlerTests
     public async Task Handle_ProductIsDeleted_ThrowsNotFoundException()
     {
         var product = BuildProduct(ProductId, RetailerId, isDeleted: true);
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        SetupProductInContext(product);
         var command = BuildCommand();
 
         var act = () => _sut.Handle(command, default);
@@ -113,10 +122,7 @@ public sealed class AddProductImageCommandHandlerTests
     public async Task Handle_ValidCommand_UploadsFileToStorage()
     {
         var product = BuildProduct();
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        SetupProductInContext(product);
         var command = BuildCommand();
 
         await _sut.Handle(command, default);
@@ -134,10 +140,7 @@ public sealed class AddProductImageCommandHandlerTests
     public async Task Handle_ValidCommand_AddsImageToProduct()
     {
         var product = BuildProduct();
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        SetupProductInContext(product);
         var command = BuildCommand(displayOrder: 2);
 
         await _sut.Handle(command, default);
@@ -151,10 +154,7 @@ public sealed class AddProductImageCommandHandlerTests
     public async Task Handle_ValidCommand_SavesChanges()
     {
         var product = BuildProduct();
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        SetupProductInContext(product);
         var command = BuildCommand();
 
         await _sut.Handle(command, default);
@@ -166,10 +166,7 @@ public sealed class AddProductImageCommandHandlerTests
     public async Task Handle_ValidCommand_ReturnsSuccessResultWithProductImageDto()
     {
         var product = BuildProduct();
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        SetupProductInContext(product);
         var command = BuildCommand(displayOrder: 1);
 
         var result = await _sut.Handle(command, default);
@@ -184,10 +181,7 @@ public sealed class AddProductImageCommandHandlerTests
     public async Task Handle_ValidCommand_ReturnsImageWithNonEmptyId()
     {
         var product = BuildProduct();
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        SetupProductInContext(product);
         var command = BuildCommand();
 
         var result = await _sut.Handle(command, default);
@@ -199,10 +193,7 @@ public sealed class AddProductImageCommandHandlerTests
     public async Task Handle_ValidCommand_DefaultDisplayOrderIsZero()
     {
         var product = BuildProduct();
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        SetupProductInContext(product);
         var command = BuildCommand(displayOrder: 0);
 
         var result = await _sut.Handle(command, default);
@@ -214,10 +205,7 @@ public sealed class AddProductImageCommandHandlerTests
     public async Task Handle_ValidCommand_UploadFolderContainsRetailerId()
     {
         var product = BuildProduct();
-        _uowMock
-            .Setup(x => x.GetTrackedByIdAsync<Product>(ProductId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(product);
-
+        SetupProductInContext(product);
         var command = BuildCommand();
 
         await _sut.Handle(command, default);

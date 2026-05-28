@@ -73,20 +73,20 @@ public sealed class DeleteProductCommandHandler
             inventoryRecord?.SoftDelete();
 
             // ── 4. Inactivate any active Offers referencing this product ───────
-            // Cannot have an active Offer for a deleted product.
-            // Uses ExecuteUpdateAsync — bulk SQL UPDATE inside the open transaction.
-            await _context.Offers
+            // Load into the change tracker, then mutate via the domain method so
+            // EF Core detects the change and persists it in SaveChangesAsync below.
+            // This replaces the previous ExecuteUpdateAsync call, which is not
+            // supported by the in-memory / mocked DbSet used in unit tests.
+            var activeOffers = await _context.Offers
                 .Where(o => o.ProductId == command.ProductId
                          && o.Status == "Active"
                          && !o.IsDeleted)
-                .ExecuteUpdateAsync(
-                    setters => setters
-                        .SetProperty(o => o.Status, "Inactive")
-                        .SetProperty(o => o.UpdatedAt, DateTime.UtcNow),
-                    ct);
+                .ToListAsync(ct);
 
-            // ── 5. Single SaveChanges for product + images + inventory ─────────
-            // (Offer update was already flushed by ExecuteUpdateAsync above.)
+            foreach (var offer in activeOffers)
+                offer.ToggleStatus(); // Active → Inactive
+
+            // ── 5. Single SaveChanges: product + images + inventory + offers ───
             await _unitOfWork.SaveChangesAsync(ct);
 
         }, cancellationToken);

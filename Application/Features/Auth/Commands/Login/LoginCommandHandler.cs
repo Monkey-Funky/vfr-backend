@@ -45,6 +45,9 @@ public sealed class LoginCommandHandler
         // resolve to the same account.
         // We do NOT filter by status here so that the lockout check (step 3) can fire
         // first for any account, regardless of its status.
+        //
+        // Email is a unique column (guaranteed 0 or 1 rows). FirstOrDefaultAsync is used
+        // here because it matches the IRepository contract used by all tests and callers.
         RetailerAccount? retailer = await _unitOfWork
             .Repository<RetailerAccount>()
             .FirstOrDefaultAsync(

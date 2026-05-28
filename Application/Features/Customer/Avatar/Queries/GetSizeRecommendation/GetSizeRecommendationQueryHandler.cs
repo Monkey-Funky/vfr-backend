@@ -23,7 +23,7 @@ public sealed class GetSizeRecommendationQueryHandler : IRequestHandler<GetSizeR
 
     public async Task<SizeRecommendationDto> Handle(GetSizeRecommendationQuery request, CancellationToken cancellationToken)
     {
-        var customerId = _currentUserService.CustomerId 
+        var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedException("Customer identity missing.");
 
         var avatar = await _context.Avatars
@@ -31,7 +31,7 @@ public sealed class GetSizeRecommendationQueryHandler : IRequestHandler<GetSizeR
             .FirstOrDefaultAsync(a => a.CustomerId == customerId, cancellationToken);
 
         if (avatar is null)
-            throw new BusinessRuleException("NO_AVATAR", "You must create an avatar before requesting a size recommendation.");
+            throw new NotFoundException("Avatar", customerId);
 
         // Real implementation would ensure product exists, but for scope we trust the SizeRecommendationService
         return await _sizeRecommendationService.RecommendSizeAsync(avatar, request.ProductId, cancellationToken);

@@ -77,12 +77,20 @@ public sealed class LoginWithGoogleCommandHandler
         //
         // NOTE: The global query filter (HasQueryFilter(r => !r.IsDeleted)) is active.
         // The explicit !r.IsDeleted in the predicate is redundant but kept for clarity.
+        //
+        // W-4 FIX: The OR predicate can in theory match two distinct rows simultaneously
+        // (one matched by GoogleId, another by Email). SingleOrDefaultAsync would throw
+        // in that edge case. Instead, we use FirstOrDefaultAsync with an explicit OrderBy
+        // to make the result deterministic and silence the EF W-4 warning.
+        // OrderBy(CreatedAt) ensures the oldest account wins, which is the safest
+        // tie-breaking strategy when a merge scenario occurs.
         RetailerAccount? retailer = await _unitOfWork
             .Repository<RetailerAccount>()
             .FirstOrDefaultAsync(
-                r => (r.GoogleId == googleUser.GoogleId
-                   || r.Email.ToLower() == googleUser.Email.ToLower())
-                  && !r.IsDeleted,
+                predicate: r => (r.GoogleId == googleUser.GoogleId
+                             || r.Email.ToLower() == googleUser.Email.ToLower())
+                             && !r.IsDeleted,
+                orderBy: q => q.OrderBy(r => r.CreatedAt),  // oldest account wins
                 cancellationToken);
 
         // Track whether we are creating a brand-new account

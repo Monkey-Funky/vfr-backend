@@ -35,7 +35,6 @@ public sealed class RefreshCustomerTokenCommandHandler
         if (principal is null)
         {
             _logger.LogWarning("RefreshCustomerToken failed — access token is structurally invalid.");
-            // AuthenticationException → HTTP 401; UnauthorizedException is for IDOR / 403.
             throw new AuthenticationException("The access token is invalid.");
         }
 
@@ -48,13 +47,14 @@ public sealed class RefreshCustomerTokenCommandHandler
             throw new AuthenticationException("The access token does not contain a valid identity.");
         }
 
-        // FIX F-02: Validate role claim to prevent cross-role attacks
+        // Validate role claim to prevent cross-role token reuse
         string? roleClaim = principal.FindFirst("role")?.Value
                          ?? principal.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
 
         if (roleClaim != "Customer")
         {
-            _logger.LogWarning("RefreshCustomerToken — role claim is '{Role}', expected 'Customer'.", roleClaim);
+            _logger.LogWarning(
+                "RefreshCustomerToken — role claim is '{Role}', expected 'Customer'.", roleClaim);
             throw new AuthenticationException("The access token is not a valid Customer token.");
         }
 
@@ -65,7 +65,8 @@ public sealed class RefreshCustomerTokenCommandHandler
         if (customer is null || customer.IsDeleted)
         {
             _logger.LogWarning(
-                "RefreshCustomerToken failed — account not found or deleted. CustomerId: {CustomerId}", customerId);
+                "RefreshCustomerToken failed — account not found or deleted. CustomerId: {CustomerId}",
+                customerId);
             throw new AuthenticationException("Account not found.");
         }
 
@@ -78,15 +79,19 @@ public sealed class RefreshCustomerTokenCommandHandler
             throw new AuthenticationException("Your account is no longer active. Please log in again.");
         }
 
-        // 3. Verify RefreshToken matches hash using EnhancedVerify as requested
+        // 3. Verify RefreshToken against the stored standard BCrypt hash
         if (customer.RefreshTokenHash is null || customer.RefreshTokenExpiresAt is null)
         {
             _logger.LogWarning(
-                "RefreshCustomerToken failed — no active refresh token. CustomerId: {CustomerId}", customerId);
+                "RefreshCustomerToken failed — no active refresh token. CustomerId: {CustomerId}",
+                customerId);
             throw new AuthenticationException("No active refresh token found. Please log in again.");
         }
 
-        bool isTokenValid = BCrypt.Net.BCrypt.EnhancedVerify(command.RefreshToken, customer.RefreshTokenHash);
+        // FIX U-3: Use BCrypt.Verify (standard) — consistent with HashPassword used when
+        // storing the token. EnhancedVerify expects EnhancedHashPassword-produced hashes and
+        // always returns false against a standard BCrypt hash, causing every valid token to fail.
+        bool isTokenValid = BCrypt.Net.BCrypt.Verify(command.RefreshToken, customer.RefreshTokenHash);
         if (!isTokenValid)
         {
             _logger.LogWarning(
@@ -97,7 +102,8 @@ public sealed class RefreshCustomerTokenCommandHandler
         // 4. Verify refresh token has not expired
         if (customer.RefreshTokenExpiresAt.Value < DateTime.UtcNow)
         {
-            _logger.LogInformation("RefreshCustomerToken failed — token expired. CustomerId: {CustomerId}", customerId);
+            _logger.LogInformation(
+                "RefreshCustomerToken failed — token expired. CustomerId: {CustomerId}", customerId);
             throw new AuthenticationException("The refresh token has expired. Please log in again.");
         }
 
@@ -123,9 +129,8 @@ public sealed class RefreshCustomerTokenCommandHandler
         catch (DbUpdateConcurrencyException)
         {
             _logger.LogWarning(
-                "RefreshCustomerToken — concurrent rotation detected. CustomerId: {CustomerId}", customerId);
-            // Concurrent rotation means a second device/request beat us to it.
-            // The caller must re-authenticate — this is an authentication flow failure.
+                "RefreshCustomerToken — concurrent rotation detected. CustomerId: {CustomerId}",
+                customerId);
             throw new AuthenticationException("A concurrent session refresh was detected. Please retry.");
         }
 

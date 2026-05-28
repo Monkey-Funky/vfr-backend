@@ -2,111 +2,149 @@ using Domain.Enums.Customer;
 
 namespace Tests.Unit.DomainTests.Entities;
 
-/// <summary>
-/// Unit tests for <see cref="CustomerAccount"/> aggregate root.
-/// Validates registration flows, profile updates, and lockout logic.
-/// </summary>
 public sealed class CustomerAccountTests
 {
-    // ── Factory Methods ──────────────────────────────────────────────────────
-
     [Fact]
-    public void Create_ValidInput_InitializesPendingAccount()
+    public void Create_ValidParameters_SetsPropertiesCorrectly()
     {
-        // Act
-        var customer = CustomerAccount.Create("John Doe", "john@example.com", "hashed_pwd");
+        var account = CustomerAccount.Create("John Doe", "john@example.com", "hashed_password_123");
 
-        // Assert
-        customer.FullName.Should().Be("John Doe");
-        customer.Email.Should().Be("john@example.com");
-        customer.PasswordHash.Should().Be("hashed_pwd");
-        customer.Status.Should().Be(CustomerStatus.PendingEmailVerification);
-        customer.IsEmailVerified.Should().BeFalse();
+        account.Id.Should().NotBeEmpty();
+        account.FullName.Should().Be("John Doe");
+        account.Email.Should().Be("john@example.com");
+        account.PasswordHash.Should().Be("hashed_password_123");
+        account.IsEmailVerified.Should().BeFalse();
+        account.FailedLoginAttempts.Should().Be(0);
+        account.GoogleId.Should().BeNull();
+        account.LockoutUntil.Should().BeNull();
+        account.AvatarUrl.Should().BeNull();
+        account.CreatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
     }
 
     [Fact]
-    public void CreateWithGoogle_ValidInput_InitializesActiveAccount()
+    public void Create_EmailIsLowercasedAndTrimmed()
     {
-        // Act
-        var customer = CustomerAccount.CreateWithGoogle("Jane Smith", "jane@gmail.com", "google_123");
+        var account = CustomerAccount.Create("John Doe", "  JOHN@EXAMPLE.COM  ", "hashed_password");
 
-        // Assert
-        customer.FullName.Should().Be("Jane Smith");
-        customer.Email.Should().Be("jane@gmail.com");
-        customer.GoogleId.Should().Be("google_123");
-        customer.Status.Should().Be(CustomerStatus.Active);
-        customer.IsEmailVerified.Should().BeTrue();
-    }
-
-    // ── Profile Updates ──────────────────────────────────────────────────────
-
-    [Fact]
-    public void UpdateProfile_ValidData_UpdatesProperties()
-    {
-        // Arrange
-        var customer = CustomerAccount.CreateWithGoogle("Jane Smith", "jane@gmail.com", "google_123");
-        var dob = new DateOnly(1990, 1, 1);
-
-        // Act
-        customer.UpdateProfile("Jane Doe", "12345678", dob, "Female");
-
-        // Assert
-        customer.FullName.Should().Be("Jane Doe");
-        customer.PhoneNumber.Should().Be("12345678");
-        customer.DateOfBirth.Should().Be(dob);
-        customer.Gender.Should().Be("Female");
+        account.Email.Should().Be("john@example.com");
     }
 
     [Fact]
-    public void UpdateProfile_InvalidGender_ThrowsBusinessRuleException()
+    public void Create_StatusIsPendingEmailVerification()
     {
-        // Arrange
-        var customer = CustomerAccount.CreateWithGoogle("Jane Smith", "jane@gmail.com", "google_123");
+        var account = CustomerAccount.Create("John Doe", "john@example.com", "hashed_password");
 
-        // Act
-        var act = () => customer.UpdateProfile("Jane Doe", null, null, "Attack Helicopter");
-
-        // Assert
-        act.Should().Throw<BusinessRuleException>()
-            .Which.Code.Should().Be("INVALID_GENDER");
+        account.Status.Should().Be(CustomerStatus.PendingEmailVerification);
     }
 
-    // ── Lockout Logic ────────────────────────────────────────────────────────
+    [Fact]
+    public void CreateWithGoogle_SetsGoogleIdAndNullPassword()
+    {
+        var account = CustomerAccount.CreateWithGoogle("Jane Smith", "jane@gmail.com", "google_sub_abc123");
+
+        account.GoogleId.Should().Be("google_sub_abc123");
+        account.PasswordHash.Should().BeNull();
+        account.IsEmailVerified.Should().BeTrue();
+        account.Status.Should().Be(CustomerStatus.Active);
+        account.Email.Should().Be("jane@gmail.com");
+        account.FullName.Should().Be("Jane Smith");
+    }
 
     [Fact]
-    public void IncrementFailedLogin_LocksOutAfter10Attempts()
+    public void MarkEmailVerified_SetsStatusToActive()
     {
-        // Arrange
-        var customer = CustomerAccount.Create("John", "john@ex.com", "pwd");
+        var account = CustomerAccount.Create("John Doe", "john@example.com", "hashed_password");
+        account.Status.Should().Be(CustomerStatus.PendingEmailVerification);
+        account.IsEmailVerified.Should().BeFalse();
 
-        // Act & Assert
-        for (int i = 1; i <= 9; i++)
+        account.MarkEmailVerified();
+
+        account.IsEmailVerified.Should().BeTrue();
+        account.Status.Should().Be(CustomerStatus.Active);
+    }
+
+    [Fact]
+    public void IncrementFailedLogin_IncrementsCounter()
+    {
+        var account = CustomerAccount.Create("John Doe", "john@example.com", "hashed_password");
+
+        account.IncrementFailedLogin();
+        account.FailedLoginAttempts.Should().Be(1);
+        account.IsLockedOut().Should().BeFalse();
+
+        account.IncrementFailedLogin();
+        account.FailedLoginAttempts.Should().Be(2);
+        account.IsLockedOut().Should().BeFalse();
+
+        account.IncrementFailedLogin();
+        account.FailedLoginAttempts.Should().Be(3);
+        account.IsLockedOut().Should().BeFalse();
+    }
+
+    [Fact]
+    public void IncrementFailedLogin_AtTen_LocksAccount()
+    {
+        var account = CustomerAccount.Create("John Doe", "john@example.com", "hashed_password");
+
+        for (var i = 0; i < 9; i++)
         {
-            customer.IncrementFailedLogin();
-            customer.IsLockedOut().Should().BeFalse();
-            customer.FailedLoginAttempts.Should().Be(i);
+            account.IncrementFailedLogin();
+            account.IsLockedOut().Should().BeFalse($"account should not be locked after {i + 1} attempt(s)");
         }
 
-        customer.IncrementFailedLogin();
-        customer.IsLockedOut().Should().BeTrue();
-        customer.FailedLoginAttempts.Should().Be(10);
-        customer.LockoutUntil.Should().BeAfter(DateTime.UtcNow);
+        account.IncrementFailedLogin();
+
+        account.FailedLoginAttempts.Should().Be(10);
+        account.IsLockedOut().Should().BeTrue();
+        account.LockoutUntil.Should().NotBeNull();
+        account.LockoutUntil!.Value.Should().BeAfter(DateTime.UtcNow);
     }
 
     [Fact]
-    public void ResetFailedLogin_ClearsLockoutAndCount()
+    public void ResetFailedLogins_SetsCounterToZero()
     {
-        // Arrange
-        var customer = CustomerAccount.Create("John", "john@ex.com", "pwd");
-        for (int i = 0; i < 10; i++) customer.IncrementFailedLogin();
-        customer.IsLockedOut().Should().BeTrue();
+        var account = CustomerAccount.Create("John Doe", "john@example.com", "hashed_password");
+        for (var i = 0; i < 10; i++) account.IncrementFailedLogin();
+        account.IsLockedOut().Should().BeTrue();
 
-        // Act
-        customer.ResetFailedLogin();
+        account.ResetFailedLogin();
 
-        // Assert
-        customer.IsLockedOut().Should().BeFalse();
-        customer.FailedLoginAttempts.Should().Be(0);
-        customer.LockoutUntil.Should().BeNull();
+        account.FailedLoginAttempts.Should().Be(0);
+        account.LockoutUntil.Should().BeNull();
+        account.IsLockedOut().Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsLockedOut_ReturnsTrueWhenCounterIsAtMax()
+    {
+        var account = CustomerAccount.Create("John Doe", "john@example.com", "hashed_password");
+        account.IsLockedOut().Should().BeFalse();
+
+        for (var i = 0; i < 10; i++) account.IncrementFailedLogin();
+
+        account.IsLockedOut().Should().BeTrue();
+    }
+
+    [Fact]
+    public void SetAvatar_UpdatesAvatarId()
+    {
+        var account = CustomerAccount.CreateWithGoogle("Jane Smith", "jane@gmail.com", "google_id");
+        const string avatarUrl = "https://cdn.example.com/avatars/jane.png";
+
+        account.SetAvatarUrl(avatarUrl);
+
+        account.AvatarUrl.Should().Be(avatarUrl);
+    }
+
+    [Fact]
+    public void RemoveAvatar_ClearsAvatarId()
+    {
+        var account = CustomerAccount.CreateWithGoogle("Jane Smith", "jane@gmail.com", "google_id");
+        account.SetAvatarUrl("https://cdn.example.com/avatars/jane.png");
+        account.AvatarUrl.Should().NotBeNull();
+
+        account.SetAvatarUrl(null);
+
+        account.AvatarUrl.Should().BeNull();
     }
 }

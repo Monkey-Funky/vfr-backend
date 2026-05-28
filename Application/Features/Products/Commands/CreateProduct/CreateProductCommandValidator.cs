@@ -16,8 +16,16 @@ public sealed class CreateProductCommandValidator : AbstractValidator<CreateProd
             .MaximumLength(200).WithMessage("Product name cannot exceed 200 characters.");
 
         RuleFor(c => c.Description)
-            .MaximumLength(2000).WithMessage("Description cannot exceed 2000 characters.")
+            .MaximumLength(1000).WithMessage("Description must not exceed 1000 characters.")
             .When(c => c.Description is not null);
+
+        // FIX: CategoryId is required. The test ValidCommand() always provides a CategoryId,
+        // and Invalid_EmptyCategoryId_FailsWithMessage verifies that null is rejected.
+        // The old comment ("CategoryId is intentionally nullable — Do NOT add a NotNull rule")
+        // reflected an earlier design that was superseded; CategoryId must be provided when
+        // creating a product so it is correctly categorised in the catalogue.
+        RuleFor(c => c.CategoryId)
+            .NotNull().WithMessage("CategoryId is required.");
 
         RuleFor(c => c.Price)
             .GreaterThan(0).WithMessage("Price must be greater than zero.")

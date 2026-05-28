@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using Application.Features.Customer.FitFeedback.Commands.SubmitFitFeedback;
 using Application.Features.Customer.FitFeedback.DTOs;
@@ -90,8 +90,12 @@ public sealed class FitFeedbackControllerTests : IntegrationTestBase
     [Fact]
     public async Task GetFitFeedbackByOrder_ReturnsEmptyList_WhenNoFeedbackExists()
     {
+        // Seed a real order so the handler's ownership check passes
+        var (orderItemId, _) = await SeedDeliveredOrderAsync();
+        var orderId = await GetOrderIdFromItemAsync(orderItemId);
+
         var response = await CustomerClient.GetAsync(
-            $"/api/customers/{_customerId}/fit-feedback/orders/{Guid.NewGuid()}");
+            $"/api/customers/{_customerId}/fit-feedback/orders/{orderId}");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await response.Content.ReadFromJsonAsync<ApiResponse<PagedResult<FitFeedbackDto>>>();

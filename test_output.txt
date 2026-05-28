@@ -1,0 +1,31 @@
+﻿  Determining projects to restore...
+G:\Graduate_Project_Backend\Infrastructure\Infrastructure.csproj : warning NU1902: Package 'MailKit' 4.15.1 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-9j88-vvj5-vhgr [G:\Graduate_Project_Backend\Tests.Integration\Tests.Integration.csproj]
+  All projects are up-to-date for restore.
+G:\Graduate_Project_Backend\Infrastructure\Infrastructure.csproj : warning NU1902: Package 'MailKit' 4.15.1 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-9j88-vvj5-vhgr
+  Domain -> G:\Graduate_Project_Backend\Domain\bin\Debug\net9.0\Domain.dll
+  Shared -> G:\Graduate_Project_Backend\Shared\bin\Debug\net9.0\Shared.dll
+  Application -> G:\Graduate_Project_Backend\Application\bin\Debug\net9.0\Application.dll
+  Infrastructure -> G:\Graduate_Project_Backend\Infrastructure\bin\Debug\net9.0\Infrastructure.dll
+  API -> G:\Graduate_Project_Backend\API\bin\Debug\net9.0\API.dll
+  Tests.Integration -> G:\Graduate_Project_Backend\Tests.Integration\bin\Debug\net9.0\Tests.Integration.dll
+Test run for G:\Graduate_Project_Backend\Tests.Integration\bin\Debug\net9.0\Tests.Integration.dll (.NETCoreApp,Version=v9.0)
+VSTest version 17.14.1 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+dotnet : [xUnit.net 00:00:18.52]     Tests.Integration.Controllers.AvatarDebugTests.Debug_UpdateAvatarMeasurements 
+[FAIL]
+At line:1 char:1
++ dotnet test Tests.Integration --filter "FullyQualifiedName~Debug_Upda ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([xUnit.net 00:0...urements [FAIL]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Failed Tests.Integration.Controllers.AvatarDebugTests.Debug_UpdateAvatarMeasurements [835 ms]
+  Error Message:
+   Update failed: InternalServerError - Body: {"success":false,"code":"INTERNAL_ERROR","message":"An unexpected error occurred.","details":[],"traceId":"0HNLSAESE8LGG","timestamp":"2026-05-28T00:54:51.104844Z"}
+  Stack Trace:
+     at Tests.Integration.Controllers.AvatarDebugTests.Debug_UpdateAvatarMeasurements() in G:\Graduate_Project_Backend\Tests.Integration\Controllers\AvatarDebugTests.cs:line 53
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     1, Passed:     0, Skipped:     0, Total:     1, Duration: 835 ms - Tests.Integration.dll (net9.0)

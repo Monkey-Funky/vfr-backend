@@ -1,5 +1,4 @@
 ﻿using Application.Interfaces.Persistence;
-using Application.Interfaces.Services;
 using Domain.Entities.Orders;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -13,15 +12,18 @@ public sealed class UpdateOrderStatusCommandHandler
     private const int MaxConcurrencyRetries = 3;
 
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IApplicationDbContext _context;
     private readonly IMediator _mediator;
     private readonly ILogger<UpdateOrderStatusCommandHandler> _logger;
 
     public UpdateOrderStatusCommandHandler(
         IUnitOfWork unitOfWork,
+        IApplicationDbContext context,
         IMediator mediator,
         ILogger<UpdateOrderStatusCommandHandler> logger)
     {
         _unitOfWork = unitOfWork;
+        _context = context;
         _mediator = mediator;
         _logger = logger;
     }
@@ -37,9 +39,13 @@ public sealed class UpdateOrderStatusCommandHandler
                 await _unitOfWork.ExecuteInTransactionAsync(async ct =>
                 {
                     // ── IDOR Defence ─────────────────────────────────────────
-                    // GetTrackedByIdAsync loads WITH tracking so RowVersion is
-                    // included in the UPDATE WHERE clause for the optimistic lock.
-                    var order = await _unitOfWork.GetTrackedByIdAsync<Order>(request.OrderId, ct)
+                    // Load Order WITH tracking (no AsNoTracking) so the RowVersion
+                    // concurrency token is included in the UPDATE WHERE clause.
+                    // Include Items so that InventoryDecrementHandler can process
+                    // each line item when the status transitions to Shipped.
+                    var order = await _context.Orders
+                        .Include(o => o.Items)
+                        .FirstOrDefaultAsync(o => o.Id == request.OrderId, ct)
                         ?? throw new NotFoundException(nameof(Order), request.OrderId);
 
                     // Verify ownership — return 404 (not 403) to avoid confirming existence

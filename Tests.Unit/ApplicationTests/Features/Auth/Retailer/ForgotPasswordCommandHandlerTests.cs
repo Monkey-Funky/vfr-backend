@@ -18,12 +18,26 @@ public sealed class ForgotPasswordCommandHandlerTests
     public ForgotPasswordCommandHandlerTests()
     {
         _uowMock.Setup(x => x.Repository<RetailerAccount>()).Returns(_retailerRepoMock.Object);
-        _cacheServiceMock.Setup(x => x.SetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+        _cacheServiceMock
+            .Setup(x => x.SetAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<TimeSpan?>(),
+                It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        _emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _emailServiceMock
+            .Setup(x => x.SendEmailAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _sut = new ForgotPasswordCommandHandler(_uowMock.Object, _cacheServiceMock.Object, _emailServiceMock.Object, _loggerMock.Object);
+        _sut = new ForgotPasswordCommandHandler(
+            _uowMock.Object,
+            _cacheServiceMock.Object,
+            _emailServiceMock.Object,
+            _loggerMock.Object);
     }
 
     private void SetupAccountQuery(RetailerAccount? account) =>
@@ -45,7 +59,8 @@ public sealed class ForgotPasswordCommandHandlerTests
     {
         SetupAccountQuery(null);
 
-        var result = await _sut.Handle(new ForgotPasswordCommand("notfound@example.com"), CancellationToken.None);
+        var result = await _sut.Handle(
+            new ForgotPasswordCommand("notfound@example.com"), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         result.Data.Should().BeTrue();
@@ -57,9 +72,16 @@ public sealed class ForgotPasswordCommandHandlerTests
     {
         SetupAccountQuery(null);
 
-        await _sut.Handle(new ForgotPasswordCommand("notfound@example.com"), CancellationToken.None);
+        await _sut.Handle(
+            new ForgotPasswordCommand("notfound@example.com"), CancellationToken.None);
 
-        _emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _emailServiceMock.Verify(
+            x => x.SendEmailAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -67,9 +89,16 @@ public sealed class ForgotPasswordCommandHandlerTests
     {
         SetupAccountQuery(null);
 
-        await _sut.Handle(new ForgotPasswordCommand("notfound@example.com"), CancellationToken.None);
+        await _sut.Handle(
+            new ForgotPasswordCommand("notfound@example.com"), CancellationToken.None);
 
-        _cacheServiceMock.Verify(x => x.SetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Never);
+        _cacheServiceMock.Verify(
+            x => x.SetAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<TimeSpan?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -78,13 +107,15 @@ public sealed class ForgotPasswordCommandHandlerTests
         var account = CreateActiveRetailer();
         SetupAccountQuery(account);
 
-        await _sut.Handle(new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
+        await _sut.Handle(
+            new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
 
-        _cacheServiceMock.Verify(x => x.SetAsync(
-            It.Is<string>(k => k.Contains("pwd_reset:")),
-            It.Is<string>(h => h.StartsWith("$2")),
-            It.Is<TimeSpan>(t => t == TimeSpan.FromMinutes(15)),
-            It.IsAny<CancellationToken>()),
+        _cacheServiceMock.Verify(
+            x => x.SetAsync(
+                It.Is<string>(k => k.Contains("pwd_reset:")),
+                It.Is<string>(h => h.StartsWith("$2")),
+                It.Is<TimeSpan?>(t => t == TimeSpan.FromMinutes(15)),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -94,13 +125,15 @@ public sealed class ForgotPasswordCommandHandlerTests
         var account = CreateActiveRetailer("retailer@example.com");
         SetupAccountQuery(account);
 
-        await _sut.Handle(new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
+        await _sut.Handle(
+            new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
 
-        _emailServiceMock.Verify(x => x.SendEmailAsync(
-            account.Email,
-            It.IsAny<string>(),
-            It.IsAny<string>(),
-            It.IsAny<CancellationToken>()),
+        _emailServiceMock.Verify(
+            x => x.SendEmailAsync(
+                account.Email,
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -110,7 +143,8 @@ public sealed class ForgotPasswordCommandHandlerTests
         var account = CreateActiveRetailer();
         SetupAccountQuery(account);
 
-        var result = await _sut.Handle(new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
+        var result = await _sut.Handle(
+            new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         result.Data.Should().BeTrue();
@@ -123,13 +157,15 @@ public sealed class ForgotPasswordCommandHandlerTests
         var account = CreateActiveRetailer("Retailer@Example.COM");
         SetupAccountQuery(account);
 
-        await _sut.Handle(new ForgotPasswordCommand("Retailer@Example.COM"), CancellationToken.None);
+        await _sut.Handle(
+            new ForgotPasswordCommand("Retailer@Example.COM"), CancellationToken.None);
 
-        _cacheServiceMock.Verify(x => x.SetAsync(
-            It.Is<string>(k => k == "pwd_reset:retailer@example.com"),
-            It.IsAny<string>(),
-            It.IsAny<TimeSpan>(),
-            It.IsAny<CancellationToken>()),
+        _cacheServiceMock.Verify(
+            x => x.SetAsync(
+                It.Is<string>(k => k == "pwd_reset:retailer@example.com"),
+                It.IsAny<string>(),
+                It.IsAny<TimeSpan?>(),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -140,11 +176,20 @@ public sealed class ForgotPasswordCommandHandlerTests
         SetupAccountQuery(account);
 
         string? capturedHashedOtp = null;
-        _cacheServiceMock.Setup(x => x.SetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string, TimeSpan, CancellationToken>((_, hash, _, _) => capturedHashedOtp = hash)
+
+        // FIX U-4: Callback generic arg must be TimeSpan? to match ICacheService.SetAsync signature.
+        _cacheServiceMock
+            .Setup(x => x.SetAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<TimeSpan?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, string, TimeSpan?, CancellationToken>(
+                (_, hash, _, _) => capturedHashedOtp = hash)
             .Returns(Task.CompletedTask);
 
-        await _sut.Handle(new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
+        await _sut.Handle(
+            new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
 
         capturedHashedOtp.Should().NotBeNullOrEmpty();
         capturedHashedOtp.Should().StartWith("$2");
@@ -154,11 +199,13 @@ public sealed class ForgotPasswordCommandHandlerTests
     public async Task Handle_BothFoundAndNotFoundPaths_ReturnIdenticalMessage()
     {
         SetupAccountQuery(null);
-        var notFoundResult = await _sut.Handle(new ForgotPasswordCommand("ghost@example.com"), CancellationToken.None);
+        var notFoundResult = await _sut.Handle(
+            new ForgotPasswordCommand("ghost@example.com"), CancellationToken.None);
 
         var account = CreateActiveRetailer();
         SetupAccountQuery(account);
-        var foundResult = await _sut.Handle(new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
+        var foundResult = await _sut.Handle(
+            new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
 
         notFoundResult.Message.Should().Be(foundResult.Message);
     }
@@ -170,11 +217,20 @@ public sealed class ForgotPasswordCommandHandlerTests
         SetupAccountQuery(account);
 
         TimeSpan? capturedTtl = null;
-        _cacheServiceMock.Setup(x => x.SetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string, TimeSpan, CancellationToken>((_, _, ttl, _) => capturedTtl = ttl)
+
+        // FIX U-4: Callback generic arg must be TimeSpan? to match ICacheService.SetAsync signature.
+        _cacheServiceMock
+            .Setup(x => x.SetAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<TimeSpan?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, string, TimeSpan?, CancellationToken>(
+                (_, _, ttl, _) => capturedTtl = ttl)
             .Returns(Task.CompletedTask);
 
-        await _sut.Handle(new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
+        await _sut.Handle(
+            new ForgotPasswordCommand("retailer@example.com"), CancellationToken.None);
 
         capturedTtl.Should().Be(TimeSpan.FromMinutes(15));
     }

@@ -1,4 +1,6 @@
-﻿namespace Infrastructure.Persistence.Configurations.Subscription;
+﻿using Domain.Enums.Subscription;
+
+namespace Infrastructure.Persistence.Configurations.Subscription;
 
 public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Domain.Entities.Subscriptions.Subscription>
 {
@@ -32,12 +34,29 @@ public sealed class SubscriptionConfiguration : IEntityTypeConfiguration<Domain.
             .HasColumnName("plan_id")
             .IsRequired();
 
+        // ── W-3 FIX ────────────────────────────────────────────────────────────
+        // SubscriptionStatus.None has numeric value 0 — the CLR default for enums.
+        // Without a sentinel, EF Core omits the column on INSERT and the DB default
+        // ('None') always wins, even when the application explicitly sets a different
+        // status (e.g. Trial or Active) before the first save.
+        //
+        // Setting Metadata.Sentinel = SubscriptionStatus.None instructs EF Core:
+        //   "Treat None as the unset/default marker; include the column in INSERT for
+        //    all other values so the application-assigned status is persisted."
+        //
+        // This is the direct Metadata-API equivalent of HasSentinelValue() and is
+        // fully supported in EF Core 8+. It avoids the generic type-inference issue
+        // that prevents the HasSentinelValue extension method from resolving on
+        // PropertyBuilder<SubscriptionStatus> when EF Core package versions are mixed.
         builder.Property(x => x.Status)
             .HasColumnName("status")
-            .HasConversion<string>()        // ← Always before any default value config
+            .HasConversion<string>()            // ← Always before any default value config
             .HasMaxLength(30)
             .IsRequired()
-            .HasDefaultValueSql("'None'");  // ← SQL literal, not CLR enum value
+            .HasDefaultValueSql("'None'");      // ← SQL literal, not CLR enum value
+
+        // W-3 fix: set sentinel via Metadata API (equivalent to HasSentinelValue).
+        builder.Property(x => x.Status).Metadata.Sentinel = SubscriptionStatus.None;
 
         builder.Property(x => x.StartDate)
             .HasColumnName("start_date")

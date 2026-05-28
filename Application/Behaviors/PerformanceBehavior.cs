@@ -6,17 +6,20 @@ public sealed class PerformanceBehavior<TRequest, TResponse>
     : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
-    private const int SlowRequestThresholdMs = 500;
+    private const int DefaultSlowRequestThresholdMs = 500;
 
     private readonly ILogger<PerformanceBehavior<TRequest, TResponse>> _logger;
     private readonly ICurrentUserService _currentUserService;
+    private readonly int _slowRequestThresholdMs;
 
     public PerformanceBehavior(
         ILogger<PerformanceBehavior<TRequest, TResponse>> logger,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        int slowRequestThresholdMs = DefaultSlowRequestThresholdMs)
     {
         _logger = logger;
         _currentUserService = currentUserService;
+        _slowRequestThresholdMs = slowRequestThresholdMs;
     }
 
     public async Task<TResponse> Handle(
@@ -30,7 +33,7 @@ public sealed class PerformanceBehavior<TRequest, TResponse>
 
         timer.Stop();
 
-        if (timer.ElapsedMilliseconds > SlowRequestThresholdMs)
+        if (timer.ElapsedMilliseconds > _slowRequestThresholdMs)
         {
             _logger.LogWarning(
                 "Slow request detected: {RequestName} | {ElapsedMs}ms | RetailerId: {RetailerId}",

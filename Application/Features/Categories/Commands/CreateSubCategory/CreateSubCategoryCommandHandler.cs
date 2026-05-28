@@ -29,7 +29,8 @@ public sealed class CreateSubCategoryCommandHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // Step 1: Verify parent category belongs to this retailer
+        // Step 1: Verify parent category belongs to this retailer.
+        // FirstOrDefaultAsync matches the IRepository contract used by all tests and callers.
         Category parentCategory = await _unitOfWork.Repository<Category>().FirstOrDefaultAsync(
             c => c.Id == command.ParentCategoryId && c.RetailerId == retailerId,
             cancellationToken)

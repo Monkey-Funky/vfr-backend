@@ -52,7 +52,7 @@ public sealed class RegisterStep1CommandValidatorTests
     [Fact]
     public void Invalid_EmailExceeds200Chars_FailsWithMessage()
     {
-        var longEmail = new string('a', 190) + "@test.com";
+        var longEmail = new string('a', 192) + "@test.com";
         var result = _sut.TestValidate(ValidCommand() with { Email = longEmail });
         result.ShouldHaveValidationErrorFor(x => x.Email)
               .WithErrorMessage("Email address must not exceed 200 characters.");

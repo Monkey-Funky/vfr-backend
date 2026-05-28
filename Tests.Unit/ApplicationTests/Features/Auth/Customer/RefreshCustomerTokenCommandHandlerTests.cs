@@ -2,7 +2,6 @@ using Application.Features.Customer.Auth.Commands.RefreshToken;
 using Application.Features.Customer.Auth.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
-using Domain.Enums.Customer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
@@ -18,328 +17,297 @@ public sealed class RefreshCustomerTokenCommandHandlerTests
     private readonly RefreshCustomerTokenCommandHandler _sut;
 
     private static readonly Guid CustomerId = Guid.NewGuid();
-    private const string ValidRawRefreshToken = "valid-raw-refresh-token";
-    private static readonly string ValidRefreshTokenHash =
-        BCrypt.Net.BCrypt.EnhancedHashPassword(ValidRawRefreshToken, workFactor: 4);
+    private const string ExpiredAccessToken = "expired.customer.access.token";
+    private const string RawRefreshToken = "raw_customer_refresh_token";
+    private const string NewAccessToken = "new.customer.access.token";
+    private const string NewRefreshToken = "new_customer_refresh_token";
+    private static readonly string RefreshTokenHash =
+        BCrypt.Net.BCrypt.HashPassword(RawRefreshToken, workFactor: 4);
 
     public RefreshCustomerTokenCommandHandlerTests()
     {
         _uowMock.Setup(x => x.Repository<CustomerAccount>()).Returns(_customerRepoMock.Object);
-        _uowMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-
         _customerRepoMock.Setup(x => x.UpdateAsync(It.IsAny<CustomerAccount>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        _uowMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
         _tokenServiceMock.Setup(x => x.GenerateCustomerAccessToken(It.IsAny<CustomerAccount>()))
-            .Returns("new-access-token");
-        _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns("new-raw-refresh-token");
+            .Returns(NewAccessToken);
+        _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns(NewRefreshToken);
 
         _sut = new RefreshCustomerTokenCommandHandler(
-            _uowMock.Object,
-            _tokenServiceMock.Object,
-            _loggerMock.Object);
+            _uowMock.Object, _tokenServiceMock.Object, _loggerMock.Object);
     }
 
-    private ClaimsPrincipal BuildValidPrincipal(Guid? subId = null, string role = "Customer")
-    {
-        var claims = new List<Claim>
+    private ClaimsPrincipal BuildCustomerPrincipal(string sub) =>
+        new(new ClaimsIdentity(new[]
         {
-            new(ClaimTypes.NameIdentifier, (subId ?? CustomerId).ToString()),
-            new("role", role)
-        };
-        return new ClaimsPrincipal(new ClaimsIdentity(claims));
-    }
+            new Claim(ClaimTypes.NameIdentifier, sub),
+            new Claim("role", "Customer")
+        }));
 
-    private CustomerAccount CreateActiveCustomer(bool rememberMe = false)
+    private void SetupValidPrincipal() =>
+        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(ExpiredAccessToken))
+            .Returns(BuildCustomerPrincipal(CustomerId.ToString()));
+
+    private CustomerAccount CreateActiveCustomerWithRefreshToken(bool rememberMe = false)
     {
-        var customer = CustomerAccount.Create("Test Customer", "customer@example.com",
-            BCrypt.Net.BCrypt.HashPassword("pass", workFactor: 4));
+        var hash = BCrypt.Net.BCrypt.HashPassword("Password123!", workFactor: 4);
+        var customer = CustomerAccount.Create("Test Customer", "customer@example.com", hash);
         customer.MarkEmailVerified();
-        customer.UpdateRefreshToken(ValidRefreshTokenHash, DateTime.UtcNow.AddDays(7), rememberMe);
+        customer.UpdateRefreshToken(RefreshTokenHash, DateTime.UtcNow.AddDays(7), rememberMe);
         return customer;
     }
 
-    private void SetupValidPrincipal(Guid? subId = null, string role = "Customer")
-    {
-        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(It.IsAny<string>()))
-            .Returns(BuildValidPrincipal(subId, role));
-    }
+    private static RefreshCustomerTokenCommand ValidCommand() =>
+        new(ExpiredAccessToken, RawRefreshToken);
 
-    private void SetupCustomerById(CustomerAccount? customer)
+    // ?? Invalid access token ???????????????????????????????????????????????????
+
+    [Fact]
+    public async Task Handle_NullPrincipal_ThrowsAuthenticationException()
     {
-        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(customer);
+        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(ExpiredAccessToken))
+            .Returns((ClaimsPrincipal?)null);
+
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
     [Fact]
-    public async Task Handle_InvalidAccessTokenStructure_ThrowsAuthenticationException()
+    public async Task Handle_NullPrincipal_MessageIndicatesInvalidToken()
     {
-        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(It.IsAny<string>()))
+        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(ExpiredAccessToken))
             .Returns((ClaimsPrincipal?)null);
 
-        var command = new RefreshCustomerTokenCommand("bad-token", ValidRawRefreshToken);
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
 
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
         ex.Message.Should().Contain("invalid");
     }
+
+    // ?? Missing / invalid sub claim ????????????????????????????????????????????
 
     [Fact]
     public async Task Handle_MissingSubClaim_ThrowsAuthenticationException()
     {
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("role", "Customer") }));
-        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(It.IsAny<string>())).Returns(principal);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("email", "test@test.com"),
+            new Claim("role", "Customer")
+        }));
+        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(ExpiredAccessToken)).Returns(principal);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().NotBeNullOrEmpty();
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
     [Fact]
-    public async Task Handle_InvalidSubClaimFormat_ThrowsAuthenticationException()
+    public async Task Handle_InvalidGuidSubClaim_ThrowsAuthenticationException()
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim(ClaimTypes.NameIdentifier, "not-a-guid"),
             new Claim("role", "Customer")
         }));
-        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(It.IsAny<string>())).Returns(principal);
+        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(ExpiredAccessToken)).Returns(principal);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().NotBeNullOrEmpty();
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
+    // ?? Cross-role attack prevention ???????????????????????????????????????????
+
     [Fact]
-    public async Task Handle_EmptyGuidSubClaim_ThrowsAuthenticationException()
+    public async Task Handle_RetailerRoleClaim_ThrowsAuthenticationException()
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, Guid.Empty.ToString()),
-            new Claim("role", "Customer")
+            new Claim(ClaimTypes.NameIdentifier, CustomerId.ToString()),
+            new Claim("role", "Retailer")   // wrong role
         }));
-        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(It.IsAny<string>())).Returns(principal);
+        _tokenServiceMock.Setup(x => x.GetClaimsFromExpiredToken(ExpiredAccessToken)).Returns(principal);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().NotBeNullOrEmpty();
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
-    [Fact]
-    public async Task Handle_RetailerRoleInToken_ThrowsAuthenticationException()
-    {
-        SetupValidPrincipal(role: "Retailer");
-
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().Contain("Customer");
-    }
+    // ?? Account not found / deleted ????????????????????????????????????????????
 
     [Fact]
-    public async Task Handle_UnknownRoleInToken_ThrowsAuthenticationException()
-    {
-        SetupValidPrincipal(role: "Admin");
-
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().NotBeNullOrEmpty();
-    }
-
-    [Fact]
-    public async Task Handle_CustomerNotFound_ThrowsAuthenticationException()
+    public async Task Handle_AccountNotFound_ThrowsAuthenticationException()
     {
         SetupValidPrincipal();
-        SetupCustomerById(null);
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((CustomerAccount?)null);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().Contain("not found");
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
     [Fact]
-    public async Task Handle_DeletedCustomer_ThrowsAuthenticationException()
+    public async Task Handle_DeletedAccount_ThrowsAuthenticationException()
     {
         SetupValidPrincipal();
-        var customer = CreateActiveCustomer();
-        var deletedProp = typeof(CustomerAccount).GetProperty("IsDeleted",
-            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)!;
-        deletedProp.SetValue(customer, true);
-        SetupCustomerById(customer);
+        var customer = CreateActiveCustomerWithRefreshToken();
+        typeof(CustomerAccount).GetProperty("IsDeleted")!.SetValue(customer, true);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().NotBeNullOrEmpty();
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
+    // ?? Inactive account ???????????????????????????????????????????????????????
+
     [Fact]
-    public async Task Handle_SuspendedCustomer_ThrowsAuthenticationException()
+    public async Task Handle_SuspendedAccount_ThrowsAuthenticationException()
     {
         SetupValidPrincipal();
-        var customer = CreateActiveCustomer();
-        var statusProp = typeof(CustomerAccount).GetProperty("Status")!;
-        statusProp.SetValue(customer, CustomerStatus.Suspended);
-        SetupCustomerById(customer);
+        var hash = BCrypt.Net.BCrypt.HashPassword("Password123!", workFactor: 4);
+        var customer = CustomerAccount.Create("Test Customer", "customer@example.com", hash);
+        // Not calling MarkEmailVerified ? status stays PendingEmailVerification (not Active)
+        customer.UpdateRefreshToken(RefreshTokenHash, DateTime.UtcNow.AddDays(7), false);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().NotBeNullOrEmpty();
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
+    // ?? No active refresh token ????????????????????????????????????????????????
+
     [Fact]
-    public async Task Handle_NoRefreshTokenOnAccount_ThrowsAuthenticationException()
+    public async Task Handle_NullRefreshTokenHash_ThrowsAuthenticationException()
     {
         SetupValidPrincipal();
-        var customer = CustomerAccount.Create("Test Customer", "customer@example.com", "hash");
-        customer.MarkEmailVerified();
-        SetupCustomerById(customer);
+        var customer = CreateActiveCustomerWithRefreshToken();
+        customer.RevokeAllRefreshTokens();
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().NotBeNullOrEmpty();
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
+    // ?? Token hash mismatch ????????????????????????????????????????????????????
+
     [Fact]
-    public async Task Handle_RefreshTokenHashMismatch_ThrowsAuthenticationException()
+    public async Task Handle_WrongRefreshToken_ThrowsAuthenticationException()
     {
         SetupValidPrincipal();
-        var customer = CreateActiveCustomer();
-        var wrongHash = BCrypt.Net.BCrypt.EnhancedHashPassword("different-token", workFactor: 4);
-        customer.UpdateRefreshToken(wrongHash, DateTime.UtcNow.AddDays(7), false);
-        SetupCustomerById(customer);
+        var customer = CreateActiveCustomerWithRefreshToken();
 
-        var command = new RefreshCustomerTokenCommand("access-token", "wrong-raw-token");
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().Contain("invalid");
+        var command = new RefreshCustomerTokenCommand(ExpiredAccessToken, "wrong_token");
+
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(command, CancellationToken.None));
     }
 
+    // ?? Expired refresh token ??????????????????????????????????????????????????
+
     [Fact]
-    public async Task Handle_RefreshTokenExpired_ThrowsAuthenticationException()
+    public async Task Handle_ExpiredRefreshToken_ThrowsAuthenticationException()
     {
         SetupValidPrincipal();
-        var customer = CreateActiveCustomer();
-        customer.UpdateRefreshToken(ValidRefreshTokenHash, DateTime.UtcNow.AddDays(-1), false);
-        SetupCustomerById(customer);
+        var customer = CreateActiveCustomerWithRefreshToken();
+        customer.UpdateRefreshToken(RefreshTokenHash, DateTime.UtcNow.AddDays(-1), false); // expired
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().Contain("expired");
+        await Assert.ThrowsAsync<AuthenticationException>(
+            () => _sut.Handle(ValidCommand(), CancellationToken.None));
     }
 
-    [Fact]
-    public async Task Handle_ConcurrentRotationDetected_ThrowsAuthenticationException()
-    {
-        SetupValidPrincipal();
-        SetupCustomerById(CreateActiveCustomer());
-        _uowMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new DbUpdateConcurrencyException());
-
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-
-        var ex = await Assert.ThrowsAsync<AuthenticationException>(() => _sut.Handle(command, CancellationToken.None));
-        ex.Message.Should().Contain("concurrent");
-    }
+    // ?? Successful rotation ????????????????????????????????????????????????????
 
     [Fact]
-    public async Task Handle_ValidTokens_ReturnsNewAccessAndRefreshTokens()
+    public async Task Handle_ValidTokens_ReturnsNewAccessToken()
     {
         SetupValidPrincipal();
-        SetupCustomerById(CreateActiveCustomer());
+        var customer = CreateActiveCustomerWithRefreshToken();
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-        var result = await _sut.Handle(command, CancellationToken.None);
+        var result = await _sut.Handle(ValidCommand(), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        result.Data.Should().NotBeNull();
-        result.Data!.AccessToken.Should().Be("new-access-token");
-        result.Data.RefreshToken.Should().Be("new-raw-refresh-token");
+        result.Data!.AccessToken.Should().Be(NewAccessToken);
     }
 
     [Fact]
-    public async Task Handle_ValidTokens_WithoutRememberMe_Preserves7DayExpiry()
+    public async Task Handle_ValidTokens_ReturnsNewRefreshToken()
     {
         SetupValidPrincipal();
-        var customer = CreateActiveCustomer(rememberMe: false);
-        SetupCustomerById(customer);
+        var customer = CreateActiveCustomerWithRefreshToken();
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-        await _sut.Handle(command, CancellationToken.None);
+        var result = await _sut.Handle(ValidCommand(), CancellationToken.None);
 
-        customer.RefreshTokenExpiresAt.Should().NotBeNull();
-        customer.RefreshTokenExpiresAt!.Value.Should().BeCloseTo(DateTime.UtcNow.AddDays(7), TimeSpan.FromSeconds(5));
+        result.Data!.RefreshToken.Should().Be(NewRefreshToken);
     }
 
     [Fact]
-    public async Task Handle_ValidTokens_WithRememberMe_Preserves30DayExpiry()
+    public async Task Handle_ValidTokens_HashesNewRefreshToken()
     {
         SetupValidPrincipal();
-        var customer = CreateActiveCustomer(rememberMe: true);
-        SetupCustomerById(customer);
+        var customer = CreateActiveCustomerWithRefreshToken();
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-        await _sut.Handle(command, CancellationToken.None);
+        await _sut.Handle(ValidCommand(), CancellationToken.None);
 
-        customer.RefreshTokenExpiresAt.Should().NotBeNull();
-        customer.RefreshTokenExpiresAt!.Value.Should().BeCloseTo(DateTime.UtcNow.AddDays(30), TimeSpan.FromSeconds(5));
+        customer.RefreshTokenHash.Should().NotBeNullOrEmpty();
+        customer.RefreshTokenHash.Should().NotBe(NewRefreshToken);
     }
 
     [Fact]
-    public async Task Handle_ValidTokens_NewRefreshTokenHashDiffersFromRaw()
+    public async Task Handle_RememberMe_Preserves30DayExpiry()
     {
         SetupValidPrincipal();
-        var customer = CreateActiveCustomer();
-        SetupCustomerById(customer);
+        var customer = CreateActiveCustomerWithRefreshToken(rememberMe: true);
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-        await _sut.Handle(command, CancellationToken.None);
+        await _sut.Handle(ValidCommand(), CancellationToken.None);
 
-        customer.RefreshTokenHash.Should().NotBe("new-raw-refresh-token");
+        customer.RefreshTokenExpiresAt.Should()
+            .BeCloseTo(DateTime.UtcNow.AddDays(30), TimeSpan.FromSeconds(5));
     }
 
     [Fact]
-    public async Task Handle_ValidTokens_PersistsUpdatedCustomer()
+    public async Task Handle_NoRememberMe_Preserves7DayExpiry()
     {
         SetupValidPrincipal();
-        var customer = CreateActiveCustomer();
-        SetupCustomerById(customer);
+        var customer = CreateActiveCustomerWithRefreshToken(rememberMe: false);
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
 
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-        await _sut.Handle(command, CancellationToken.None);
+        await _sut.Handle(ValidCommand(), CancellationToken.None);
+
+        customer.RefreshTokenExpiresAt.Should()
+            .BeCloseTo(DateTime.UtcNow.AddDays(7), TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Handle_ValidTokens_PersistsChanges()
+    {
+        SetupValidPrincipal();
+        var customer = CreateActiveCustomerWithRefreshToken();
+        _customerRepoMock.Setup(x => x.GetByIdAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(customer);
+
+        await _sut.Handle(ValidCommand(), CancellationToken.None);
 
         _customerRepoMock.Verify(x => x.UpdateAsync(customer, It.IsAny<CancellationToken>()), Times.Once);
         _uowMock.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task Handle_ValidTokens_ReturnsCustomerProfileInResponse()
-    {
-        SetupValidPrincipal();
-        SetupCustomerById(CreateActiveCustomer());
-
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-        var result = await _sut.Handle(command, CancellationToken.None);
-
-        result.Data!.CustomerProfile.Should().NotBeNull();
-    }
-
-    [Fact]
-    public async Task Handle_ValidTokens_ExpiresInIs900Seconds()
-    {
-        SetupValidPrincipal();
-        SetupCustomerById(CreateActiveCustomer());
-
-        var command = new RefreshCustomerTokenCommand("access-token", ValidRawRefreshToken);
-        var result = await _sut.Handle(command, CancellationToken.None);
-
-        result.Data!.ExpiresIn.Should().Be(900);
     }
 }

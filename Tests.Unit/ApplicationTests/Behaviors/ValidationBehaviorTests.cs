@@ -7,58 +7,94 @@ namespace Tests.Unit.ApplicationTests.Behaviors;
 
 public sealed class ValidationBehaviorTests
 {
-    public sealed record TestRequest : IRequest<string>;
+    private sealed record TestCommand : IRequest<string>;
+
+    private static RequestHandlerDelegate<string> NextDelegate(string result = "ok")
+        => _ => Task.FromResult(result);
 
     [Fact]
-    public async Task Handle_NoValidators_CallsNext()
+    public async Task Handle_WithNoValidators_PassesThrough()
     {
-        // Arrange
-        var sut = new ValidationBehavior<TestRequest, string>(Enumerable.Empty<IValidator<TestRequest>>());
+        var sut = new ValidationBehavior<TestCommand, string>(
+            Enumerable.Empty<IValidator<TestCommand>>());
 
-        // Act
-        var result = await sut.Handle(new TestRequest(), (_) => Task.FromResult("Success"), default);
+        var result = await sut.Handle(new TestCommand(), NextDelegate("passed"), default);
 
-        // Assert
-        result.Should().Be("Success");
+        result.Should().Be("passed");
     }
 
     [Fact]
-    public async Task Handle_ValidRequest_CallsNext()
+    public async Task Handle_WithValidCommand_PassesThrough()
     {
-        // Arrange
-        var validator = new TestRequestValidator(valid: true);
-        var sut = new ValidationBehavior<TestRequest, string>(new[] { validator });
+        var validator = new InlineValidator<TestCommand>();
+        var sut = new ValidationBehavior<TestCommand, string>(new[] { validator });
 
-        // Act
-        var result = await sut.Handle(new TestRequest(), (_) => Task.FromResult("Success"), default);
+        var result = await sut.Handle(new TestCommand(), NextDelegate("passed"), default);
 
-        // Assert
-        result.Should().Be("Success");
+        result.Should().Be("passed");
     }
 
     [Fact]
-    public async Task Handle_InvalidRequest_ThrowsValidationException()
+    public async Task Handle_WithInvalidCommand_ThrowsValidationException()
     {
-        // Arrange
-        var validator = new TestRequestValidator(valid: false);
-        var sut = new ValidationBehavior<TestRequest, string>(new[] { validator });
+        var validator = new InlineValidator<TestCommand>();
+        validator.RuleFor(x => x).Custom((_, ctx) => ctx.AddFailure("Field", "Error"));
+        var sut = new ValidationBehavior<TestCommand, string>(new[] { validator });
 
-        // Act
-        var act = () => sut.Handle(new TestRequest(), (_) => Task.FromResult("Success"), default);
+        var act = async () => await sut.Handle(new TestCommand(), NextDelegate(), default);
 
-        // Assert
-        var ex = await act.Should().ThrowAsync<DomainValidationException>();
-        ex.Which.Errors.Should().ContainKey("Prop1");
+        await act.Should().ThrowAsync<DomainValidationException>();
     }
 
-    private sealed class TestRequestValidator : AbstractValidator<TestRequest>
+    [Fact]
+    public async Task Handle_WithMultipleErrors_ReturnsAllErrors()
     {
-        public TestRequestValidator(bool valid)
+        var validator = new InlineValidator<TestCommand>();
+        validator.RuleFor(x => x).Custom((_, ctx) =>
         {
-            if (!valid)
-            {
-                RuleFor(x => x).Custom((x, context) => context.AddFailure("Prop1", "Error 1"));
-            }
-        }
+            ctx.AddFailure("FieldA", "Error A1");
+            ctx.AddFailure("FieldA", "Error A2");
+            ctx.AddFailure("FieldB", "Error B1");
+        });
+        var sut = new ValidationBehavior<TestCommand, string>(new[] { validator });
+
+        var act = async () => await sut.Handle(new TestCommand(), NextDelegate(), default);
+
+        var ex = await act.Should().ThrowAsync<DomainValidationException>();
+        ex.Which.Errors.Should().HaveCount(2);
+        ex.Which.Errors["FieldA"].Should().HaveCount(2);
+        ex.Which.Errors["FieldB"].Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task Handle_ValidationExceptionContainsFieldNames()
+    {
+        var validator = new InlineValidator<TestCommand>();
+        validator.RuleFor(x => x).Custom((_, ctx) =>
+        {
+            ctx.AddFailure("Email", "Invalid email");
+            ctx.AddFailure("Password", "Password too short");
+        });
+        var sut = new ValidationBehavior<TestCommand, string>(new[] { validator });
+
+        var act = async () => await sut.Handle(new TestCommand(), NextDelegate(), default);
+
+        var ex = await act.Should().ThrowAsync<DomainValidationException>();
+        ex.Which.Errors.Keys.Should().Contain("Email");
+        ex.Which.Errors.Keys.Should().Contain("Password");
+    }
+
+    [Fact]
+    public async Task Handle_ValidationExceptionContainsMessages()
+    {
+        var validator = new InlineValidator<TestCommand>();
+        validator.RuleFor(x => x).Custom((_, ctx) =>
+            ctx.AddFailure("Email", "Email is required"));
+        var sut = new ValidationBehavior<TestCommand, string>(new[] { validator });
+
+        var act = async () => await sut.Handle(new TestCommand(), NextDelegate(), default);
+
+        var ex = await act.Should().ThrowAsync<DomainValidationException>();
+        ex.Which.Errors["Email"].Should().Contain("Email is required");
     }
 }

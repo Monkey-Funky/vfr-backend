@@ -113,25 +113,25 @@ public sealed class AvatarController : CustomerBaseApiController
         return NoContentResponse();
     }
 
-    //// ==============================================================
-    //// GET api/customers/{customerId}/avatar/size-recommendation/{productId}
-    //// ==============================================================
-    //[HttpGet("size-recommendation/{productId:guid}")]
-    //[SwaggerOperation(
-    //    Summary = "Get a size recommendation",
-    //    Description = "Uses ML mapping limits (placeholder) to match customer's body measurements to the product sizing chart.")]
-    //[ProducesResponseType(typeof(ApiResponse<SizeRecommendationDto>), StatusCodes.Status200OK)]
-    //[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-    //[ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-    //public async Task<IActionResult> GetSizeRecommendation(
-    //    Guid customerId,
-    //    Guid productId,
-    //    CancellationToken cancellationToken)
-    //{
-    //    EnsureCustomerOwnership(customerId);
-    //    var result = await Sender.Send(new GetSizeRecommendationQuery(productId), cancellationToken);
-    //    return OkResponse(result);
-    //}
+    // ==============================================================
+    // GET api/customers/{customerId}/avatar/size-recommendation/{productId}
+    // ==============================================================
+    [HttpGet("size-recommendation/{productId:guid}")]
+    [SwaggerOperation(
+        Summary = "Get a size recommendation",
+        Description = "Uses ML mapping limits (placeholder) to match customer's body measurements to the product sizing chart.")]
+    [ProducesResponseType(typeof(ApiResponse<SizeRecommendationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetSizeRecommendation(
+        Guid customerId,
+        Guid productId,
+        CancellationToken cancellationToken)
+    {
+        EnsureCustomerOwnership(customerId);
+        var result = await Sender.Send(new GetSizeRecommendationQuery(productId), cancellationToken);
+        return OkResponse(result);
+    }
 
     // ==============================================================
     // POST api/customers/{customerId}/avatar/extract-from-image

@@ -50,7 +50,8 @@ public sealed class DeleteCategoryCommandHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // IDOR guard: load category and verify ownership
+        // IDOR guard: load category and verify ownership.
+        // FirstOrDefaultAsync matches the IRepository contract used by all tests and callers.
         Category category = await _unitOfWork.Repository<Category>().FirstOrDefaultAsync(
             c => c.Id == command.CategoryId && c.RetailerId == retailerId,
             cancellationToken)

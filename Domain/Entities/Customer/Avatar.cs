@@ -22,7 +22,8 @@ public sealed class Avatar : BaseEntity
     public string? Avatar3dModelUrl { get; private set; }
     public DateTime LastMeasuredAt { get; private set; }
 
-
+    private readonly List<AvatarMeasurementHistory> _measurementHistories = [];
+    public IReadOnlyCollection<AvatarMeasurementHistory> MeasurementHistories => _measurementHistories.AsReadOnly();
 
     private Avatar() { }
 
@@ -66,10 +67,19 @@ public sealed class Avatar : BaseEntity
         return avatar;
     }
 
-    public void UpdateMeasurements(BodyMeasurements measurements)
+    /// <summary>
+    /// Updates all body measurements and records an immutable history snapshot.
+    /// </summary>
+    /// <param name="measurements">The new measurement values.</param>
+    /// <param name="source">
+    /// The measurement source: "Manual", "BodyScan", or "AIEstimate".
+    /// Passed through to <see cref="AvatarMeasurementHistory"/> so the correct
+    /// source is recorded rather than always defaulting to "Manual".
+    /// </param>
+    public void UpdateMeasurements(BodyMeasurements measurements, string source = "Manual")
     {
         ArgumentNullException.ThrowIfNull(measurements);
-        
+
         if (measurements.HeightCm <= 0) throw new BusinessRuleException("INVALID_HEIGHT", "Height must be greater than zero.");
         if (measurements.WeightKg <= 0) throw new BusinessRuleException("INVALID_WEIGHT", "Weight must be greater than zero.");
 
@@ -87,6 +97,34 @@ public sealed class Avatar : BaseEntity
 
         LastMeasuredAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
+
+        // Domain entity owns history: one snapshot per UpdateMeasurements call.
+        // EF Core detects this addition to _measurementHistories during DetectChanges
+        // and inserts the row in the same transaction as the avatar UPDATE.
+        var snapshot = AvatarMeasurementHistory.CreateSnapshot(
+            avatarId: Id,
+            measurementDataJson: BuildMeasurementJson(measurements),
+            source: source);
+        _measurementHistories.Add(snapshot);
+    }
+
+    private static string BuildMeasurementJson(BodyMeasurements m)
+    {
+        var ic = System.Globalization.CultureInfo.InvariantCulture;
+        return string.Concat(
+            "{",
+            $"\"heightCm\":{m.HeightCm.ToString(ic)},",
+            $"\"weightKg\":{m.WeightKg.ToString(ic)},",
+            $"\"chestCm\":{(m.ChestCm.HasValue ? m.ChestCm.Value.ToString(ic) : "null")},",
+            $"\"waistCm\":{(m.WaistCm.HasValue ? m.WaistCm.Value.ToString(ic) : "null")},",
+            $"\"hipsCm\":{(m.HipsCm.HasValue ? m.HipsCm.Value.ToString(ic) : "null")},",
+            $"\"shoulderWidthCm\":{(m.ShoulderWidthCm.HasValue ? m.ShoulderWidthCm.Value.ToString(ic) : "null")},",
+            $"\"inseamCm\":{(m.InseamCm.HasValue ? m.InseamCm.Value.ToString(ic) : "null")},",
+            $"\"neckCm\":{(m.NeckCm.HasValue ? m.NeckCm.Value.ToString(ic) : "null")},",
+            $"\"armLengthCm\":{(m.ArmLengthCm.HasValue ? m.ArmLengthCm.Value.ToString(ic) : "null")},",
+            $"\"shoeSizeEu\":{(m.ShoeSizeEu.HasValue ? m.ShoeSizeEu.Value.ToString(ic) : "null")},",
+            $"\"bodyShape\":{(m.BodyShape is not null ? $"\"{m.BodyShape}\"" : "null")}",
+            "}");
     }
 
     public void SetAvatar3dModelUrl(string url)
