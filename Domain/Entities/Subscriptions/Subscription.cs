@@ -181,8 +181,6 @@ public sealed class Subscription : BaseEntity
     /// </summary>
     public void Cancel()
     {
-        const string ErrorCode = "INVALID_SUBSCRIPTION_TRANSITION";
-
         if (Status == SubscriptionStatus.Cancelled)
             throw new BusinessRuleException(
                 "SUBSCRIPTION_ALREADY_CANCELLED",

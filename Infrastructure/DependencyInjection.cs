@@ -298,6 +298,10 @@ public static class DependencyInjection
         services.AddSingleton<IReportQueue, ReportQueue>();
         services.AddHostedService<ReportGenerationJob>();
 
+        // ── Subscription Lifecycle Jobs ──────────────────────────────────────────
+        services.AddHostedService<SubscriptionExpiryJob>();
+        services.AddHostedService<RecurringPaymentJob>();
+
         services.AddScoped<IPlanLimitService, PlanLimitService>();
 
         return services;

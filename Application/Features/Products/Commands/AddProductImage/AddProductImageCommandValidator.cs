@@ -1,4 +1,4 @@
-﻿
+
 namespace Application.Features.Products.Commands.AddProductImage;
 
 public sealed class AddProductImageCommandValidator
@@ -7,7 +7,7 @@ public sealed class AddProductImageCommandValidator
     private static readonly string[] AllowedContentTypes =
         ["image/jpeg", "image/jpg", "image/png"];
 
-    private const long MaxSizeBytes = 1 * 1024 * 1024; // 1 MB
+    private const long MaxSizeBytes = long.MaxValue; // No size limit — retailers may upload any image size
 
     public AddProductImageCommandValidator()
     {
@@ -19,8 +19,8 @@ public sealed class AddProductImageCommandValidator
 
         // FileUploadDto.Length — same property name as IFormFile.Length
         RuleFor(c => c.ImageFile.Length)
-            .LessThanOrEqualTo(MaxSizeBytes)
-            .WithMessage("Image must not exceed 1 MB.")
+            .GreaterThan(0)
+            .WithMessage("Image file must not be empty.")
             .When(c => c.ImageFile is not null);
 
         // FileUploadDto.ContentType — same property name as IFormFile.ContentType

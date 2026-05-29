@@ -1,4 +1,4 @@
-﻿using Domain.Enums.Product;
+using Domain.Enums.Product;
 
 namespace Application.Features.Products.Commands.CreateProduct;
 
@@ -7,7 +7,7 @@ public sealed class CreateProductCommandValidator : AbstractValidator<CreateProd
     private static readonly string[] AllowedImageContentTypes =
         ["image/jpeg", "image/jpg", "image/png"];
 
-    private const long MaxImageSizeBytes = 5L * 1024 * 1024; // 5 MB per spec
+    private const long MaxImageSizeBytes = long.MaxValue; // No size limit — retailers may upload any image size
 
     public CreateProductCommandValidator()
     {
@@ -52,8 +52,8 @@ public sealed class CreateProductCommandValidator : AbstractValidator<CreateProd
             .ChildRules(image =>
             {
                 image.RuleFor(f => f.Length)
-                    .LessThanOrEqualTo(MaxImageSizeBytes)
-                    .WithMessage("Each image must not exceed 5 MB.");
+                    .GreaterThan(0)
+                    .WithMessage("Each image must not be empty.");
 
                 image.RuleFor(f => f.ContentType)
                     .Must(ct => AllowedImageContentTypes.Contains(ct.ToLowerInvariant()))
