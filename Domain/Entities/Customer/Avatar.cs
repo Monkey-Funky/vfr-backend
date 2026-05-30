@@ -97,33 +97,28 @@ public sealed class Avatar : BaseEntity
 
         LastMeasuredAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
-
-        // Domain entity owns history: one snapshot per UpdateMeasurements call.
-        // EF Core detects this addition to _measurementHistories during DetectChanges
-        // and inserts the row in the same transaction as the avatar UPDATE.
-        var snapshot = AvatarMeasurementHistory.CreateSnapshot(
-            avatarId: Id,
-            measurementDataJson: BuildMeasurementJson(measurements),
-            source: source);
-        _measurementHistories.Add(snapshot);
     }
 
-    private static string BuildMeasurementJson(BodyMeasurements m)
+    /// <summary>
+    /// Serializes body measurements to a JSON string for history snapshots.
+    /// Public so that command handlers can build history snapshots explicitly.
+    /// </summary>
+    public static string BuildMeasurementJson(BodyMeasurements m)
     {
         var ic = System.Globalization.CultureInfo.InvariantCulture;
         return string.Concat(
             "{",
-            $"\"heightCm\":{m.HeightCm.ToString(ic)},",
-            $"\"weightKg\":{m.WeightKg.ToString(ic)},",
-            $"\"chestCm\":{(m.ChestCm.HasValue ? m.ChestCm.Value.ToString(ic) : "null")},",
-            $"\"waistCm\":{(m.WaistCm.HasValue ? m.WaistCm.Value.ToString(ic) : "null")},",
-            $"\"hipsCm\":{(m.HipsCm.HasValue ? m.HipsCm.Value.ToString(ic) : "null")},",
-            $"\"shoulderWidthCm\":{(m.ShoulderWidthCm.HasValue ? m.ShoulderWidthCm.Value.ToString(ic) : "null")},",
-            $"\"inseamCm\":{(m.InseamCm.HasValue ? m.InseamCm.Value.ToString(ic) : "null")},",
-            $"\"neckCm\":{(m.NeckCm.HasValue ? m.NeckCm.Value.ToString(ic) : "null")},",
-            $"\"armLengthCm\":{(m.ArmLengthCm.HasValue ? m.ArmLengthCm.Value.ToString(ic) : "null")},",
-            $"\"shoeSizeEu\":{(m.ShoeSizeEu.HasValue ? m.ShoeSizeEu.Value.ToString(ic) : "null")},",
-            $"\"bodyShape\":{(m.BodyShape is not null ? $"\"{m.BodyShape}\"" : "null")}",
+            $"\"HeightCm\":{m.HeightCm.ToString(ic)},",
+            $"\"WeightKg\":{m.WeightKg.ToString(ic)},",
+            $"\"ChestCm\":{(m.ChestCm.HasValue ? m.ChestCm.Value.ToString(ic) : "null")},",
+            $"\"WaistCm\":{(m.WaistCm.HasValue ? m.WaistCm.Value.ToString(ic) : "null")},",
+            $"\"HipsCm\":{(m.HipsCm.HasValue ? m.HipsCm.Value.ToString(ic) : "null")},",
+            $"\"ShoulderWidthCm\":{(m.ShoulderWidthCm.HasValue ? m.ShoulderWidthCm.Value.ToString(ic) : "null")},",
+            $"\"InseamCm\":{(m.InseamCm.HasValue ? m.InseamCm.Value.ToString(ic) : "null")},",
+            $"\"NeckCm\":{(m.NeckCm.HasValue ? m.NeckCm.Value.ToString(ic) : "null")},",
+            $"\"ArmLengthCm\":{(m.ArmLengthCm.HasValue ? m.ArmLengthCm.Value.ToString(ic) : "null")},",
+            $"\"ShoeSizeEu\":{(m.ShoeSizeEu.HasValue ? m.ShoeSizeEu.Value.ToString(ic) : "null")},",
+            $"\"BodyShape\":{(m.BodyShape is not null ? $"\"{m.BodyShape}\"" : "null")}",
             "}");
     }
 

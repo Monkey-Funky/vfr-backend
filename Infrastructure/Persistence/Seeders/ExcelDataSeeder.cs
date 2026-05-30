@@ -42,15 +42,15 @@ internal sealed class ExcelDataSeeder : ISeeder
 
     // Category GUIDs
 
-    private static readonly Guid BottomsCategoryId  = new("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb001");
+    private static readonly Guid BottomsCategoryId = new("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb001");
 
-    private static readonly Guid DressesCategoryId  = new("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb002");
+    private static readonly Guid DressesCategoryId = new("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb002");
 
     private static readonly Guid KnitwearCategoryId = new("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb003");
 
     private static readonly Guid OuterwearCategoryId = new("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb004");
 
-    private static readonly Guid TopsCategoryId     = new("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb005");
+    private static readonly Guid TopsCategoryId = new("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb005");
 
 
 
@@ -96,7 +96,9 @@ internal sealed class ExcelDataSeeder : ISeeder
 
     {
 
-        // Fast-path: if seed retailer and all categories exist, assume fully seeded.
+        // Fast-path: verify that ALL seed artefacts are present, including product_images.
+        // Previously this check omitted product_images, so a partial seed (products inserted
+        // but images missing) would silently skip — leaving ThumbnailUrl null for every product.
 
         var retailerExists = await _context.RetailerAccounts
 
@@ -126,11 +128,77 @@ internal sealed class ExcelDataSeeder : ISeeder
 
 
 
-        if (retailerExists && existingCatCount >= 5 && existingProductCount >= 100)
+        // ── FIX: also check product_images so a products-exist-but-no-images state is caught ──
+        var existingImageCount = await _context.ProductImages
+
+            .IgnoreQueryFilters()
+
+            .Where(i => _context.Products
+
+                .IgnoreQueryFilters()
+
+                .Where(p => p.RetailerId == SeedRetailerId)
+
+                .Select(p => p.Id)
+
+                .Contains(i.ProductId))
+
+            .CountAsync(cancellationToken);
+
+
+
+        if (retailerExists && existingCatCount >= 5 && existingProductCount >= 100 && existingImageCount >= 100)
 
         {
 
             _logger.LogDebug("ExcelDataSeeder: all seed data already present, skipping.");
+
+            return;
+
+        }
+
+
+
+        // Partial state: products exist but images are missing — re-seed images only.
+        if (retailerExists && existingProductCount >= 100 && existingImageCount < 100)
+
+        {
+
+            _logger.LogWarning(
+
+                "ExcelDataSeeder: products present ({ProductCount}) but product_images missing ({ImageCount}). " +
+
+                "Re-seeding product images only.",
+
+                existingProductCount, existingImageCount);
+
+
+
+            await using var imgTx = await _context.Database.BeginTransactionAsync(cancellationToken);
+
+            try
+
+            {
+
+                await SeedProductImagesOnlyAsync(cancellationToken);
+
+                await imgTx.CommitAsync(cancellationToken);
+
+                _logger.LogInformation("ExcelDataSeeder: product images re-seeded successfully.");
+
+            }
+
+            catch (Exception ex)
+
+            {
+
+                await imgTx.RollbackAsync(cancellationToken);
+
+                _logger.LogError(ex, "ExcelDataSeeder: product image re-seed failed — transaction rolled back.");
+
+                throw;
+
+            }
 
             return;
 
@@ -290,7 +358,13 @@ internal sealed class ExcelDataSeeder : ISeeder
 
                   {"Active"}, {false}, now())
 
-                 ON CONFLICT (id) DO NOTHING
+                 ON CONFLICT (id) DO UPDATE SET
+
+                     cover_image_url = EXCLUDED.cover_image_url,
+
+                     name            = EXCLUDED.name,
+
+                     description     = EXCLUDED.description
 
                  """, ct);
 
@@ -389,6 +463,51 @@ internal sealed class ExcelDataSeeder : ISeeder
                  """, ct);
 
         }
+
+    }
+
+
+
+    // ── Image-only re-seed (used when products exist but product_images are missing) ──────────
+
+    /// <summary>
+    /// Re-inserts product_images rows for all seed products.
+    /// Called when the fast-path detects that products exist but their images are absent
+    /// (e.g. after a DB reset that cleared product_images but not products).
+    /// Uses ON CONFLICT (id) DO NOTHING so it is safe to run multiple times.
+    /// </summary>
+
+    private async Task SeedProductImagesOnlyAsync(CancellationToken ct)
+
+    {
+
+        var products = BuildProducts();
+
+
+
+        foreach (var p in products)
+
+        {
+
+            await _context.Database.ExecuteSqlAsync(
+
+                $"""
+
+                 INSERT INTO product_images
+
+                 (id, product_id, image_url, display_order, is_deleted)
+
+                 VALUES
+
+                 ({p.ImageId}, {p.ProductId}, {p.ImageUrl}, {0}, {false})
+
+                 ON CONFLICT (id) DO NOTHING
+
+                 """, ct);
+
+        }
+
+        _logger.LogDebug("ExcelDataSeeder: {Count} product image rows upserted.", products.Count);
 
     }
 
@@ -2633,4 +2752,3 @@ internal sealed class ExcelDataSeeder : ISeeder
     );
 
 }
-

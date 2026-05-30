@@ -24,7 +24,6 @@ public sealed class UpdateAvatarMeasurementsCommandHandler : IRequestHandler<Upd
             ?? throw new UnauthorizedException("Customer identity missing.");
 
         var avatar = await _context.Avatars
-            .Include(a => a.MeasurementHistories)
             .FirstOrDefaultAsync(a => a.Id == request.AvatarId, cancellationToken);
 
         if (avatar is null || avatar.CustomerId != customerId)
@@ -44,11 +43,20 @@ public sealed class UpdateAvatarMeasurementsCommandHandler : IRequestHandler<Upd
             request.BodyShape
         );
 
-        // The domain entity owns the measurement update AND the history snapshot.
-        // UpdateMeasurements appends the snapshot to _measurementHistories; EF Core
-        // detects the addition through the ".WithMany("_measurementHistories")" relationship
-        // configuration and inserts the new row in the same transaction as the avatar UPDATE.
+        // Update avatar properties (does NOT touch the navigation collection).
         avatar.UpdateMeasurements(measurements, request.Source);
+
+        // Record history snapshot explicitly via the DbSet.
+        // Adding through the navigation backing field causes a DbUpdateConcurrencyException
+        // when the navigation was not eagerly loaded — EF Core cannot reliably detect
+        // entities added to an unloaded navigation's backing field.
+        var measurementJson = Domain.Entities.Customer.Avatar.BuildMeasurementJson(measurements);
+        var history = AvatarMeasurementHistory.CreateSnapshot(
+            avatarId: avatar.Id,
+            measurementDataJson: measurementJson,
+            source: request.Source);
+
+        _context.AvatarMeasurementHistory.Add(history);
 
         await _context.SaveChangesAsync(cancellationToken);
     }

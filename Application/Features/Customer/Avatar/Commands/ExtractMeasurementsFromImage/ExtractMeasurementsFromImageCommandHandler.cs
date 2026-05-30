@@ -5,7 +5,6 @@ using Application.Interfaces.Services;
 using Application.Interfaces.Services.Customer;
 using Domain.Entities.Customer;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace Application.Features.Customer.Avatar.Commands.ExtractMeasurementsFromImage;
 
@@ -53,7 +52,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 cancellationToken);
         }
 
-        const string source = "ai_image";
+        const string source = "AIEstimate";
 
         // 3. Upsert: check if the customer already has an avatar.
         var existingAvatar = await _context.Avatars
@@ -64,7 +63,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         if (existingAvatar is not null)
         {
             // UPDATE existing avatar — mutate entity state directly.
-            existingAvatar.UpdateMeasurements(measurements);
+            existingAvatar.UpdateMeasurements(measurements, source);
 
             avatar = existingAvatar;
         }
@@ -92,7 +91,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         //    This is committed atomically in the same SaveChangesAsync transaction.
         //    No domain events are published before save, so no side-effects leak
         //    if the transaction rolls back.
-        var measurementsJson = JsonSerializer.Serialize(measurements);
+        var measurementsJson = Domain.Entities.Customer.Avatar.BuildMeasurementJson(measurements);
         var history = AvatarMeasurementHistory.CreateSnapshot(
             avatarId: avatar.Id,
             measurementDataJson: measurementsJson,

@@ -130,14 +130,31 @@ internal sealed class TransactionalDataSeeder : ISeeder
 
     public async Task SeedAsync(CancellationToken ct = default)
     {
-        // Fast-path: if subscription already exists assume fully seeded.
+        // Fast-path: if subscription already exists assume transactional data is present.
         bool alreadySeeded = await _db.Database
             .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM subscriptions WHERE id = {SubscriptionId}")
             .AnyAsync(ct);
 
         if (alreadySeeded)
         {
-            _log.LogDebug("TransactionalDataSeeder: data already present — skipping.");
+            _log.LogDebug("TransactionalDataSeeder: data already present — running offers upsert to ensure images are current.");
+
+            // Even when already seeded, re-run offers upsert so cover_image_url is always kept
+            // up to date (ON CONFLICT DO UPDATE). This fixes cases where offers were originally
+            // inserted without images due to an earlier ON CONFLICT DO NOTHING guard.
+            await using var offerTx = await _db.Database.BeginTransactionAsync(ct);
+            try
+            {
+                await SeedOffersAsync(ct);
+                await offerTx.CommitAsync(ct);
+                _log.LogDebug("TransactionalDataSeeder: offers upserted successfully.");
+            }
+            catch (Exception ex)
+            {
+                await offerTx.RollbackAsync(ct);
+                _log.LogError(ex, "TransactionalDataSeeder: offers upsert failed — transaction rolled back.");
+                throw;
+            }
             return;
         }
 
@@ -329,7 +346,9 @@ internal sealed class TransactionalDataSeeder : ISeeder
                  'https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/13_uc9omt.jpg',
                  'Active',
                  false, {now.AddDays(-10)}, {now.AddDays(-10)})
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (id) DO UPDATE SET
+                cover_image_url = EXCLUDED.cover_image_url,
+                updated_at      = EXCLUDED.updated_at
             """, ct);
 
         // Product-type offer (Product #13 — leather jacket)
@@ -350,7 +369,9 @@ internal sealed class TransactionalDataSeeder : ISeeder
                  'https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/13_uc9omt.jpg',
                  'Active',
                  false, {now.AddDays(-5)}, {now.AddDays(-5)})
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (id) DO UPDATE SET
+                cover_image_url = EXCLUDED.cover_image_url,
+                updated_at      = EXCLUDED.updated_at
             """, ct);
 
         // Category-type offer (Dresses — bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb002)
@@ -371,7 +392,9 @@ internal sealed class TransactionalDataSeeder : ISeeder
                  'https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/56_wtsghs.jpg',
                  'Active',
                  false, {now}, {now})
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (id) DO UPDATE SET
+                cover_image_url = EXCLUDED.cover_image_url,
+                updated_at      = EXCLUDED.updated_at
             """, ct);
 
         _log.LogDebug("TransactionalDataSeeder: offers seeded.");

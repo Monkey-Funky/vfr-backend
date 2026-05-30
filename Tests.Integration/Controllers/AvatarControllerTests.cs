@@ -82,40 +82,40 @@ public sealed class AvatarControllerTests : IntegrationTestBase
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
     }
 
-    //[Fact]
-    //public async Task UpdateAvatarMeasurements_WithValidData_ShouldReturn200()
-    //{
-    //    var avatarId = await SeedAvatarAsync();
+    [Fact]
+    public async Task UpdateAvatarMeasurements_WithValidData_ShouldReturn200()
+    {
+        var avatarId = await SeedAvatarAsync();
 
-    //    var command = new UpdateAvatarMeasurementsCommand(
-    //        AvatarId: avatarId,
-    //        HeightCm: 178m,
-    //        WeightKg: 74m,
-    //        ChestCm: 98m,
-    //        WaistCm: 83m,
-    //        HipsCm: 100m,
-    //        ShoulderWidthCm: 44m,
-    //        InseamCm: 82m,
-    //        NeckCm: 39m,
-    //        ArmLengthCm: 62m,
-    //        ShoeSizeEu: 43m,
-    //        BodyShape: "Hourglass",
-    //        Source: "Manual");
+        var command = new UpdateAvatarMeasurementsCommand(
+            AvatarId: avatarId,
+            HeightCm: 178m,
+            WeightKg: 74m,
+            ChestCm: 98m,
+            WaistCm: 83m,
+            HipsCm: 100m,
+            ShoulderWidthCm: 44m,
+            InseamCm: 82m,
+            NeckCm: 39m,
+            ArmLengthCm: 62m,
+            ShoeSizeEu: 43m,
+            BodyShape: "Hourglass",
+            Source: "Manual");
 
-    //    var response = await CustomerClient.PatchAsJsonAsync(
-    //        $"/api/customers/{_customerId}/avatar/measurements", command);
+        var response = await CustomerClient.PatchAsJsonAsync(
+            $"/api/customers/{_customerId}/avatar/measurements", command);
 
-    //    response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-    //    await Factory.ExecuteDbContextAsync(async db =>
-    //    {
-    //        var avatar = await db.Avatars.FirstOrDefaultAsync(a => a.Id == avatarId);
-    //        avatar.Should().NotBeNull();
-    //        avatar!.HeightCm.Should().Be(178m);
-    //        avatar.WeightKg.Should().Be(74m);
-    //        avatar.WaistCm.Should().Be(83m);
-    //    });
-    //}
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var avatar = await db.Avatars.FirstOrDefaultAsync(a => a.Id == avatarId);
+            avatar.Should().NotBeNull();
+            avatar!.HeightCm.Should().Be(178m);
+            avatar.WeightKg.Should().Be(74m);
+            avatar.WaistCm.Should().Be(83m);
+        });
+    }
 
     [Fact]
     public async Task GetAvatar_WhenNoAvatarExists_ShouldReturn404()
@@ -141,122 +141,122 @@ public sealed class AvatarControllerTests : IntegrationTestBase
         result.Data.WeightKg.Should().Be(70m);
     }
 
-    //[Fact]
-    //public async Task GetSizeRecommendation_WithAvatar_ShouldReturn200()
-    //{
-    //    await SeedAvatarAsync();
+    [Fact]
+    public async Task GetSizeRecommendation_WithAvatar_ShouldReturn200()
+    {
+        await SeedAvatarAsync();
 
-    //    var productId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
 
-    //    Factory.SizeRecommendationServiceMock
-    //        .Setup(s => s.RecommendSizeAsync(
-    //            It.IsAny<Domain.Entities.Customer.Avatar>(),
-    //            productId,
-    //            It.IsAny<CancellationToken>()))
-    //        .ReturnsAsync(new Application.Features.Customer.Avatar.DTOs.SizeRecommendationDto(
-    //            ProductId: productId,
-    //            RecommendedSize: "M",
-    //            ConfidenceScore: 0.92m,
-    //            Justification: "Based on chest and waist measurements."));
+        Factory.SizeRecommendationServiceMock
+            .Setup(s => s.RecommendSizeAsync(
+                It.IsAny<Domain.Entities.Customer.Avatar>(),
+                productId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Application.Features.Customer.Avatar.DTOs.SizeRecommendationDto(
+                ProductId: productId,
+                RecommendedSize: "M",
+                ConfidenceScore: 0.92m,
+                Justification: "Based on chest and waist measurements."));
 
-    //    var response = await CustomerClient.GetAsync(
-    //        $"/api/customers/{_customerId}/avatar/size-recommendation/{productId}");
+        var response = await CustomerClient.GetAsync(
+            $"/api/customers/{_customerId}/avatar/size-recommendation/{productId}");
 
-    //    response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-    //    var result = await response.Content
-    //        .ReadFromJsonAsync<ApiResponse<Application.Features.Customer.Avatar.DTOs.SizeRecommendationDto>>();
-    //    result!.Data.Should().NotBeNull();
-    //    result.Data!.RecommendedSize.Should().Be("M");
-    //}
+        var result = await response.Content
+            .ReadFromJsonAsync<ApiResponse<Application.Features.Customer.Avatar.DTOs.SizeRecommendationDto>>();
+        result!.Data.Should().NotBeNull();
+        result.Data!.RecommendedSize.Should().Be("M");
+    }
 
-    //[Fact]
-    //public async Task GetSizeRecommendation_WithoutAvatar_ShouldReturn404()
-    //{
-    //    var productId = Guid.NewGuid();
+    [Fact]
+    public async Task GetSizeRecommendation_WithoutAvatar_ShouldReturn404()
+    {
+        var productId = Guid.NewGuid();
 
-    //    var response = await CustomerClient.GetAsync(
-    //        $"/api/customers/{_customerId}/avatar/size-recommendation/{productId}");
+        var response = await CustomerClient.GetAsync(
+            $"/api/customers/{_customerId}/avatar/size-recommendation/{productId}");
 
-    //    response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-    //}
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
 
-    //[Fact]
-    //public async Task GetAvatarMeasurementHistory_ShouldReturnHistory()
-    //{
-    //    var command = new CreateAvatarCommand(
-    //        HeightCm: 175m,
-    //        WeightKg: 70m,
-    //        ChestCm: null,
-    //        WaistCm: null,
-    //        HipsCm: null,
-    //        ShoulderWidthCm: null,
-    //        InseamCm: null,
-    //        NeckCm: null,
-    //        ArmLengthCm: null,
-    //        ShoeSizeEu: null,
-    //        BodyShape: null,
-    //        Source: "Manual");
+    [Fact]
+    public async Task GetAvatarMeasurementHistory_ShouldReturnHistory()
+    {
+        var command = new CreateAvatarCommand(
+            HeightCm: 175m,
+            WeightKg: 70m,
+            ChestCm: null,
+            WaistCm: null,
+            HipsCm: null,
+            ShoulderWidthCm: null,
+            InseamCm: null,
+            NeckCm: null,
+            ArmLengthCm: null,
+            ShoeSizeEu: null,
+            BodyShape: null,
+            Source: "Manual");
 
-    //    await CustomerClient.PostAsJsonAsync(
-    //        $"/api/customers/{_customerId}/avatar", command);
+        await CustomerClient.PostAsJsonAsync(
+            $"/api/customers/{_customerId}/avatar", command);
 
-    //    var response = await CustomerClient.GetAsync(
-    //        $"/api/customers/{_customerId}/avatar/history");
+        var response = await CustomerClient.GetAsync(
+            $"/api/customers/{_customerId}/avatar/history");
 
-    //    response.StatusCode.Should().Be(HttpStatusCode.OK);
-    //    var result = await response.Content.ReadFromJsonAsync<ApiResponse<PagedResult<AvatarMeasurementHistoryDto>>>();
-    //    result!.Data.Should().NotBeNull();
-    //    result.Data!.Items.Should().NotBeEmpty();
-    //    result.Data.Items[0].Source.Should().Be("Manual");
-    //}
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ApiResponse<PagedResult<AvatarMeasurementHistoryDto>>>();
+        result!.Data.Should().NotBeNull();
+        result.Data!.Items.Should().NotBeEmpty();
+        result.Data.Items[0].Source.Should().Be("Manual");
+    }
 
-    //[Fact]
-    //public async Task GetAvatarMeasurementHistory_AfterMultipleUpdates_ShouldReturnAllSnapshots()
-    //{
-    //    var command = new CreateAvatarCommand(
-    //        HeightCm: 175m,
-    //        WeightKg: 70m,
-    //        ChestCm: null,
-    //        WaistCm: null,
-    //        HipsCm: null,
-    //        ShoulderWidthCm: null,
-    //        InseamCm: null,
-    //        NeckCm: null,
-    //        ArmLengthCm: null,
-    //        ShoeSizeEu: null,
-    //        BodyShape: null,
-    //        Source: "Manual");
+    [Fact]
+    public async Task GetAvatarMeasurementHistory_AfterMultipleUpdates_ShouldReturnAllSnapshots()
+    {
+        var command = new CreateAvatarCommand(
+            HeightCm: 175m,
+            WeightKg: 70m,
+            ChestCm: null,
+            WaistCm: null,
+            HipsCm: null,
+            ShoulderWidthCm: null,
+            InseamCm: null,
+            NeckCm: null,
+            ArmLengthCm: null,
+            ShoeSizeEu: null,
+            BodyShape: null,
+            Source: "Manual");
 
-    //    await CustomerClient.PostAsJsonAsync($"/api/customers/{_customerId}/avatar", command);
+        await CustomerClient.PostAsJsonAsync($"/api/customers/{_customerId}/avatar", command);
 
-    //    var getAvatarResponse = await CustomerClient.GetAsync($"/api/customers/{_customerId}/avatar");
-    //    var avatarResult = await getAvatarResponse.Content.ReadFromJsonAsync<ApiResponse<AvatarDto>>();
-    //    var avatarId = avatarResult!.Data!.Id;
+        var getAvatarResponse = await CustomerClient.GetAsync($"/api/customers/{_customerId}/avatar");
+        var avatarResult = await getAvatarResponse.Content.ReadFromJsonAsync<ApiResponse<AvatarDto>>();
+        var avatarId = avatarResult!.Data!.Id;
 
-    //    var updateCommand = new UpdateAvatarMeasurementsCommand(
-    //        AvatarId: avatarId,
-    //        HeightCm: 176m,
-    //        WeightKg: 72m,
-    //        ChestCm: null,
-    //        WaistCm: null,
-    //        HipsCm: null,
-    //        ShoulderWidthCm: null,
-    //        InseamCm: null,
-    //        NeckCm: null,
-    //        ArmLengthCm: null,
-    //        ShoeSizeEu: null,
-    //        BodyShape: null,
-    //        Source: "BodyScan");
+        var updateCommand = new UpdateAvatarMeasurementsCommand(
+            AvatarId: avatarId,
+            HeightCm: 176m,
+            WeightKg: 72m,
+            ChestCm: null,
+            WaistCm: null,
+            HipsCm: null,
+            ShoulderWidthCm: null,
+            InseamCm: null,
+            NeckCm: null,
+            ArmLengthCm: null,
+            ShoeSizeEu: null,
+            BodyShape: null,
+            Source: "BodyScan");
 
-    //    await CustomerClient.PatchAsJsonAsync($"/api/customers/{_customerId}/avatar/measurements", updateCommand);
+        await CustomerClient.PatchAsJsonAsync($"/api/customers/{_customerId}/avatar/measurements", updateCommand);
 
-    //    var response = await CustomerClient.GetAsync($"/api/customers/{_customerId}/avatar/history");
+        var response = await CustomerClient.GetAsync($"/api/customers/{_customerId}/avatar/history");
 
-    //    response.StatusCode.Should().Be(HttpStatusCode.OK);
-    //    var result = await response.Content.ReadFromJsonAsync<ApiResponse<PagedResult<AvatarMeasurementHistoryDto>>>();
-    //    result!.Data!.Items.Should().HaveCountGreaterThanOrEqualTo(2);
-    //}
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ApiResponse<PagedResult<AvatarMeasurementHistoryDto>>>();
+        result!.Data!.Items.Should().HaveCountGreaterThanOrEqualTo(2);
+    }
 
     [Fact]
     public async Task DeleteAvatar_ShouldReturn200()

@@ -2,7 +2,6 @@ using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Customer;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace Application.Features.Customer.Avatar.Commands.CreateAvatar;
 
@@ -47,7 +46,7 @@ public sealed class CreateAvatarCommandHandler : IRequestHandler<CreateAvatarCom
         _context.Avatars.Add(avatar);
 
         // Record initial history snapshot in same transaction
-        var measurementsJson = JsonSerializer.Serialize(new BodyMeasurements(
+        var measurementsJson = Domain.Entities.Customer.Avatar.BuildMeasurementJson(new BodyMeasurements(
             request.HeightCm,
             request.WeightKg,
             request.ChestCm,
