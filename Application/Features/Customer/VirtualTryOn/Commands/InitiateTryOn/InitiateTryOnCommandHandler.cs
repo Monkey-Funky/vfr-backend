@@ -13,31 +13,34 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IVirtualTryOnService _virtualTryOnService;
+    private readonly ICacheService _cacheService;
 
     public InitiateTryOnCommandHandler(
         IApplicationDbContext context,
         ICurrentUserService currentUserService,
-        IVirtualTryOnService virtualTryOnService)
+        IVirtualTryOnService virtualTryOnService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
         _virtualTryOnService = virtualTryOnService;
+        _cacheService = cacheService;
     }
 
     public async Task<TryOnResultDto> Handle(InitiateTryOnCommand request, CancellationToken cancellationToken)
     {
-        var customerId = _currentUserService.CustomerId 
+        var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedException("Customer identity missing.");
 
-        // 1. Validate product exists and is strictly active
+        // 1. Validate product exists and is active.
         var product = await _context.Products
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == request.ProductId, cancellationToken);
-            
+
         if (product is null || product.Status != "Active")
             throw new NotFoundException("Product", request.ProductId);
 
-        // 2. Load avatar if provided, validate ownership
+        // 2. Load and validate avatar ownership if one is provided.
         Domain.Entities.Customer.Avatar? activeAvatar = null;
         if (request.AvatarId.HasValue)
         {
@@ -49,27 +52,26 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 throw new NotFoundException("Avatar", request.AvatarId.Value);
         }
 
-        // 3. Persist the pending TryOn session
+        // 3. Persist the pending session before calling the external service.
         var session = VirtualTryOnSession.Create(
             customerId: customerId,
             productId: request.ProductId,
             retailerId: product.RetailerId,
             sessionType: request.SessionType,
-            avatarId: request.AvatarId
-        );
+            avatarId: request.AvatarId);
 
         _context.VirtualTryOnSessions.Add(session);
         await _context.SaveChangesAsync(cancellationToken);
 
-        // 4. Call TryOn service
+        // 4. Call the external try-on service; mark the session failed on any exception.
         TryOnResultDto result;
         try
         {
             result = await _virtualTryOnService.ProcessTryOnAsync(
-                customerId, 
-                request.ProductId, 
-                request.SessionType, 
-                activeAvatar, 
+                customerId,
+                request.ProductId,
+                request.SessionType,
+                activeAvatar,
                 cancellationToken);
         }
         catch
@@ -79,21 +81,25 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
             throw;
         }
 
-        // 5. Update session status securely based on service result
+        // 5. Update session status based on service result.
         if (result.Status == SessionStatus.Failed)
         {
             session.MarkAsFailed();
         }
-        else if (result.Status == SessionStatus.Completed && result.ResultImageUrl != null)
+        else if (result.Status == SessionStatus.Completed && result.ResultImageUrl is not null)
         {
             session.MarkAsCompleted(
-                result.ResultImageUrl, 
-                result.RecommendedSize, 
-                result.ConfidenceScore, 
+                result.ResultImageUrl,
+                result.RecommendedSize,
+                result.ConfidenceScore,
                 result.DurationSeconds ?? 0);
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        // Invalidate the paginated try-on session list for this customer so the new
+        // session appears immediately on the next fetch (all pages, all products).
+        await _cacheService.RemoveByPrefixAsync($"tryon:{customerId:N}:", cancellationToken);
 
         return result;
     }

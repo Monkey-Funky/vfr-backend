@@ -1,3 +1,4 @@
+using Application.Interfaces.Services;
 using Application.Features.Orders.Commands.UpdateOrderStatus;
 using Application.Interfaces.Persistence;
 using Domain.Enums.Orders;
@@ -14,6 +15,7 @@ public sealed class UpdateOrderStatusCommandHandlerTests
     private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<IMediator> _mediatorMock = new();
     private readonly Mock<ILogger<UpdateOrderStatusCommandHandler>> _loggerMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly UpdateOrderStatusCommandHandler _sut;
 
     private static readonly Guid RetailerId = Guid.NewGuid();
@@ -25,6 +27,7 @@ public sealed class UpdateOrderStatusCommandHandlerTests
             _uowMock.Object,
             _contextMock.Object,
             _mediatorMock.Object,
+            _cacheServiceMock.Object,
             _loggerMock.Object);
 
         _uowMock

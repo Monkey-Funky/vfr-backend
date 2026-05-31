@@ -1,7 +1,9 @@
 ﻿using Application.Interfaces.Persistence;
+using Application.Interfaces.Services;
 using Domain.Entities.Orders;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Shared.Constants;
 
 
 namespace Application.Features.Orders.Commands.UpdateOrderStatus;
@@ -14,17 +16,20 @@ public sealed class UpdateOrderStatusCommandHandler
     private readonly IUnitOfWork _unitOfWork;
     private readonly IApplicationDbContext _context;
     private readonly IMediator _mediator;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<UpdateOrderStatusCommandHandler> _logger;
 
     public UpdateOrderStatusCommandHandler(
         IUnitOfWork unitOfWork,
         IApplicationDbContext context,
         IMediator mediator,
+        ICacheService cacheService,
         ILogger<UpdateOrderStatusCommandHandler> logger)
     {
         _unitOfWork = unitOfWork;
         _context = context;
         _mediator = mediator;
+        _cacheService = cacheService;
         _logger = logger;
     }
 
@@ -73,6 +78,12 @@ public sealed class UpdateOrderStatusCommandHandler
                     await _mediator.Publish(domainEvent, ct);
 
                 }, cancellationToken);
+
+                // ── Invalidate order caches after successful commit ────────────
+                await Task.WhenAll(
+                    _cacheService.RemoveAsync(CacheKeys.OrderDetail(request.RetailerId, request.OrderId), cancellationToken),
+                    _cacheService.RemoveByPrefixAsync(CacheKeys.OrderListPrefix(request.RetailerId), cancellationToken)
+                );
 
                 return Result<bool>.Success(true, "Order status updated successfully.");
             }

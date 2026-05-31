@@ -10,6 +10,7 @@ public sealed class RenameCollectionCommandHandlerTests
 {
     private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly RenameCollectionCommandHandler _sut;
 
     private static readonly Guid CustomerId = Guid.NewGuid();
@@ -18,7 +19,8 @@ public sealed class RenameCollectionCommandHandlerTests
     {
         _sut = new RenameCollectionCommandHandler(
             _contextMock.Object,
-            _currentUserServiceMock.Object);
+            _currentUserServiceMock.Object,
+            _cacheServiceMock.Object);
 
         _currentUserServiceMock.SetupGet(x => x.CustomerId).Returns(CustomerId);
     }

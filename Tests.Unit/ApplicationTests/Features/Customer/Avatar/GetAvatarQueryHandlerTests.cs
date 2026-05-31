@@ -1,4 +1,5 @@
-﻿using Application.Features.Customer.Avatar.Queries.GetAvatar;
+﻿using Application.Interfaces.Services;
+using Application.Features.Customer.Avatar.Queries.GetAvatar;
 using Application.Interfaces.Persistence;
 using Domain.Entities.Customer;
 
@@ -7,6 +8,7 @@ namespace Tests.Unit.Application.Features.Customer.Avatar;
 public sealed class GetAvatarQueryHandlerTests
 {
     private readonly Mock<IApplicationDbContext> _contextMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly GetAvatarQueryHandler _sut;
 
     private static readonly Guid CustomerId = Guid.NewGuid();
@@ -14,7 +16,7 @@ public sealed class GetAvatarQueryHandlerTests
 
     public GetAvatarQueryHandlerTests()
     {
-        _sut = new GetAvatarQueryHandler(_contextMock.Object);
+        _sut = new GetAvatarQueryHandler(_contextMock.Object, _cacheServiceMock.Object);
     }
 
     private static Domain.Entities.Customer.Avatar BuildAvatar(Guid? customerId = null)

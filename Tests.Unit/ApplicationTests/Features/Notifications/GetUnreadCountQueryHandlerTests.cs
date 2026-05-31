@@ -9,6 +9,7 @@ public sealed class GetUnreadCountQueryHandlerTests
 {
     private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<ICurrentUserService> _userServiceMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly GetUnreadCountQueryHandler _sut;
 
     private static readonly Guid RetailerId = Guid.NewGuid();
@@ -18,7 +19,8 @@ public sealed class GetUnreadCountQueryHandlerTests
     {
         _sut = new GetUnreadCountQueryHandler(
             _contextMock.Object,
-            _userServiceMock.Object);
+            _userServiceMock.Object,
+            _cacheServiceMock.Object);
 
         _userServiceMock.SetupGet(x => x.RetailerId).Returns(RetailerId);
     }

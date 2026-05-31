@@ -9,6 +9,7 @@ public sealed class GetOrderByIdQueryHandlerTests
 {
     private readonly Mock<IOrderRepository> _orderRepoMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly GetOrderByIdQueryHandler _sut;
 
     private static readonly Guid RetailerId = Guid.NewGuid();
@@ -16,7 +17,7 @@ public sealed class GetOrderByIdQueryHandlerTests
 
     public GetOrderByIdQueryHandlerTests()
     {
-        _sut = new GetOrderByIdQueryHandler(_orderRepoMock.Object, _currentUserServiceMock.Object);
+        _sut = new GetOrderByIdQueryHandler(_orderRepoMock.Object, _currentUserServiceMock.Object, _cacheServiceMock.Object);
         _currentUserServiceMock.SetupGet(x => x.RetailerId).Returns(RetailerId);
     }
 

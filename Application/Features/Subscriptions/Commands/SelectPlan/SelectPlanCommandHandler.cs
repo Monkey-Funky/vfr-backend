@@ -1,4 +1,5 @@
-﻿using Application.Interfaces.External;
+﻿using Shared.Constants;
+using Application.Interfaces.External;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Enums.Subscription;
@@ -189,8 +190,11 @@ public sealed class SelectPlanCommandHandler
                 "Please check your current subscription status.");
         }
 
-        await _cacheService.RemoveByPrefixAsync(
-            $"subscriptions:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"subscriptions:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.CurrentSubscription(retailerId), cancellationToken),
+            _cacheService.RemoveAsync($"sub_details:{retailerId:N}", cancellationToken)
+        );
 
         return Result<Guid>.Success(subscriptionId, "Plan selected and activated successfully.");
     }

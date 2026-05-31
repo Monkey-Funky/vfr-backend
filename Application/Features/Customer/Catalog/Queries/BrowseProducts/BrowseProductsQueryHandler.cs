@@ -1,31 +1,122 @@
-using Application.Features.Customer.Catalog.DTOs;
+﻿using Application.Features.Customer.Catalog.DTOs;
+using Application.Features.Customer.Catalog.Mappings;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Enums.Product;
 using Microsoft.EntityFrameworkCore;
-using Application.Features.Customer.Catalog.Mappings;
 using NpgsqlTypes;
+using Shared.Constants;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace Application.Features.Customer.Catalog.Queries.BrowseProducts;
 
+/// <summary>
+/// Paginates and filters the public product catalog.
+/// Cache-aside (shared, no user scope): TTL 3 minutes.
+/// Key is a SHA-256 fingerprint of all query parameters — unique per filter combination.
+/// Invalidated by product Create/Update/Delete/Toggle in the retailer domain.
+/// IsFavorite is a per-user concern: computed post-cache and NOT stored in the cache.
+/// </summary>
 internal sealed class BrowseProductsQueryHandler : IRequestHandler<BrowseProductsQuery, PagedResult<ProductCardDto>>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
-    public BrowseProductsQueryHandler(IApplicationDbContext context, ICurrentUserService currentUserService)
+    public BrowseProductsQueryHandler(
+        IApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
-    public async Task<PagedResult<ProductCardDto>> Handle(BrowseProductsQuery request, CancellationToken cancellationToken)
+    public async Task<PagedResult<ProductCardDto>> Handle(
+        BrowseProductsQuery request,
+        CancellationToken cancellationToken)
     {
-        var query = _context.Products.AsNoTracking();
+        string fingerprint = BuildFingerprint(request);
+        string cacheKey = CacheKeys.ProductBrowse(fingerprint);
 
-        // 1. Base Filters (Retailer global filters like IsDeleted and Active are assumed applied or handled via EF)
-        // Ensure we only see Active products just in case
-        query = query.Where(p => p.Status == ProductStatus.Active);
+        // Try shared cache (isFavorite = false for all items — user-specific overlay applied below).
+        var cachedBase = await _cacheService.GetAsync<BrowseCachePayload>(cacheKey, cancellationToken);
+
+        // FIX: PagedResult<T> is a class, not a record — cannot use "with" expressions.
+        // Build a mutable List<ProductCardDto> that we can update in-place.
+        List<ProductCardDto> items;
+        int totalCount;
+        int pageNumber;
+        int pageSize;
+
+        if (cachedBase is not null)
+        {
+            // Clone the list so the cached payload is never mutated.
+            items = cachedBase.Items.ToList();
+            totalCount = cachedBase.TotalCount;
+            pageNumber = cachedBase.PageNumber;
+            pageSize = cachedBase.PageSize;
+        }
+        else
+        {
+            var fetched = await FetchFromDatabaseAsync(request, cancellationToken);
+            items = fetched.Items.ToList();
+            totalCount = fetched.TotalCount;
+            pageNumber = fetched.PageNumber;
+            pageSize = fetched.PageSize;
+
+            // Cache the base result (isFavorite = false for all).
+            await _cacheService.SetAsync(
+                cacheKey,
+                new BrowseCachePayload(items, totalCount, pageNumber, pageSize),
+                TimeSpan.FromMinutes(3),
+                cancellationToken);
+        }
+
+        // Overlay per-user IsFavorite flags — never stored in the shared cache.
+        if (_currentUserService.IsAuthenticated
+            && _currentUserService.CustomerId.HasValue
+            && items.Count > 0)
+        {
+            var customerId = _currentUserService.CustomerId.Value;
+            var productIds = items.Select(p => p.Id).ToList();
+
+            var favoriteIds = await _context.CustomerFavorites.AsNoTracking()
+                .Where(f => f.CustomerId == customerId && productIds.Contains(f.ProductId))
+                .Select(f => f.ProductId)
+                .ToListAsync(cancellationToken);
+
+            if (favoriteIds.Count > 0)
+            {
+                var favoriteSet = favoriteIds.ToHashSet();
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (favoriteSet.Contains(items[i].Id))
+                        items[i] = items[i] with { IsFavorite = true };
+                }
+            }
+        }
+
+        return new PagedResult<ProductCardDto>
+        {
+            Items = items,
+            TotalCount = totalCount,
+            PageNumber = pageNumber,
+            PageSize = pageSize
+        };
+    }
+
+    // ─── Private DB fetch ────────────────────────────────────────────────────
+
+    private async Task<PagedResult<ProductCardDto>> FetchFromDatabaseAsync(
+        BrowseProductsQuery request,
+        CancellationToken cancellationToken)
+    {
+        var query = _context.Products.AsNoTracking()
+            .Where(p => p.Status == ProductStatus.Active);
 
         if (request.RetailerId.HasValue)
             query = query.Where(p => p.RetailerId == request.RetailerId.Value);
@@ -42,73 +133,61 @@ internal sealed class BrowseProductsQueryHandler : IRequestHandler<BrowseProduct
         if (request.MaxPrice.HasValue)
             query = query.Where(p => p.Price <= request.MaxPrice.Value);
 
-        //2.Full - Text Search(plainto_tsquery)
         if (!string.IsNullOrWhiteSpace(request.SearchTerm) && request.SearchTerm.Length >= 2)
         {
-            query = query.Where(p => EF.Property<NpgsqlTsVector>(p, "search_vector")
-                .Matches(EF.Functions.PlainToTsQuery("english", request.SearchTerm)));
+            query = query.Where(p =>
+                EF.Property<NpgsqlTsVector>(p, "search_vector")
+                  .Matches(EF.Functions.PlainToTsQuery("english", request.SearchTerm)));
         }
 
-        // 3. Array Filters (Multi-select)
-        if (request.Categories != null && request.Categories.Length > 0)
+        if (request.Categories is { Length: > 0 })
         {
             var categoryIdsToFilter = await _context.Categories.AsNoTracking()
                 .Where(c => request.Categories.Contains(c.Name))
                 .Select(c => c.Id)
                 .ToListAsync(cancellationToken);
-            
-            if (categoryIdsToFilter.Count > 0)
-            {
-                query = query.Where(p => p.CategoryId.HasValue && categoryIdsToFilter.Contains(p.CategoryId.Value));
-            }
-            else
-            {
-                // No matching categories found, so filter out everything
-                query = query.Where(p => false);
-            }
+
+            query = categoryIdsToFilter.Count > 0
+                ? query.Where(p => p.CategoryId.HasValue && categoryIdsToFilter.Contains(p.CategoryId.Value))
+                : query.Where(_ => false);
         }
 
-        if (request.Colors != null && request.Colors.Length > 0)
-        {
-            query = query.Where(p => p.AvailableColors != null && p.AvailableColors.Any(c => request.Colors.Contains(c)));
-        }
+        if (request.Colors is { Length: > 0 })
+            query = query.Where(p => p.AvailableColors != null
+                                  && p.AvailableColors.Any(c => request.Colors.Contains(c)));
 
-        if (request.Sizes != null && request.Sizes.Length > 0)
-        {
-            query = query.Where(p => p.AvailableSizes != null && p.AvailableSizes.Any(s => request.Sizes.Contains(s)));
-        }
+        if (request.Sizes is { Length: > 0 })
+            query = query.Where(p => p.AvailableSizes != null
+                                  && p.AvailableSizes.Any(s => request.Sizes.Contains(s)));
 
-        if (request.FabricMaterials != null && request.FabricMaterials.Length > 0)
-        {
+        if (request.FabricMaterials is { Length: > 0 })
             query = query.Where(p => p.Material != null && request.FabricMaterials.Contains(p.Material));
-        }
 
-        if (request.FabricPatterns != null && request.FabricPatterns.Length > 0)
-        {
+        if (request.FabricPatterns is { Length: > 0 })
             query = query.Where(p => p.Pattern != null && request.FabricPatterns.Contains(p.Pattern));
-        }
 
-        if (request.Brands != null && request.Brands.Length > 0)
-        {
+        if (request.Brands is { Length: > 0 })
             query = query.Where(p => p.Brand != null && request.Brands.Contains(p.Brand));
-        }
 
-        // Note: BodyShapes not currently mapped to Product directly, ignoring or needs joining later
-        // if (request.BodyShapes != null && request.BodyShapes.Length > 0) { ... }
-
-        // 4. Sorting
         query = request.SortBy?.ToLowerInvariant() switch
         {
-            "price" => request.SortOrder?.ToLowerInvariant() == "desc" ? query.OrderByDescending(p => p.Price) : query.OrderBy(p => p.Price),
-            "name" => request.SortOrder?.ToLowerInvariant() == "desc" ? query.OrderByDescending(p => p.Name) : query.OrderBy(p => p.Name),
-            "newest" => request.SortOrder?.ToLowerInvariant() == "desc" ? query.OrderByDescending(p => p.CreatedAt) : query.OrderBy(p => p.CreatedAt),
-            "mostviewed" => request.SortOrder?.ToLowerInvariant() == "desc" ? query.OrderByDescending(p => p.ViewsCount) : query.OrderBy(p => p.ViewsCount),
-            _ => query.OrderByDescending(p => p.CreatedAt) // Default Newest
+            "price" => request.SortOrder?.ToLowerInvariant() == "desc"
+                                ? query.OrderByDescending(p => p.Price)
+                                : query.OrderBy(p => p.Price),
+            "name" => request.SortOrder?.ToLowerInvariant() == "desc"
+                                ? query.OrderByDescending(p => p.Name)
+                                : query.OrderBy(p => p.Name),
+            "newest" => request.SortOrder?.ToLowerInvariant() == "desc"
+                                ? query.OrderByDescending(p => p.CreatedAt)
+                                : query.OrderBy(p => p.CreatedAt),
+            "mostviewed" => request.SortOrder?.ToLowerInvariant() == "desc"
+                                ? query.OrderByDescending(p => p.ViewsCount)
+                                : query.OrderBy(p => p.ViewsCount),
+            _ => query.OrderByDescending(p => p.CreatedAt)
         };
 
-        // 5. Pagination & Projection
-        int totalCount = await query.CountAsync(cancellationToken);
-        
+        int total = await query.CountAsync(cancellationToken);
+
         var products = await query
             .Include(p => p.Images)
             .Skip((request.PageNumber - 1) * request.PageSize)
@@ -116,46 +195,77 @@ internal sealed class BrowseProductsQueryHandler : IRequestHandler<BrowseProduct
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
-        // Fetch active offers for these products
         var productIds = products.Select(p => p.Id).ToList();
-        var categoryIds = products.Where(p => p.CategoryId.HasValue).Select(p => p.CategoryId!.Value).Distinct().ToList();
+        var categoryIds = products
+            .Where(p => p.CategoryId.HasValue)
+            .Select(p => p.CategoryId!.Value)
+            .Distinct()
+            .ToList();
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        
+
         var activeOffers = await _context.Offers.AsNoTracking()
-            .Where(o => o.Status == "Active" && o.StartDate <= today && (o.EndDate == null || o.EndDate >= today))
-            .Where(o => (o.ProductId.HasValue && productIds.Contains(o.ProductId.Value)) || 
-                        (o.CategoryId.HasValue && categoryIds.Contains(o.CategoryId.Value)))
+            .Where(o => o.Status == "Active"
+                     && o.StartDate <= today
+                     && (o.EndDate == null || o.EndDate >= today))
+            .Where(o => (o.ProductId.HasValue && productIds.Contains(o.ProductId.Value))
+                     || (o.CategoryId.HasValue && categoryIds.Contains(o.CategoryId.Value)))
             .ToListAsync(cancellationToken);
 
-        // Compute IsFavorite
-        HashSet<Guid> favoriteProductIds = new();
-        if (_currentUserService.IsAuthenticated && _currentUserService.CustomerId.HasValue)
+        var dtos = products.Select(p =>
         {
-            var customerId = _currentUserService.CustomerId;
-            var favorites = await _context.CustomerFavorites.AsNoTracking()
-                .Where(f => f.CustomerId == customerId && productIds.Contains(f.ProductId))
-                .Select(f => f.ProductId)
-                .ToListAsync(cancellationToken);
-            
-            favoriteProductIds = [.. favorites];
-        }
-
-        var dtos = products.Select(p => 
-        {
-            decimal? discountedPrice = null;
-            var offer = activeOffers.FirstOrDefault(o => o.ProductId == p.Id) ?? 
-                        activeOffers.FirstOrDefault(o => o.CategoryId == p.CategoryId);
-
-            return p.ToProductCardDto(offer, favoriteProductIds.Contains(p.Id));
+            var offer = activeOffers.FirstOrDefault(o => o.ProductId == p.Id)
+                     ?? activeOffers.FirstOrDefault(o => o.CategoryId == p.CategoryId);
+            return p.ToProductCardDto(offer, isFavorite: false);
         }).ToList();
 
         return new PagedResult<ProductCardDto>
         {
             Items = dtos,
-            TotalCount = totalCount,
+            TotalCount = total,
             PageNumber = request.PageNumber,
             PageSize = request.PageSize
         };
     }
+
+    // ─── Cache fingerprint ───────────────────────────────────────────────────
+
+    private static string BuildFingerprint(BrowseProductsQuery r)
+    {
+        var key = JsonSerializer.Serialize(new
+        {
+            r.RetailerId,
+            r.CategoryId,
+            r.SubCategoryId,
+            r.SearchTerm,
+            r.MinPrice,
+            r.MaxPrice,
+            Colors = r.Colors is null ? null : string.Join(',', r.Colors.OrderBy(x => x)),
+            Sizes = r.Sizes is null ? null : string.Join(',', r.Sizes.OrderBy(x => x)),
+            Cats = r.Categories is null ? null : string.Join(',', r.Categories.OrderBy(x => x)),
+            Mats = r.FabricMaterials is null ? null : string.Join(',', r.FabricMaterials.OrderBy(x => x)),
+            Pats = r.FabricPatterns is null ? null : string.Join(',', r.FabricPatterns.OrderBy(x => x)),
+            Brands = r.Brands is null ? null : string.Join(',', r.Brands.OrderBy(x => x)),
+            r.SortBy,
+            r.SortOrder,
+            r.PageNumber,
+            r.PageSize
+        });
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(key));
+        return Convert.ToHexString(hash)[..16]; // 16 hex chars = 64-bit fingerprint, collision-free in practice
+    }
+
+    // ─── Private cache payload ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Serialisation DTO stored in Redis.
+    /// Uses <see cref="IReadOnlyList{T}"/> to match <see cref="PagedResult{T}.Items"/>.
+    /// isFavorite is always false here; it is overlaid per-user after the cache read.
+    /// </summary>
+    private sealed record BrowseCachePayload(
+        IReadOnlyList<ProductCardDto> Items,
+        int TotalCount,
+        int PageNumber,
+        int PageSize);
 }

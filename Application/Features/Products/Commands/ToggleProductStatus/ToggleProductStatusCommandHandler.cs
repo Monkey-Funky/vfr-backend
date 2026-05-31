@@ -73,9 +73,12 @@ public sealed class ToggleProductStatusCommandHandler
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Invalidate active product count cache after status change.
-        await _cache.RemoveAsync(
-            CacheKeys.ActiveProductCount(retailerId),
-            cancellationToken);
+        await Task.WhenAll(
+            _cache.RemoveAsync(CacheKeys.ActiveProductCount(retailerId), cancellationToken),
+            _cache.RemoveAsync(CacheKeys.ProductDetail(retailerId, command.ProductId), cancellationToken),
+            _cache.RemoveByPrefixAsync(CacheKeys.ProductListPrefix(retailerId), cancellationToken),
+            _cache.RemoveByPrefixAsync("catalog:browse:", cancellationToken)
+        );
 
         return Result<string>.Success(newStatus, $"Product status changed to {newStatus}.");
     }

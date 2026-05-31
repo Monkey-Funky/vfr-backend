@@ -1,4 +1,5 @@
-﻿
+﻿using Shared.Constants;
+
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 
@@ -56,7 +57,10 @@ public sealed class UpdateSubCategoryCommandHandler
         await _unitOfWork.Repository<SubCategory>().UpdateAsync(subCategory, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        await _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.SubCategories(retailerId, command.ParentCategoryId), cancellationToken)
+        );
 
         return Result<bool>.Success(true, "Sub-category updated successfully.");
     }

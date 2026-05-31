@@ -1,6 +1,7 @@
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Customer;
+using Shared.Constants;
 
 namespace Application.Features.Customer.Address.Commands.SetDefaultAddress;
 
@@ -9,15 +10,18 @@ public sealed class SetDefaultAddressCommandHandler
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<SetDefaultAddressCommandHandler> _logger;
 
     public SetDefaultAddressCommandHandler(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
+        ICacheService cacheService,
         ILogger<SetDefaultAddressCommandHandler> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
         _logger = logger;
     }
 
@@ -34,10 +38,11 @@ public sealed class SetDefaultAddressCommandHandler
         if (newDefaultAddress is null || newDefaultAddress.IsDeleted || newDefaultAddress.CustomerId != customerId)
             throw new NotFoundException(nameof(CustomerAddress), command.Id);
 
+        // Idempotency: already the default — nothing to change.
         if (newDefaultAddress.IsDefault)
             return Result<bool>.Success(true, "Address is already set as default.");
 
-        // Requires atomic transaction to unset previous default
+        // Atomically unset the previous default and set the new one.
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
             var previousDefault = await _unitOfWork.Repository<CustomerAddress>()
@@ -53,17 +58,14 @@ public sealed class SetDefaultAddressCommandHandler
             newDefaultAddress.SetAsDefault();
             await _unitOfWork.Repository<CustomerAddress>().UpdateAsync(newDefaultAddress, ct);
             await _unitOfWork.SaveChangesAsync(ct);
-
         }, cancellationToken);
 
         _logger.LogInformation(
-            "Customer {CustomerId} set address {AddressId} as default.",
-            customerId, newDefaultAddress.Id);
+            "Customer {CustomerId} set address {AddressId} as default.", customerId, newDefaultAddress.Id);
 
-        // FIX U-11: Changed "Default address updated successfully." ? "Address set as default successfully."
-        // The test asserts result.Message.Should().Contain("default") — FluentAssertions Contain is
-        // case-sensitive. "Default" (capital D) does not match the lowercase substring "default".
-        // The new message places "default" in a lowercase position, satisfying the assertion.
+        // Invalidate cached address list.
+        await _cacheService.RemoveAsync(CacheKeys.CustomerAddresses(customerId), cancellationToken);
+
         return Result<bool>.Success(true, "Address set as default successfully.");
     }
 }

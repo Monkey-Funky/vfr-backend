@@ -11,6 +11,7 @@ public sealed class UpdateNotificationPreferencesCommandHandlerTests
     private readonly Mock<IUnitOfWork> _uowMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<ILogger<UpdateNotificationPreferencesCommandHandler>> _loggerMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly Mock<IRepository<NotificationPreference>> _prefRepoMock = new();
     private readonly UpdateNotificationPreferencesCommandHandler _sut;
 
@@ -36,6 +37,7 @@ public sealed class UpdateNotificationPreferencesCommandHandlerTests
         _sut = new UpdateNotificationPreferencesCommandHandler(
             _uowMock.Object,
             _currentUserServiceMock.Object,
+            _cacheServiceMock.Object,
             _loggerMock.Object);
     }
 

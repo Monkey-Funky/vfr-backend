@@ -14,6 +14,7 @@ public sealed class InitiateTryOnCommandHandlerTests
     private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<IVirtualTryOnService> _tryOnServiceMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly InitiateTryOnCommandHandler _sut;
 
     private static readonly Guid CustomerId = Guid.NewGuid();
@@ -24,7 +25,20 @@ public sealed class InitiateTryOnCommandHandlerTests
         _sut = new InitiateTryOnCommandHandler(
             _contextMock.Object,
             _currentUserServiceMock.Object,
-            _tryOnServiceMock.Object);
+            _tryOnServiceMock.Object,
+            _cacheServiceMock.Object);
+        // Cache miss for all GetAsync calls — Moq returns Task<T?> default (null)
+        // which simulates a cache miss so the handler always exercises the DB path.
+        // RemoveAsync / RemoveByPrefixAsync are stubbed to complete successfully.
+        _cacheServiceMock
+            .Setup(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cacheServiceMock
+            .Setup(x => x.RemoveByPrefixAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cacheServiceMock
+            .Setup(x => x.RemoveByPatternAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         _currentUserServiceMock.SetupGet(x => x.CustomerId).Returns(CustomerId);
     }

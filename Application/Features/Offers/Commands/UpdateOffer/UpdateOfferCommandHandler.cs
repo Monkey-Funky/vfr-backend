@@ -79,12 +79,16 @@ public sealed class UpdateOfferCommandHandler
             endDate: command.EndDate,
             status: command.Status,
             newCoverImageUrl: newCoverImageUrl);
-            
+
         await _unitOfWork.Repository<Offer>().UpdateAsync(offer, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // ── Invalidate list and single-entity caches ───────────────────────────
-        await _cacheService.RemoveByPrefixAsync($"offers:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"offers:{retailerId}:", cancellationToken),
+            _cacheService.RemoveByPrefixAsync("catalog:offers:", cancellationToken),
+            _cacheService.RemoveByPrefixAsync("catalog:browse:", cancellationToken)
+        );
 
         return Result<bool>.Success(true);
     }

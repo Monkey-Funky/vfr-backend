@@ -4,31 +4,30 @@ using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Orders;
 using Microsoft.EntityFrameworkCore;
-
+using Shared.Constants;
 
 namespace Application.Features.Orders.Queries.GetOrderById;
 
 /// <summary>
-/// Handles GetOrderByIdQuery.
-///
-/// FIXES APPLIED:
-///   • AsSplitQuery() removed — not available in Application layer.
-///   • Scopes the query to retailerId AND orderId — prevents IDOR.
-///   • Returns 404 (not 403) when orderId doesn't belong to the retailer —
-///     avoids confirming another tenant's resource existence.
+/// Returns a single order with full item details.
+/// Cache-aside: TTL 5 minutes.
+/// Invalidated by UpdateOrderStatus and any command that touches order state.
 /// </summary>
 public sealed class GetOrderByIdQueryHandler
     : IRequestHandler<GetOrderByIdQuery, OrderDto>
 {
     private readonly IOrderRepository _orderRepository;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
     public GetOrderByIdQueryHandler(
         IOrderRepository orderRepository,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _orderRepository = orderRepository;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<OrderDto> Handle(
@@ -38,15 +37,22 @@ public sealed class GetOrderByIdQueryHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // GetByIdWithItemsAsync already filters by BOTH orderId AND retailerId.
-        // If the order exists but belongs to a different retailer, null is returned → 404.
-        // This is intentional IDOR defence: never return 403 (would confirm resource existence).
+        string cacheKey = CacheKeys.OrderDetail(retailerId, query.OrderId);
+
+        var cached = await _cacheService.GetAsync<OrderDto>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
+
         var order = await _orderRepository.GetByIdWithItemsAsync(
             query.OrderId,
             retailerId,
             cancellationToken)
             ?? throw new NotFoundException(nameof(Order), query.OrderId);
 
-        return order.ToDto();
+        var dto = order.ToDto();
+
+        await _cacheService.SetAsync(cacheKey, dto, TimeSpan.FromMinutes(5), cancellationToken);
+
+        return dto;
     }
 }

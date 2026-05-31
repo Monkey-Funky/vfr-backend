@@ -1,4 +1,5 @@
-﻿using Application.Interfaces.Persistence;
+﻿using Shared.Constants;
+using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Subscriptions;
 using Domain.Enums.Subscription;
@@ -53,8 +54,11 @@ public sealed class ToggleRecurringPaymentCommandHandler
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Invalidate cache.
-        await _cacheService.RemoveByPrefixAsync(
-            $"subscriptions:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"subscriptions:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.CurrentSubscription(retailerId), cancellationToken),
+            _cacheService.RemoveAsync($"sub_details:{retailerId:N}", cancellationToken)
+        );
 
         bool newValue = subscription.IsRecurringEnabled;
         string message = newValue

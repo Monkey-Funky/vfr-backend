@@ -4,21 +4,29 @@ using Application.Interfaces.Services;
 using Domain.Entities.Subscriptions;
 using Domain.Enums.Subscription;
 using Microsoft.EntityFrameworkCore;
+using Shared.Constants;
 
 namespace Application.Features.Subscriptions.Queries.GetCurrentSubscription;
 
+/// <summary>
+/// Returns the current subscription for the authenticated retailer.
+/// Cache-aside: TTL 5 minutes. Invalidated by all subscription command handlers.
+/// </summary>
 public sealed class GetCurrentSubscriptionQueryHandler
     : IRequestHandler<GetCurrentSubscriptionQuery, CurrentSubscriptionDto>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
     public GetCurrentSubscriptionQueryHandler(
         IApplicationDbContext context,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<CurrentSubscriptionDto> Handle(
@@ -28,7 +36,12 @@ public sealed class GetCurrentSubscriptionQueryHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // Fetch current subscription with plan and pending-downgrade plan (if any).
+        string cacheKey = CacheKeys.CurrentSubscription(retailerId);
+
+        var cached = await _cacheService.GetAsync<CurrentSubscriptionDto>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
+
         Subscription subscription = await _context.Subscriptions
             .AsNoTracking()
             .Include(s => s.Plan)
@@ -37,7 +50,6 @@ public sealed class GetCurrentSubscriptionQueryHandler
             ?? throw new NotFoundException(
                 "No subscription found for this retailer. Please start a trial or select a plan.");
 
-        // Derive UI button state from domain state.
         bool canUpgrade = subscription.Status is SubscriptionStatus.Active
                                                   or SubscriptionStatus.PendingDowngrade
                                                   or SubscriptionStatus.Trial;
@@ -47,7 +59,7 @@ public sealed class GetCurrentSubscriptionQueryHandler
                                                        or SubscriptionStatus.None);
         bool canStartTrial = subscription.Status == SubscriptionStatus.None;
 
-        return new CurrentSubscriptionDto(
+        var dto = new CurrentSubscriptionDto(
             SubscriptionId: subscription.Id,
             Status: subscription.Status,
             StartDate: subscription.StartDate,
@@ -63,5 +75,9 @@ public sealed class GetCurrentSubscriptionQueryHandler
             CanCancel: canCancel,
             CanStartTrial: canStartTrial
         );
+
+        await _cacheService.SetAsync(cacheKey, dto, TimeSpan.FromMinutes(5), cancellationToken);
+
+        return dto;
     }
 }

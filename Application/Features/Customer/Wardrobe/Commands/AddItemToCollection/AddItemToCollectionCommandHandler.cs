@@ -11,28 +11,32 @@ internal sealed class AddItemToCollectionCommandHandler : IRequestHandler<AddIte
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
-    public AddItemToCollectionCommandHandler(IApplicationDbContext context, ICurrentUserService currentUserService)
+    public AddItemToCollectionCommandHandler(
+        IApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task Handle(AddItemToCollectionCommand request, CancellationToken cancellationToken)
     {
-        var customerId = _currentUserService.CustomerId;
+        var customerId = _currentUserService.CustomerId
+            ?? throw new UnauthorizedAccessException("Only authenticated customers can modify collections.");
 
-        // Check collection ownership
+        // IDOR guard: verify the collection belongs to this customer.
         var collection = await _context.WardrobeCollections
             .FirstOrDefaultAsync(c => c.Id == request.CollectionId, cancellationToken)
             ?? throw new NotFoundException("WardrobeCollection", request.CollectionId);
 
         if (collection.CustomerId != customerId)
-        {
             throw new UnauthorizedAccessException("You are not authorized to access this collection.");
-        }
 
-        // Check if product is active
+        // Verify the product is active.
         var product = await _context.Products
             .AsNoTracking()
             .Select(p => new { p.Id, p.RetailerId, p.Status })
@@ -42,14 +46,16 @@ internal sealed class AddItemToCollectionCommandHandler : IRequestHandler<AddIte
         if (product.Status != ProductStatus.Active)
             throw new NotFoundException("Product", request.ProductId);
 
-        // Atomic Operation Required. Fetch or auto-create the CustomerFavorite
+        // Auto-create or restore the CustomerFavorite (adding to a collection implicitly favorites).
         var favorite = await _context.CustomerFavorites
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(f => f.CustomerId == customerId && f.ProductId == request.ProductId, cancellationToken);
+            .FirstOrDefaultAsync(
+                f => f.CustomerId == customerId && f.ProductId == request.ProductId,
+                cancellationToken);
 
-        if (favorite == null)
+        if (favorite is null)
         {
-            favorite = CustomerFavorite.Create((Guid)customerId, request.ProductId, product.RetailerId);
+            favorite = CustomerFavorite.Create(customerId, request.ProductId, product.RetailerId);
             _context.CustomerFavorites.Add(favorite);
         }
         else if (favorite.IsDeleted)
@@ -63,10 +69,18 @@ internal sealed class AddItemToCollectionCommandHandler : IRequestHandler<AddIte
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
+
+            // Invalidate the collection detail and the collections list cache.
+            await Task.WhenAll(
+                _cacheService.RemoveAsync($"wardrobe:{customerId:N}", cancellationToken),
+                _cacheService.RemoveAsync(
+                    $"wardrobe_items:{customerId:N}:{request.CollectionId:N}:p1s20", cancellationToken)
+            );
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
+        catch (DbUpdateException ex) when (
+            ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
         {
-            // Ignore duplicate insert due to partial unique index
+            // Idempotency: duplicate insert due to partial unique index — silently ignore.
         }
     }
 }

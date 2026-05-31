@@ -12,6 +12,7 @@ public sealed class GetFavoritesQueryHandlerTests
 {
     private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<ICurrentUserService> _userServiceMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly GetFavoritesQueryHandler _sut;
 
     private static readonly Guid CustomerId = Guid.NewGuid();
@@ -22,7 +23,20 @@ public sealed class GetFavoritesQueryHandlerTests
     {
         _sut = new GetFavoritesQueryHandler(
             _contextMock.Object,
-            _userServiceMock.Object);
+            _userServiceMock.Object,
+            _cacheServiceMock.Object);
+        // Cache miss for all GetAsync calls — Moq returns Task<T?> default (null)
+        // which simulates a cache miss so the handler always exercises the DB path.
+        // RemoveAsync / RemoveByPrefixAsync are stubbed to complete successfully.
+        _cacheServiceMock
+            .Setup(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cacheServiceMock
+            .Setup(x => x.RemoveByPrefixAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cacheServiceMock
+            .Setup(x => x.RemoveByPatternAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         _userServiceMock.SetupGet(x => x.CustomerId).Returns(CustomerId);
     }

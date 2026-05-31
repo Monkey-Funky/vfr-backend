@@ -1,4 +1,5 @@
-﻿using Application.Interfaces.Persistence;
+﻿using Shared.Constants;
+using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 
 namespace Application.Features.Subscriptions.Commands.CancelSubscription;
@@ -42,8 +43,11 @@ public sealed class CancelSubscriptionCommandHandler
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Invalidate subscription cache for this retailer
-        await _cacheService.RemoveByPrefixAsync(
-            $"subscriptions:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"subscriptions:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.CurrentSubscription(retailerId), cancellationToken),
+            _cacheService.RemoveAsync($"sub_details:{retailerId:N}", cancellationToken)
+        );
 
         return Result<bool>.Success(
             true,

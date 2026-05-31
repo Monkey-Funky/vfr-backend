@@ -146,9 +146,12 @@ public sealed class UpdateProductCommandHandler
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // ── STEP 7: Invalidate Redis cache ────────────────────────────────────
-        await _cache.RemoveAsync(
-            CacheKeys.ActiveProductCount(retailerId),
-            cancellationToken);
+        await Task.WhenAll(
+            _cache.RemoveAsync(CacheKeys.ActiveProductCount(retailerId), cancellationToken),
+            _cache.RemoveAsync(CacheKeys.ProductDetail(retailerId, trackedProduct.Id), cancellationToken),
+            _cache.RemoveByPrefixAsync(CacheKeys.ProductListPrefix(retailerId), cancellationToken),
+            _cache.RemoveByPrefixAsync("catalog:browse:", cancellationToken)
+        );
 
         // ── Build response DTO ────────────────────────────────────────────────
         string? categoryName = null;

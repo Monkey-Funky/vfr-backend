@@ -7,33 +7,54 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Customer.Wardrobe.Queries.GetCollectionItems;
 
-internal sealed class GetCollectionItemsQueryHandler : IRequestHandler<GetCollectionItemsQuery, PagedResult<ProductCardDto>>
+/// <summary>
+/// Returns paginated products inside a wardrobe collection.
+/// Cache-aside: TTL 5 minutes. Invalidated by AddItemToCollection and RemoveItemFromCollection.
+/// </summary>
+internal sealed class GetCollectionItemsQueryHandler
+    : IRequestHandler<GetCollectionItemsQuery, PagedResult<ProductCardDto>>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
-    public GetCollectionItemsQueryHandler(IApplicationDbContext context, ICurrentUserService currentUserService)
+    public GetCollectionItemsQueryHandler(
+        IApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
-    public async Task<PagedResult<ProductCardDto>> Handle(GetCollectionItemsQuery request, CancellationToken cancellationToken)
+    public async Task<PagedResult<ProductCardDto>> Handle(
+        GetCollectionItemsQuery request,
+        CancellationToken cancellationToken)
     {
-        var customerId = _currentUserService.CustomerId;
+        var customerId = _currentUserService.CustomerId
+            ?? throw new UnauthorizedAccessException("Only authenticated customers can view collections.");
 
-        // 1. Secure IDOR Check (Combined)
+        string cacheKey =
+            $"wardrobe_items:{customerId:N}:{request.CollectionId:N}:p{request.PageNumber}s{request.PageSize}";
+
+        var cached = await _cacheService.GetAsync<PagedResult<ProductCardDto>>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
+
+        // IDOR guard: verify collection belongs to this customer.
         var collectionExists = await _context.WardrobeCollections
             .AnyAsync(c => c.Id == request.CollectionId && c.CustomerId == customerId, cancellationToken);
 
         if (!collectionExists)
             throw new NotFoundException("WardrobeCollection", request.CollectionId);
 
-        // 2. Fetch the paginated Product IDs for this collection
+        // Paginate the product IDs via the join.
         var query = _context.WardrobeCollectionItems
             .AsNoTracking()
             .Where(i => i.CollectionId == request.CollectionId)
-            .Join(_context.CustomerFavorites.AsNoTracking(),
+            .Join(
+                _context.CustomerFavorites.AsNoTracking(),
                 i => i.FavoriteId,
                 f => f.Id,
                 (i, f) => new { i.CreatedAt, f.ProductId })
@@ -49,53 +70,64 @@ internal sealed class GetCollectionItemsQueryHandler : IRequestHandler<GetCollec
 
         if (productIds.Count == 0)
         {
-            return new PagedResult<ProductCardDto>
+            var empty = new PagedResult<ProductCardDto>
             {
                 Items = [],
                 TotalCount = totalCount,
                 PageNumber = request.PageNumber,
                 PageSize = request.PageSize
             };
+            await _cacheService.SetAsync(cacheKey, empty, TimeSpan.FromMinutes(5), cancellationToken);
+            return empty;
         }
 
-        // 3. Fetch Product Details
-        var products = await _context.Products
+        // Fetch product details and active offers in parallel.
+        var productsTask = _context.Products
             .AsNoTracking()
             .Include(p => p.Images)
             .Where(p => productIds.Contains(p.Id) && p.Status == ProductStatus.Active)
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
-        // 4. Fetch Active Offers (CRITICAL FIX: Filtered by productIds)
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var activeOffers = await _context.Offers
+
+        var offersTask = _context.Offers
             .AsNoTracking()
-            .Where(o => o.Status == Domain.Enums.Offer.OfferStatus.Active
+            .Where(o => o.Status == "Active"
                      && o.StartDate <= today
                      && (o.EndDate == null || o.EndDate >= today)
-                     && o.OfferType == Domain.Enums.Offer.OfferType.Product
                      && o.ProductId.HasValue
-                     && productIds.Contains(o.ProductId.Value)) // The database does the filtering now!
-            .ToDictionaryAsync(o => o.ProductId!.Value, cancellationToken); // Instantly mapped to a dictionary!
+                     && productIds.Contains(o.ProductId.Value))
+            .ToListAsync(cancellationToken);
 
-        // 5. Hydrate Results
-        var resultItems = new List<ProductCardDto>();
-        foreach (var pId in productIds) // Iterate by original sorted order
-        {
-            var p = products.FirstOrDefault(x => x.Id == pId);
-            if (p != null)
+        await Task.WhenAll(productsTask, offersTask);
+
+        var products = await productsTask;
+        var activeOffers = await offersTask;
+
+        // Preserve the collection-order (by item CreatedAt) from productIds.
+        var productDict = products.ToDictionary(p => p.Id);
+
+        var dtos = productIds
+            .Where(id => productDict.ContainsKey(id))
+            .Select(id =>
             {
-                activeOffers.TryGetValue(p.Id, out var offer);
-                resultItems.Add(p.ToProductCardDto(offer, true)); // IsFavorite is true
-            }
-        }
+                var p = productDict[id];
+                var offer = activeOffers.FirstOrDefault(o => o.ProductId == p.Id);
+                return p.ToProductCardDto(offer, isFavorite: true); // always favorited — it's in their collection
+            })
+            .ToList();
 
-        return new PagedResult<ProductCardDto>
+        var result = new PagedResult<ProductCardDto>
         {
-            Items = resultItems,
+            Items = dtos,
             TotalCount = totalCount,
             PageNumber = request.PageNumber,
             PageSize = request.PageSize
         };
+
+        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(5), cancellationToken);
+
+        return result;
     }
 }

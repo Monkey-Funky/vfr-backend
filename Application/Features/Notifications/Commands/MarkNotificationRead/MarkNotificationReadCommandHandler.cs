@@ -1,4 +1,5 @@
-﻿using Application.Interfaces.Persistence;
+﻿using Shared.Constants;
+using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Notifications;
 namespace Application.Features.Notifications.Commands.MarkNotificationRead;
@@ -43,8 +44,10 @@ public sealed class MarkNotificationReadCommandHandler
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        await _cacheService.RemoveByPrefixAsync(
-            $"notifications:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"notifications:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.UnreadNotificationCount(retailerId), cancellationToken)
+        );
 
         return Result<bool>.Success(true, "Notification marked as read.");
     }

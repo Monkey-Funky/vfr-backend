@@ -8,11 +8,16 @@ internal sealed class RemoveItemFromCollectionCommandHandler : IRequestHandler<R
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
-    public RemoveItemFromCollectionCommandHandler(IApplicationDbContext context, ICurrentUserService currentUserService)
+    public RemoveItemFromCollectionCommandHandler(
+        IApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task Handle(RemoveItemFromCollectionCommand request, CancellationToken cancellationToken)
@@ -20,28 +25,33 @@ internal sealed class RemoveItemFromCollectionCommandHandler : IRequestHandler<R
         var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedAccessException("Only authenticated customers can modify collections.");
 
-        // 1. Secure IDOR Check
+        // IDOR guard: verify the collection belongs to this customer.
         var collectionExists = await _context.WardrobeCollections
             .AnyAsync(c => c.Id == request.CollectionId && c.CustomerId == customerId, cancellationToken);
 
         if (!collectionExists)
             throw new NotFoundException("WardrobeCollection", request.CollectionId);
 
-        // 2. The Join: Find the specific item link using the ProductId
+        // Find the specific collection-item link via the product ID.
         var collectionItem = await _context.WardrobeCollectionItems
-            .Join(_context.CustomerFavorites,
-                  item => item.FavoriteId,
-                  fav => fav.Id,
-                  (item, fav) => new { Item = item, fav.ProductId })
+            .Join(
+                _context.CustomerFavorites,
+                item => item.FavoriteId,
+                fav => fav.Id,
+                (item, fav) => new { Item = item, fav.ProductId })
             .Where(x => x.Item.CollectionId == request.CollectionId && x.ProductId == request.ProductId)
             .Select(x => x.Item)
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException("Product in Collection", request.ProductId);
 
-        // 3. Domain Deletion
         collectionItem.SoftDelete();
-
-        // 4. Save
         await _context.SaveChangesAsync(cancellationToken);
+
+        // Invalidate the collection items cache (all pages) and the collections list.
+        await Task.WhenAll(
+            _cacheService.RemoveAsync($"wardrobe:{customerId:N}", cancellationToken),
+            _cacheService.RemoveByPrefixAsync(
+                $"wardrobe_items:{customerId:N}:{request.CollectionId:N}:", cancellationToken)
+        );
     }
 }

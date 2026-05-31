@@ -1,6 +1,7 @@
 ﻿using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Retailer;
+using Shared.Constants;
 
 namespace Application.Features.PaymentMethods.Commands.RemovePaymentMethod;
 
@@ -9,13 +10,16 @@ public sealed class RemovePaymentMethodCommandHandler
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
     public RemovePaymentMethodCommandHandler(
         IUnitOfWork unitOfWork,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<Result<bool>> Handle(
@@ -25,7 +29,7 @@ public sealed class RemovePaymentMethodCommandHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // ── Load the payment method (IDOR guard: must belong to retailer) ─────
+        // IDOR guard: must belong to this retailer.
         PaymentMethod method = await _unitOfWork
             .Repository<PaymentMethod>()
             .FirstOrDefaultAsync(
@@ -35,7 +39,7 @@ public sealed class RemovePaymentMethodCommandHandler
                 cancellationToken)
             ?? throw new NotFoundException(nameof(PaymentMethod), command.PaymentMethodId);
 
-        // ── Guard: Cannot remove the active default card ───────────────────────
+        // Guard: cannot remove the active default card if other cards exist.
         if (method.IsDefault)
         {
             bool otherCardsExist = await _unitOfWork
@@ -53,11 +57,11 @@ public sealed class RemovePaymentMethodCommandHandler
                     "as default before removing this one.");
         }
 
-        // ── Soft-delete ───────────────────────────────────────────────────────
-        await _unitOfWork.Repository<PaymentMethod>()
-            .SoftDeleteAsync(method, cancellationToken);
-
+        await _unitOfWork.Repository<PaymentMethod>().SoftDeleteAsync(method, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Invalidate the cached payment methods list.
+        await _cacheService.RemoveAsync(CacheKeys.PaymentMethods(retailerId), cancellationToken);
 
         return Result<bool>.Success(true, "Payment method removed successfully.");
     }

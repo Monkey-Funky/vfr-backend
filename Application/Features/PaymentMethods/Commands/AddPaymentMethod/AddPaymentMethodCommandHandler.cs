@@ -1,6 +1,7 @@
 ﻿using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Retailer;
+using Shared.Constants;
 
 namespace Application.Features.PaymentMethods.Commands.AddPaymentMethod;
 
@@ -10,15 +11,18 @@ public sealed class AddPaymentMethodCommandHandler
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
     private readonly IEncryptionService _encryptionService;
+    private readonly ICacheService _cacheService;
 
     public AddPaymentMethodCommandHandler(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
-        IEncryptionService encryptionService)
+        IEncryptionService encryptionService,
+        ICacheService cacheService)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
         _encryptionService = encryptionService;
+        _cacheService = cacheService;
     }
 
     public async Task<Result<Guid>> Handle(
@@ -43,13 +47,14 @@ public sealed class AddPaymentMethodCommandHandler
 
         if (command.SetAsDefault)
         {
-            IReadOnlyList<PaymentMethod> existingMethods = await _unitOfWork
+            // Atomically unset existing defaults before setting the new one.
+            IReadOnlyList<PaymentMethod> existingDefaults = await _unitOfWork
                 .Repository<PaymentMethod>()
                 .FindAsync(
                     pm => pm.RetailerId == retailerId && pm.IsDefault && !pm.IsDeleted,
                     cancellationToken);
 
-            foreach (PaymentMethod existing in existingMethods)
+            foreach (var existing in existingDefaults)
             {
                 existing.UnsetDefault();
                 await _unitOfWork.Repository<PaymentMethod>().UpdateAsync(existing, cancellationToken);
@@ -59,6 +64,9 @@ public sealed class AddPaymentMethodCommandHandler
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Invalidate the cached payment methods list so the new card appears immediately.
+        await _cacheService.RemoveAsync(CacheKeys.PaymentMethods(retailerId), cancellationToken);
 
         return Result<Guid>.Success(
             method.Id,

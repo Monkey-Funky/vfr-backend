@@ -4,31 +4,30 @@ using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Orders;
 using Microsoft.EntityFrameworkCore;
-
+using Shared.Constants;
 
 namespace Application.Features.Orders.Queries.GetOrders;
 
-
 /// <summary>
-/// Handles GetOrdersQuery — returns paginated, filtered orders for the authenticated retailer.
-///
-/// FIXES APPLIED:
-///   • PagedResult uses object-initializer syntax (not constructor parameters) — fixes CS1739.
-///   • AsSplitQuery() removed — not available in the Application layer package.
-///   • Queries always scope to RetailerId from JWT (IDOR protection).
+/// Returns paginated, filtered orders for the authenticated retailer.
+/// Cache-aside: TTL 2 minutes (orders change frequently on status updates).
+/// Invalidated by any command that mutates an order (UpdateOrderStatus, etc.).
 /// </summary>
 public sealed class GetOrdersQueryHandler
     : IRequestHandler<GetOrdersQuery, PagedResult<OrderDto>>
 {
     private readonly IOrderRepository _orderRepository;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
     public GetOrdersQueryHandler(
         IOrderRepository orderRepository,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _orderRepository = orderRepository;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<PagedResult<OrderDto>> Handle(
@@ -38,6 +37,16 @@ public sealed class GetOrdersQueryHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
+        string cacheKey =
+            $"orders:{retailerId:N}:" +
+            $"p{query.PageNumber}s{query.PageSize}" +
+            $":status{query.Status ?? "null"}" +
+            $":search{query.SearchTerm ?? "null"}";
+
+        var cached = await _cacheService.GetAsync<PagedResult<OrderDto>>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
+
         var (orders, totalCount) = await _orderRepository.GetPagedOrdersAsync(
             retailerId: retailerId,
             statusFilter: query.Status,
@@ -46,16 +55,16 @@ public sealed class GetOrdersQueryHandler
             pageSize: query.PageSize,
             cancellationToken: cancellationToken);
 
-        var dtos = orders.Select(o => o.ToDto()).ToList();
-
-        // ✅ Object-initializer syntax — matches PagedResult<T>'s init properties.
-        // Never use new PagedResult<T>(Items: ...) — PagedResult has no such constructor.
-        return new PagedResult<OrderDto>
+        var result = new PagedResult<OrderDto>
         {
-            Items = dtos,
+            Items = orders.Select(o => o.ToDto()).ToList(),
             TotalCount = totalCount,
             PageNumber = query.PageNumber,
             PageSize = query.PageSize,
         };
+
+        await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(2), cancellationToken);
+
+        return result;
     }
 }

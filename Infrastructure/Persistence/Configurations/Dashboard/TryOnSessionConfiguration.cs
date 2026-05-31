@@ -34,5 +34,15 @@ public sealed class TryOnSessionConfiguration
 
         builder.HasIndex(s => s.ProductId)
                .HasDatabaseName("idx_try_on_sessions_product_id");
+
+        // Composite index on (retailer_id, created_at) — covers the date-range
+        // filter pattern used by all dashboard KPI and chart queries:
+        //   WHERE retailer_id = @id AND created_at >= @from AND created_at < @to
+        // Without this, Postgres falls back to a seq-scan or single-column index
+        // scan + filter, which is an O(N) full table scan on large datasets.
+        // With this index the planner can satisfy the predicate entirely from the
+        // B-tree, reducing those queries from O(N) to O(log N + result set size).
+        builder.HasIndex(s => new { s.RetailerId, s.CreatedAt })
+               .HasDatabaseName("idx_try_on_sessions_retailer_createdat");
     }
 }

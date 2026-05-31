@@ -11,6 +11,7 @@ public sealed class UpdateCustomerAddressCommandHandlerTests
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<ILogger<UpdateCustomerAddressCommandHandler>> _loggerMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly Mock<IRepository<CustomerAddress>> _addressRepoMock = new();
     private readonly UpdateCustomerAddressCommandHandler _sut;
 
@@ -21,7 +22,20 @@ public sealed class UpdateCustomerAddressCommandHandlerTests
         _sut = new UpdateCustomerAddressCommandHandler(
             _unitOfWorkMock.Object,
             _currentUserServiceMock.Object,
+            _cacheServiceMock.Object,
             _loggerMock.Object);
+        // Cache miss for all GetAsync calls — Moq returns Task<T?> default (null)
+        // which simulates a cache miss so the handler always exercises the DB path.
+        // RemoveAsync / RemoveByPrefixAsync are stubbed to complete successfully.
+        _cacheServiceMock
+            .Setup(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cacheServiceMock
+            .Setup(x => x.RemoveByPrefixAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cacheServiceMock
+            .Setup(x => x.RemoveByPatternAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         _currentUserServiceMock.SetupGet(x => x.CustomerId).Returns(CustomerId);
         _unitOfWorkMock.Setup(x => x.Repository<CustomerAddress>()).Returns(_addressRepoMock.Object);

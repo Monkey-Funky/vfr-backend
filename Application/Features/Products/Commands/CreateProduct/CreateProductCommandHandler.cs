@@ -175,9 +175,11 @@ public sealed class CreateProductCommandHandler
         }, cancellationToken);
 
         // ── STEP 6: Invalidate Redis cache ────────────────────────────────────
-        await _cache.RemoveAsync(
-            CacheKeys.ActiveProductCount(retailerId),
-            cancellationToken);
+        await Task.WhenAll(
+            _cache.RemoveAsync(CacheKeys.ActiveProductCount(retailerId), cancellationToken),
+            _cache.RemoveByPrefixAsync(CacheKeys.ProductListPrefix(retailerId), cancellationToken),
+            _cache.RemoveByPrefixAsync("catalog:browse:", cancellationToken)
+        );
 
         // ── Build response DTO ────────────────────────────────────────────────
         string? categoryName = null;

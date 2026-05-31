@@ -1,4 +1,5 @@
-﻿using Application.Interfaces.External;
+﻿using Shared.Constants;
+using Application.Interfaces.External;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Entities.Retailer;
@@ -159,8 +160,11 @@ public sealed class UpgradePlanCommandHandler
                 "Please check your subscription status and retry if needed.");
         }
 
-        await _cacheService.RemoveByPrefixAsync(
-            $"subscriptions:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"subscriptions:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.CurrentSubscription(retailerId), cancellationToken),
+            _cacheService.RemoveAsync($"sub_details:{retailerId:N}", cancellationToken)
+        );
 
         return Result<bool>.Success(true, $"Successfully upgraded to the '{newPlan.Name}' plan.");
     }

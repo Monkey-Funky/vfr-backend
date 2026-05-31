@@ -67,7 +67,11 @@ public sealed class CreateOfferCommandHandler
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // ── Step 5: Invalidate cache ───────────────────────────────────────────
-        await _cacheService.RemoveByPrefixAsync($"offers:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"offers:{retailerId}:", cancellationToken),
+            _cacheService.RemoveByPrefixAsync("catalog:offers:", cancellationToken),
+            _cacheService.RemoveByPrefixAsync("catalog:browse:", cancellationToken)
+        );
 
         return Result<Guid>.Success(offer.Id);
     }

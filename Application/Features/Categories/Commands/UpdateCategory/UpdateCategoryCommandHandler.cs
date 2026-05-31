@@ -98,7 +98,11 @@ public sealed class UpdateCategoryCommandHandler
         if (oldCoverImageUrl is not null)
             await _fileStorageService.DeleteAsync(oldCoverImageUrl, cancellationToken);
 
-        await _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken),
+            _cacheService.RemoveByPrefixAsync($"subcategories:{retailerId:N}:", cancellationToken),
+            _cacheService.RemoveAsync($"category:{retailerId:N}:", cancellationToken)
+        );
 
         return Result<bool>.Success(true, "Category updated successfully.");
     }

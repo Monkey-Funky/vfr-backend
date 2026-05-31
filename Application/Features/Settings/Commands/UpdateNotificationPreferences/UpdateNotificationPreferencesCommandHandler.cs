@@ -16,15 +16,18 @@ public sealed class UpdateNotificationPreferencesCommandHandler
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<UpdateNotificationPreferencesCommandHandler> _logger;
 
     public UpdateNotificationPreferencesCommandHandler(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
+        ICacheService cacheService,
         ILogger<UpdateNotificationPreferencesCommandHandler> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
         _logger = logger;
     }
 
@@ -68,6 +71,9 @@ public sealed class UpdateNotificationPreferencesCommandHandler
         await _unitOfWork.Repository<NotificationPreference>()
             .UpdateAsync(preference, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Invalidate cached notification preferences for this retailer
+        await _cacheService.RemoveAsync($"notif_prefs:{retailerId:N}", cancellationToken);
 
         _logger.LogInformation(
             "UpdateNotificationPreferences — preferences updated. RetailerId: {RetailerId}",

@@ -7,19 +7,25 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Categories.Queries.GetCategoryById;
 
-
+/// <summary>
+/// Returns a single category with its sub-category count for the authenticated retailer.
+/// Cache-aside: TTL 30 minutes. Invalidated by category mutation commands.
+/// </summary>
 public sealed class GetCategoryByIdQueryHandler
     : IRequestHandler<GetCategoryByIdQuery, CategoryDto>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
     public GetCategoryByIdQueryHandler(
         IApplicationDbContext context,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<CategoryDto> Handle(
@@ -28,6 +34,12 @@ public sealed class GetCategoryByIdQueryHandler
     {
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
+
+        string cacheKey = $"category:{retailerId:N}:{query.CategoryId:N}";
+
+        var cached = await _cacheService.GetAsync<CategoryDto>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
 
         Category category = await _context.Categories
             .AsNoTracking()
@@ -40,6 +52,10 @@ public sealed class GetCategoryByIdQueryHandler
             .AsNoTracking()
             .CountAsync(sc => sc.CategoryId == category.Id, cancellationToken);
 
-        return category.ToDto(subCategoryCount);
+        var dto = category.ToDto(subCategoryCount);
+
+        await _cacheService.SetAsync(cacheKey, dto, TimeSpan.FromMinutes(30), cancellationToken);
+
+        return dto;
     }
 }

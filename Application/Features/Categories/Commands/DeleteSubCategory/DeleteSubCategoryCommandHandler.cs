@@ -1,14 +1,14 @@
 ﻿using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
+using Shared.Constants;
 
 namespace Application.Features.Categories.Commands.DeleteSubCategory;
 
 /// <summary>
-/// DESIGN NOTE: Injects both <see cref="IUnitOfWork"/> and <see cref="IApplicationDbContext"/>
-/// for the same reason as <c>DeleteCategoryCommandHandler</c> — see that handler's doc comment.
-/// Both resolve to the same scoped <c>ApplicationDbContext</c> instance and share the same
-/// PostgreSQL transaction opened by <c>ExecuteInTransactionAsync</c>.
+/// Soft-deletes a sub-category owned by the current retailer.
+/// Cascade: nulls out SubCategoryId on all affected products within the same transaction.
+/// Cache: invalidates both the category list prefix and the specific subcategory key.
 /// </summary>
 public sealed class DeleteSubCategoryCommandHandler
     : IRequestHandler<DeleteSubCategoryCommand, Result<bool>>
@@ -47,25 +47,27 @@ public sealed class DeleteSubCategoryCommandHandler
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
-            // Step 1: Null out products.SubCategoryId (+ let SaveChanges stamp UpdatedAt).
-            // Load into the change tracker and mutate via the domain method so EF Core
-            // detects the change. This replaces the previous ExecuteUpdateAsync call,
-            // which is not supported by the in-memory / mocked DbSet in unit tests.
+            // Step 1: Null out products.SubCategoryId within the same transaction.
             var affectedProducts = await _context.Products
                 .Where(p => p.SubCategoryId == command.SubCategoryId)
                 .ToListAsync(ct);
 
             foreach (var product in affectedProducts)
-                product.UpdateCategory(product.CategoryId, null); // clear SubCategoryId only
+                product.UpdateCategory(product.CategoryId, null);
 
-            // Step 2: Soft-delete the sub-category itself
+            // Step 2: Soft-delete the sub-category itself.
             subCategory.MarkAsDeleted();
             await _unitOfWork.Repository<SubCategory>().UpdateAsync(subCategory, ct);
             await _unitOfWork.SaveChangesAsync(ct);
 
         }, cancellationToken);
 
-        await _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken);
+        // Invalidate: category list prefix + the specific subcategory lookup key.
+        // FIX: use command.ParentCategoryId (the correct property) not command.CategoryId (doesn't exist).
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.SubCategories(retailerId, command.ParentCategoryId), cancellationToken)
+        );
 
         return Result<bool>.Success(true, "Sub-category deleted successfully.");
     }

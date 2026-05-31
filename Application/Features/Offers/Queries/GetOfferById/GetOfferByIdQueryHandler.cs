@@ -6,18 +6,25 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Offers.Queries.GetOfferById;
 
+/// <summary>
+/// Returns a single offer by ID for the authenticated retailer.
+/// Cache-aside: TTL 15 minutes. Invalidated by UpdateOffer and DeleteOffer.
+/// </summary>
 public sealed class GetOfferByIdQueryHandler
     : IRequestHandler<GetOfferByIdQuery, OfferDto>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
     public GetOfferByIdQueryHandler(
         IApplicationDbContext context,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<OfferDto> Handle(
@@ -27,7 +34,12 @@ public sealed class GetOfferByIdQueryHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
-        // IDOR guard: the predicate includes retailerId — a mismatched retailer receives 404
+        string cacheKey = $"offer:{retailerId:N}:{query.OfferId:N}";
+
+        var cached = await _cacheService.GetAsync<OfferDto>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
+
         Offer offer = await _context.Offers
             .AsNoTracking()
             .FirstOrDefaultAsync(
@@ -35,6 +47,10 @@ public sealed class GetOfferByIdQueryHandler
                 cancellationToken)
             ?? throw new NotFoundException(nameof(Offer), query.OfferId);
 
-        return offer.ToDto();
+        var dto = offer.ToDto();
+
+        await _cacheService.SetAsync(cacheKey, dto, TimeSpan.FromMinutes(15), cancellationToken);
+
+        return dto;
     }
 }

@@ -4,6 +4,7 @@ using Domain.Entities.Customer;
 using Domain.Enums.Product;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using Shared.Constants;
 
 namespace Application.Features.Customer.Favorites.Commands.ToggleFavorite;
 
@@ -11,11 +12,16 @@ internal sealed class ToggleFavoriteCommandHandler : IRequestHandler<ToggleFavor
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
-    public ToggleFavoriteCommandHandler(IApplicationDbContext context, ICurrentUserService currentUserService)
+    public ToggleFavoriteCommandHandler(
+        IApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<(bool IsSuccess, bool IsFavoriteNow)> Handle(ToggleFavoriteCommand request, CancellationToken cancellationToken)
@@ -45,7 +51,6 @@ internal sealed class ToggleFavoriteCommandHandler : IRequestHandler<ToggleFavor
                 existingFavorite.SoftDelete();
 
                 // Cascade: soft-delete all collection items referencing this favorite
-                // to prevent orphaned rows inflating ItemCount in collection listings.
                 var orphanedItems = await _context.WardrobeCollectionItems
                     .Where(i => i.FavoriteId == existingFavorite.Id)
                     .ToListAsync(cancellationToken);
@@ -77,12 +82,16 @@ internal sealed class ToggleFavoriteCommandHandler : IRequestHandler<ToggleFavor
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
+
+            // Invalidate favorites cache for this customer (all pages)
+            await _cacheService.RemoveByPrefixAsync(
+                CacheKeys.CustomerFavoritesList(customerId), cancellationToken);
+
             return (true, isFavoriteNow);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
         {
-            // Idempotency: Rapid toggle race condition. 
-            // If we tried to insert and a duplicate exists, someone else beat us to it.
+            // Idempotency: rapid toggle race condition — duplicate already favorited.
             return (true, true);
         }
     }

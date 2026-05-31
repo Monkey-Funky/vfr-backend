@@ -5,18 +5,25 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Subscriptions.Queries.GetCurrentSubscriptionDetails;
 
+/// <summary>
+/// Returns detailed subscription + plan info for the authenticated retailer.
+/// Cache-aside: TTL 5 minutes. Invalidated by all subscription mutation commands.
+/// </summary>
 public sealed class GetCurrentSubscriptionDetailsQueryHandler
     : IRequestHandler<GetCurrentSubscriptionDetailsQuery, CurrentSubscriptionDetailsDto>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
     public GetCurrentSubscriptionDetailsQueryHandler(
         IApplicationDbContext context,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<CurrentSubscriptionDetailsDto> Handle(
@@ -26,17 +33,22 @@ public sealed class GetCurrentSubscriptionDetailsQueryHandler
         Guid retailerId = _currentUserService.RetailerId
             ?? throw new UnauthorizedException("Retailer identity could not be resolved.");
 
+        string cacheKey = $"sub_details:{retailerId:N}";
+
+        var cached = await _cacheService.GetAsync<CurrentSubscriptionDetailsDto>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
+
         Subscription subscription = await _context.Subscriptions
             .AsNoTracking()
             .Include(s => s.Plan)
             .Include(s => s.PendingDowngradePlan)
             .FirstOrDefaultAsync(s => s.RetailerId == retailerId, cancellationToken)
-            ?? throw new NotFoundException(
-                "No subscription found for this retailer.");
+            ?? throw new NotFoundException("No subscription found for this retailer.");
 
         SubscriptionPlan plan = subscription.Plan;
 
-        return new CurrentSubscriptionDetailsDto(
+        var dto = new CurrentSubscriptionDetailsDto(
             SubscriptionId: subscription.Id,
             Status: subscription.Status,
             StartDate: subscription.StartDate,
@@ -62,5 +74,9 @@ public sealed class GetCurrentSubscriptionDetailsQueryHandler
             PendingDowngradePlanName: subscription.PendingDowngradePlan?.Name,
             PendingDowngradeEffectiveAt: subscription.PendingDowngradeEffectiveAt
         );
+
+        await _cacheService.SetAsync(cacheKey, dto, TimeSpan.FromMinutes(5), cancellationToken);
+
+        return dto;
     }
 }

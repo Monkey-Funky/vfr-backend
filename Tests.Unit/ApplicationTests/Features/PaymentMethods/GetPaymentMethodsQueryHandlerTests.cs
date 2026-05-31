@@ -12,26 +12,52 @@ public sealed class GetPaymentMethodsQueryHandlerTests
     private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<IEncryptionService> _encryptionServiceMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly GetPaymentMethodsQueryHandler _sut;
 
     private static readonly Guid RetailerId = Guid.NewGuid();
     private static readonly Guid OtherRetailerId = Guid.NewGuid();
     private const string DecryptedName = "Alice Smith";
-    private static readonly string FutureExpiry = $"{DateTime.UtcNow.Month:D2}/{DateTime.UtcNow.Year + 3}";
+    private static readonly string FutureExpiry =
+        $"{DateTime.UtcNow.Month:D2}/{DateTime.UtcNow.Year + 3}";
 
     public GetPaymentMethodsQueryHandlerTests()
     {
+        // Constructor order: context, currentUserService, encryptionService, cacheService
         _sut = new GetPaymentMethodsQueryHandler(
             _contextMock.Object,
             _currentUserServiceMock.Object,
-            _encryptionServiceMock.Object);
+            _encryptionServiceMock.Object,
+            _cacheServiceMock.Object);
 
-        _currentUserServiceMock.SetupGet(x => x.RetailerId).Returns(RetailerId);
+        _currentUserServiceMock
+            .SetupGet(x => x.RetailerId)
+            .Returns(RetailerId);
 
         _encryptionServiceMock
             .Setup(x => x.Decrypt(It.IsAny<string>()))
             .Returns(DecryptedName);
+
+        // GetAsync<T> and SetAsync<T> have a `where T : class` constraint —
+        // It.IsAnyType cannot be used as a generic argument (causes the
+        // "ISetup does not contain ReturnsAsync" compiler error).
+        // Leaving them unregistered causes Moq to return the Task<T?> default
+        // which is null — exactly a cache miss, so every test hits the DB path.
+        _cacheServiceMock
+            .Setup(x => x.RemoveAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cacheServiceMock
+            .Setup(x => x.RemoveByPrefixAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cacheServiceMock
+            .Setup(x => x.RemoveByPatternAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
     }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private static PaymentMethod CreatePaymentMethod(
         Guid? retailerId = null,
@@ -57,6 +83,8 @@ public sealed class GetPaymentMethodsQueryHandlerTests
         var mockSet = methods.AsQueryable().BuildMockDbSet();
         _contextMock.Setup(c => c.PaymentMethods).Returns(mockSet.Object);
     }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task Handle_NoPaymentMethods_ReturnsEmptyList()
@@ -98,7 +126,7 @@ public sealed class GetPaymentMethodsQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_DefaultMethodIsMarkedCorrectly()
+    public async Task Handle_DefaultMethodIsOrderedFirst()
     {
         var defaultMethod = CreatePaymentMethod(isDefault: true);
         var nonDefaultMethod = CreatePaymentMethod(isDefault: false);
@@ -145,5 +173,26 @@ public sealed class GetPaymentMethodsQueryHandlerTests
         result.Should().HaveCount(1);
         _encryptionServiceMock.Verify(x => x.Decrypt("ENCRYPTED_NAME"), Times.Once);
         result[0].CardholderName.Should().Be(DecryptedName);
+    }
+
+    [Fact]
+    public async Task Handle_CacheMiss_FetchesFromDatabaseAndCachesResult()
+    {
+        var pm = CreatePaymentMethod();
+        SetupPaymentMethodsDbSet([pm]);
+
+        var result = await _sut.Handle(new GetPaymentMethodsQuery(), CancellationToken.None);
+
+        // DB data must be returned on a cache miss.
+        result.Should().HaveCount(1);
+
+        // Handler must call SetAsync exactly once to populate the cache after a DB fetch.
+        _cacheServiceMock.Verify(
+            x => x.SetAsync(
+                It.Is<string>(k => k.Contains(RetailerId.ToString("N"))),
+                It.IsAny<List<PaymentMethodDto>>(),
+                It.IsAny<TimeSpan?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 }

@@ -71,7 +71,11 @@ public sealed class CreateCategoryCommandHandler
             throw;
         }
 
-        await _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken),
+            _cacheService.RemoveByPrefixAsync($"subcategories:{retailerId:N}:", cancellationToken),
+            _cacheService.RemoveAsync($"category:{retailerId:N}:", cancellationToken)
+        );
 
         return Result<Guid>.Success(category.Id, "Category created successfully.");
     }

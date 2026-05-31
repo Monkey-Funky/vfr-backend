@@ -49,10 +49,16 @@ public sealed class OrderRepository : Repository<Order>, IOrderRepository
 
         var totalCount = await query.CountAsync(cancellationToken);
 
+        // AsSplitQuery prevents a Cartesian explosion between Orders and OrderItems.
+        // Without it, EF Core emits a single JOIN that multiplies rows:
+        //   N orders × M items-per-order rows returned and hydrated client-side.
+        // With split queries: 2 separate SQL statements, one per root + collection,
+        // resulting in exactly N + (N × avg_items) rows total — dramatically less data.
         var items = await query
             .OrderByDescending(o => o.CreatedAt)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
+            .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
         return (items, totalCount);
@@ -69,6 +75,7 @@ public sealed class OrderRepository : Repository<Order>, IOrderRepository
         return await _context.Orders
             .AsNoTracking()
             .Include(o => o.Items)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(
                 o => o.Id == orderId
                   && o.RetailerId == retailerId

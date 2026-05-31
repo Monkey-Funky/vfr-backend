@@ -69,8 +69,11 @@ public sealed class StartTrialCommandHandler
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // ── Invalidate subscription plans cache (per-retailer subscription cache) ──
-        await _cacheService.RemoveByPrefixAsync(
-            $"subscriptions:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"subscriptions:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.CurrentSubscription(retailerId), cancellationToken),
+            _cacheService.RemoveAsync($"sub_details:{retailerId:N}", cancellationToken)
+        );
 
         SubscriptionSummaryDto dto = new(
             SubscriptionId: subscription.Id,

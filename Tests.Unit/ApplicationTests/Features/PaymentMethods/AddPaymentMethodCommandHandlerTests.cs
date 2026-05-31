@@ -10,6 +10,7 @@ public sealed class AddPaymentMethodCommandHandlerTests
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<IEncryptionService> _encryptionServiceMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly Mock<IRepository<PaymentMethod>> _paymentMethodRepoMock = new();
     private readonly AddPaymentMethodCommandHandler _sut;
 
@@ -24,7 +25,8 @@ public sealed class AddPaymentMethodCommandHandlerTests
         _sut = new AddPaymentMethodCommandHandler(
             _unitOfWorkMock.Object,
             _currentUserServiceMock.Object,
-            _encryptionServiceMock.Object);
+            _encryptionServiceMock.Object,
+            _cacheServiceMock.Object);
 
         _currentUserServiceMock.SetupGet(x => x.RetailerId).Returns(RetailerId);
 

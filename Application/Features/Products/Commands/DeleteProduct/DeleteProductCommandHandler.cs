@@ -92,9 +92,12 @@ public sealed class DeleteProductCommandHandler
         }, cancellationToken);
 
         // ── 6. Invalidate Redis cache ─────────────────────────────────────────
-        await _cache.RemoveAsync(
-            CacheKeys.ActiveProductCount(retailerId),
-            cancellationToken);
+        await Task.WhenAll(
+            _cache.RemoveAsync(CacheKeys.ActiveProductCount(retailerId), cancellationToken),
+            _cache.RemoveAsync(CacheKeys.ProductDetail(retailerId, command.ProductId), cancellationToken),
+            _cache.RemoveByPrefixAsync(CacheKeys.ProductListPrefix(retailerId), cancellationToken),
+            _cache.RemoveByPrefixAsync("catalog:browse:", cancellationToken)
+        );
 
         return Result.Success("Product deleted successfully.");
     }

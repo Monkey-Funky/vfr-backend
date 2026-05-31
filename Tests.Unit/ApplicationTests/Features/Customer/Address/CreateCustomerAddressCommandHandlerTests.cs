@@ -11,6 +11,7 @@ public sealed class CreateCustomerAddressCommandHandlerTests
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<ILogger<CreateCustomerAddressCommandHandler>> _loggerMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly Mock<IRepository<CustomerAddress>> _addressRepoMock = new();
     private readonly CreateCustomerAddressCommandHandler _sut;
 
@@ -21,6 +22,7 @@ public sealed class CreateCustomerAddressCommandHandlerTests
         _sut = new CreateCustomerAddressCommandHandler(
             _unitOfWorkMock.Object,
             _currentUserServiceMock.Object,
+            _cacheServiceMock.Object,
             _loggerMock.Object);
 
         _currentUserServiceMock.SetupGet(x => x.CustomerId).Returns(CustomerId);

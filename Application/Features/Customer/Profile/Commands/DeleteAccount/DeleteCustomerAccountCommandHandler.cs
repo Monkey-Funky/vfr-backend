@@ -5,28 +5,31 @@ using Domain.Enums.Customer;
 
 namespace Application.Features.Customer.Profile.Commands.DeleteAccount;
 
-public sealed class DeleteCustomerAccountCommandHandler 
+public sealed class DeleteCustomerAccountCommandHandler
     : IRequestHandler<DeleteCustomerAccountCommand, Result<bool>>
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<DeleteCustomerAccountCommandHandler> _logger;
 
     public DeleteCustomerAccountCommandHandler(
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
+        ICacheService cacheService,
         ILogger<DeleteCustomerAccountCommandHandler> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
         _logger = logger;
     }
 
     public async Task<Result<bool>> Handle(
-        DeleteCustomerAccountCommand command, 
+        DeleteCustomerAccountCommand command,
         CancellationToken cancellationToken)
     {
-        var customerId = _currentUserService.CustomerId 
+        var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedException("User is not authenticated as a customer.");
 
         var customer = await _unitOfWork.Repository<CustomerAccount>()
@@ -35,8 +38,11 @@ public sealed class DeleteCustomerAccountCommandHandler
         if (customer is null || customer.IsDeleted)
             throw new NotFoundException(nameof(CustomerAccount), customerId);
 
+        // Idempotency: already marked for deletion — nothing to do.
         if (customer.Status == CustomerStatus.PendingDeletion)
         {
+            // Ensure the cache is also clear in case it was not invalidated earlier.
+            await _cacheService.RemoveAsync($"cust_profile:{customerId:N}", cancellationToken);
             return Result<bool>.Success(true, "Your account is already marked for deletion.");
         }
 
@@ -46,8 +52,14 @@ public sealed class DeleteCustomerAccountCommandHandler
         await _unitOfWork.Repository<CustomerAccount>().UpdateAsync(customer, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Customer {CustomerId} requested account deletion. Status set to PendingDeletion.", customerId);
+        _logger.LogInformation(
+            "Customer {CustomerId} requested account deletion. Status set to PendingDeletion.", customerId);
 
-        return Result<bool>.Success(true, "Your account has been marked for deletion. This action will be processed shortly.");
+        // Invalidate the cached profile so no stale data is served after deletion.
+        await _cacheService.RemoveAsync($"cust_profile:{customerId:N}", cancellationToken);
+
+        return Result<bool>.Success(
+            true,
+            "Your account has been marked for deletion. This action will be processed shortly.");
     }
 }

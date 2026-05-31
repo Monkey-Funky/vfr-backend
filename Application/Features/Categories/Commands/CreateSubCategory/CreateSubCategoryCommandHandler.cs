@@ -1,4 +1,5 @@
-﻿using Application.Interfaces.Persistence;
+﻿using Shared.Constants;
+using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -71,7 +72,10 @@ public sealed class CreateSubCategoryCommandHandler
             throw new ConflictException(nameof(SubCategory), "Name", command.Name);
         }
 
-        await _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"categories:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.SubCategories(retailerId, command.ParentCategoryId), cancellationToken)
+        );
 
         return Result<Guid>.Success(subCategory.Id, "Sub-category created successfully.");
     }

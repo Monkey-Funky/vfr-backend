@@ -9,68 +9,63 @@ internal sealed class CreateOutfitCommandHandler : IRequestHandler<CreateOutfitC
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly ICacheService _cacheService;
 
-    public CreateOutfitCommandHandler(IApplicationDbContext context, ICurrentUserService currentUserService)
+    public CreateOutfitCommandHandler(
+        IApplicationDbContext context,
+        ICurrentUserService currentUserService,
+        ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _cacheService = cacheService;
     }
 
     public async Task<Guid> Handle(CreateOutfitCommand request, CancellationToken cancellationToken)
     {
-        var customerId = _currentUserService.CustomerId 
+        var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedAccessException("Only authenticated customers can create outfits.");
 
-        // SECURITY MANDATE: Verify all requested products are favorited by this customer
+        // SECURITY: every product in the outfit must already be favorited by this customer.
         var requestedProductIds = request.Items.Select(i => i.ProductId).Distinct().ToList();
-        
+
         var favoritedProductIds = await _context.CustomerFavorites
             .Where(f => f.CustomerId == customerId && requestedProductIds.Contains(f.ProductId))
             .Select(f => f.ProductId)
             .ToListAsync(cancellationToken);
 
         var missingProductIds = requestedProductIds.Except(favoritedProductIds).ToList();
-        
-        if (missingProductIds.Any())
-        {
+        if (missingProductIds.Count > 0)
             throw new BusinessRuleException(
-                "INVALID_OUTFIT_ITEMS", 
+                "INVALID_OUTFIT_ITEMS",
                 $"Cannot create outfit. The following products must be favorited first: {string.Join(", ", missingProductIds)}");
-        }
 
-        // 2. THE SILENT MERGE (Duplicate Detection)
-        // Load the user's existing outfits and their active items
+        // Silent merge: if an identical outfit already exists, return its ID instead of creating a duplicate.
         var existingOutfits = await _context.CustomerOutfits
             .Include(o => o.Items.Where(i => !i.IsDeleted))
             .Where(o => o.CustomerId == customerId)
             .ToListAsync(cancellationToken);
 
-        // Find an outfit that has the EXACT same item count, 
-        // where every incoming item matches an existing item in both ProductId and SlotType.
         var duplicateOutfit = existingOutfits.FirstOrDefault(o =>
             o.Items.Count == request.Items.Count &&
-            request.Items.All(reqItem => o.Items.Any(existingItem =>
-                existingItem.ProductId == reqItem.ProductId &&
-                existingItem.SlotType == reqItem.SlotType))
-        );
+            request.Items.All(reqItem => o.Items.Any(existing =>
+                existing.ProductId == reqItem.ProductId &&
+                existing.SlotType == reqItem.SlotType)));
 
-        // If an exact match exists, silently return its ID. 
-        // The UI receives a 200 OK success, but the database writes nothing!
-        if (duplicateOutfit != null)
-        {
+        if (duplicateOutfit is not null)
             return duplicateOutfit.Id;
-        }
 
-        // 3. CREATE NEW OUTFIT (If no duplicate was found)
+        // Create the new outfit using the correct domain method: AddOrUpdateItem(productId, slot, displayOrder).
         var outfit = CustomerOutfit.Create(customerId, request.Name, request.StyleCategory);
 
         foreach (var item in request.Items)
-        {
             outfit.AddOrUpdateItem(item.ProductId, item.SlotType, item.DisplayOrder);
-        }
 
         _context.CustomerOutfits.Add(outfit);
         await _context.SaveChangesAsync(cancellationToken);
+
+        // Invalidate the customer's outfit list cache.
+        await _cacheService.RemoveAsync($"outfits:{customerId:N}", cancellationToken);
 
         return outfit.Id;
     }

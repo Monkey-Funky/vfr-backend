@@ -10,6 +10,7 @@ public sealed class DeleteCustomerAddressCommandHandlerTests
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<ILogger<DeleteCustomerAddressCommandHandler>> _loggerMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly Mock<IRepository<CustomerAddress>> _addressRepoMock = new();
     private readonly DeleteCustomerAddressCommandHandler _sut;
 
@@ -20,6 +21,7 @@ public sealed class DeleteCustomerAddressCommandHandlerTests
         _sut = new DeleteCustomerAddressCommandHandler(
             _unitOfWorkMock.Object,
             _currentUserServiceMock.Object,
+            _cacheServiceMock.Object,
             _loggerMock.Object);
 
         _currentUserServiceMock.SetupGet(x => x.CustomerId).Returns(CustomerId);

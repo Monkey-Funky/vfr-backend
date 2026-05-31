@@ -9,6 +9,7 @@ public sealed class DeleteCollectionCommandHandlerTests
 {
     private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly DeleteCollectionCommandHandler _sut;
 
     private static readonly Guid CustomerId = Guid.NewGuid();
@@ -17,7 +18,8 @@ public sealed class DeleteCollectionCommandHandlerTests
     {
         _sut = new DeleteCollectionCommandHandler(
             _contextMock.Object,
-            _currentUserServiceMock.Object);
+            _currentUserServiceMock.Object,
+            _cacheServiceMock.Object);
 
         _currentUserServiceMock.SetupGet(x => x.CustomerId).Returns(CustomerId);
     }

@@ -10,6 +10,7 @@ public sealed class SetDefaultAddressCommandHandlerTests
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<ILogger<SetDefaultAddressCommandHandler>> _loggerMock = new();
+    private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly Mock<IRepository<CustomerAddress>> _addressRepoMock = new();
     private readonly SetDefaultAddressCommandHandler _sut;
 
@@ -20,6 +21,7 @@ public sealed class SetDefaultAddressCommandHandlerTests
         _sut = new SetDefaultAddressCommandHandler(
             _unitOfWorkMock.Object,
             _currentUserServiceMock.Object,
+            _cacheServiceMock.Object,
             _loggerMock.Object);
 
         _currentUserServiceMock.SetupGet(x => x.CustomerId).Returns(CustomerId);

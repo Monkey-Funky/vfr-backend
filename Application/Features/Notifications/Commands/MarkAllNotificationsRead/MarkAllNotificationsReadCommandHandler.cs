@@ -1,4 +1,5 @@
-﻿using Application.Interfaces.Persistence;
+﻿using Shared.Constants;
+using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -43,8 +44,10 @@ public sealed class MarkAllNotificationsReadCommandHandler
                     .SetProperty(n => n.ReadAt, readAt),
                 cancellationToken);
 
-        await _cacheService.RemoveByPrefixAsync(
-            $"notifications:{retailerId}:", cancellationToken);
+        await Task.WhenAll(
+            _cacheService.RemoveByPrefixAsync($"notifications:{retailerId}:", cancellationToken),
+            _cacheService.RemoveAsync(CacheKeys.UnreadNotificationCount(retailerId), cancellationToken)
+        );
 
         return Result<int>.Success(updatedCount,
             $"{updatedCount} notification(s) marked as read.");
