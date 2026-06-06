@@ -15,6 +15,13 @@ namespace Domain.Entities.Retailer;
 ///     aggregate root created atomically alongside Product in the handler.
 ///   • search_vector is a GENERATED ALWAYS AS ... STORED column in PostgreSQL.
 ///     EF Core is told to ignore writes to it (ValueGeneratedOnAddOrUpdate).
+///
+/// MODEL ID:
+///   • ModelId is a nullable external identifier used by the AI style-recommendation
+///     model (e.g. "78_y3ppkj"). It is populated only for seeded catalogue products
+///     and is never set by retailer-facing create/update flows.
+///   • Lookup by ModelId is done via the CatalogController endpoint
+///     POST api/catalog/products/by-model-ids.
 /// </summary>
 public sealed class Product : BaseEntity
 {
@@ -86,6 +93,23 @@ public sealed class Product : BaseEntity
     public string[]? AvailableSizes { get; private set; }
 
     // =========================================================================
+    // AI / Style Recommendation — External Model Identifier
+    // =========================================================================
+
+    /// <summary>
+    /// Optional external identifier used by the AI style-recommendation model.
+    /// Format example: "78_y3ppkj".  Derived from the product image filename in the
+    /// training dataset (Products_Data-2.xlsx, "ID for Image" column).
+    ///
+    /// NULL for all retailer-created products — only populated by ExcelDataSeeder
+    /// via raw SQL so the Domain layer stays free of seeding concerns.
+    ///
+    /// Unique partial index in the DB: WHERE model_id IS NOT NULL.
+    /// Max length: 50 chars.
+    /// </summary>
+    public string? ModelId { get; private set; }
+
+    // =========================================================================
     // Navigation — Images
     // =========================================================================
 
@@ -121,6 +145,9 @@ public sealed class Product : BaseEntity
     ///
     /// Does NOT upload images — S3 upload happens before calling this method;
     /// image URLs are attached afterward via AddImage().
+    ///
+    /// ModelId is intentionally NOT a parameter — it is only populated by the
+    /// ExcelDataSeeder for AI catalogue products.
     /// </summary>
     /// <param name="retailerId">Owning retailer. Must not be Guid.Empty.</param>
     /// <param name="name">Display name. Required. Trimmed. Max 200 chars.</param>
@@ -173,6 +200,7 @@ public sealed class Product : BaseEntity
             Currency = currency.Trim().ToUpperInvariant(),
             Barcode = barcode?.Trim(),
             Status = status
+            // ModelId intentionally NOT set here — null by default for all new products
         };
     }
 
@@ -202,7 +230,7 @@ public sealed class Product : BaseEntity
 
         var image = ProductImage.Create(Id, imageUrl, displayOrder);
         _images.Add(image);
-        
+
         return image;
     }
 
@@ -307,6 +335,9 @@ public sealed class Product : BaseEntity
     /// Category cross-validation (SubCategory belongs to Category, Category belongs
     /// to this retailer) is performed by UpdateProductCommandHandler BEFORE calling
     /// this method.
+    ///
+    /// ModelId is intentionally NOT updatable via this method — it is immutable
+    /// after seeding and must never be changed by retailer-facing flows.
     ///
     /// Called by UpdateProductCommandHandler.
     /// </summary>

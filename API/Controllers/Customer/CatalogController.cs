@@ -5,6 +5,7 @@ using Application.Features.Customer.Catalog.Queries.BrowseOffers;
 using Application.Features.Customer.Catalog.Queries.BrowseProducts;
 using Application.Features.Customer.Catalog.Queries.CompareProducts;
 using Application.Features.Customer.Catalog.Queries.GetProductDetail;
+using Application.Features.Customer.Catalog.Queries.GetProductsByModelIds;
 using Application.Features.Customer.Catalog.Queries.GetSimilarProducts;
 using Swashbuckle.AspNetCore.Annotations;
 
@@ -77,6 +78,41 @@ public class CatalogController : CoreBaseApiController
     }
 
     // ==============================================================
+    // POST api/catalog/products/by-model-ids
+    // ==============================================================
+    [HttpPost("products/by-model-ids")]
+    [SwaggerOperation(
+        Summary = "Resolve AI style-recommendation model IDs to products",
+        Description = """
+            Accepts the JSON payload returned by the AI style-recommendation model and
+            resolves each model ID (e.g. "78_y3ppkj") to a full product card.
+
+            **Expected request body:**
+            ```json
+            { "modelIds": ["78_y3ppkj", "66_d3xdez", "39_kuchvf"] }
+            ```
+
+            **Behaviour:**
+            - Results are returned in the same order as the input list (rank-preserving).
+            - Unknown or inactive model IDs are silently skipped.
+            - Maximum 50 model IDs per request.
+            - The endpoint is public (no authentication required); favorite flags are
+              populated only when a customer Bearer token is present.
+            """)]
+    [ProducesResponseType(typeof(ApiResponse<List<ProductCardDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> GetProductsByModelIds(
+        [FromBody] ResolveModelIdsRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await Sender.Send(
+            new GetProductsByModelIdsQuery(request.ResolvedIds),
+            cancellationToken);
+        return OkResponse(result);
+    }
+
+    // ==============================================================
     // GET api/catalog/categories
     // ==============================================================
     [HttpGet("categories")]
@@ -103,4 +139,41 @@ public class CatalogController : CoreBaseApiController
         var result = await Sender.Send(query, cancellationToken);
         return OkResponse(result);
     }
+}
+
+// ==================================================================
+// Request DTO — local to this controller file to keep things minimal
+// ==================================================================
+
+/// <summary>
+/// Request body for POST api/catalog/products/by-model-ids.
+/// Designed to accept the exact shape returned by the AI model:
+/// <code>{ "matches": ["78_y3ppkj", "66_d3xdez"] }</code>
+/// as well as a more explicit form:
+/// <code>{ "modelIds": ["78_y3ppkj", "66_d3xdez"] }</code>
+/// Both fields are accepted (whichever the caller populates).
+/// </summary>
+public sealed class ResolveModelIdsRequest
+{
+    /// <summary>
+    /// Explicit field name — used by our own front-end calls.
+    /// Example: <c>{ "modelIds": ["78_y3ppkj", "66_d3xdez"] }</c>
+    /// </summary>
+    public IReadOnlyList<string>? ModelIds { get; init; }
+
+    /// <summary>
+    /// Raw field name emitted by the AI model response.
+    /// Example: <c>{ "matches": ["78_y3ppkj", "66_d3xdez"] }</c>
+    /// </summary>
+    public IReadOnlyList<string>? Matches { get; init; }
+
+    /// <summary>
+    /// Resolved list — ModelIds takes precedence over Matches.
+    /// Falls back to an empty list if both are null.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<string> ResolvedIds =>
+        ModelIds is { Count: > 0 }
+            ? ModelIds
+            : Matches ?? Array.Empty<string>();
 }

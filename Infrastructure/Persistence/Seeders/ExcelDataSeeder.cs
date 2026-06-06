@@ -400,7 +400,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
                  (id, retailer_id, category_id, name, description, price, currency, status,
 
-                  is_deleted, created_at, updated_at)
+                  model_id, is_deleted, created_at, updated_at)
 
                  VALUES
 
@@ -408,9 +408,13 @@ internal sealed class ExcelDataSeeder : ISeeder
 
                   {p.Name}, {p.Description}, {p.Price}, {"EGP"}, {"Active"},
 
-                  {false}, now(), now())
+                  {p.ModelId}, {false}, now(), now())
 
-                 ON CONFLICT (id) DO NOTHING
+                 ON CONFLICT (id) DO UPDATE SET
+
+                     model_id = EXCLUDED.model_id
+
+                 WHERE products.model_id IS NULL
 
                  """, ct);
 
@@ -2749,6 +2753,22 @@ internal sealed class ExcelDataSeeder : ISeeder
 
         int Stock
 
-    );
+    )
+
+    {
+
+        /// <summary>
+
+        /// External model ID used by the AI style-recommendation model.
+
+        /// Derived from the Cloudinary image filename: "https://.../78_y3ppkj.jpg" → "78_y3ppkj"
+
+        /// </summary>
+
+        public string ModelId =>
+
+            System.IO.Path.GetFileNameWithoutExtension(ImageUrl.Split('/')[^1]);
+
+    }
 
 }

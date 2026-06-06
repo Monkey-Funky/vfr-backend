@@ -56,6 +56,22 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Domain.Entit
             .IsRequired()
             .HasDefaultValue(ProductStatus.Draft);
 
+        // ── AI / Style-Recommendation External Identifier ─────────────────────
+        //
+        // DESIGN: model_id is the external string ID used by the AI style-recommendation
+        //   model (e.g. "78_y3ppkj"). It corresponds to the "ID for Image" column in
+        //   Products_Data-2.xlsx and is derived from the Cloudinary image filename.
+        //
+        //   • NULL for all retailer-created products — only populated by ExcelDataSeeder.
+        //   • Unique partial index WHERE model_id IS NOT NULL prevents duplicate model
+        //     IDs across different seeder runs while allowing any number of NULL values.
+        //   • Max 50 chars — the longest known model ID is well under this limit.
+        //   • Never set via product create/update flows — immutable after seeding.
+        builder.Property(p => p.ModelId)
+            .HasColumnName("model_id")
+            .HasMaxLength(50)
+            .IsRequired(false); // nullable
+
         // ── Search Vector (Shadow Property — PostgreSQL GENERATED ALWAYS AS STORED) ──
         //
         // DESIGN: The Product entity has NO SearchVector C# property.
@@ -167,6 +183,15 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Domain.Entit
         builder.HasIndex("SearchVector")
             .HasMethod("gin")
             .HasDatabaseName("idx_products_search_vector");
+
+        // Partial unique index on model_id.
+        // NULL values are intentionally excluded — retailer products have NULL model_id.
+        // This allows infinite retailer products (all NULL) while enforcing uniqueness
+        // across the seeded AI catalogue products.
+        builder.HasIndex(p => p.ModelId)
+            .HasFilter("model_id IS NOT NULL")
+            .IsUnique()
+            .HasDatabaseName("uidx_products_model_id");
 
         // ── CHECK Constraint ──────────────────────────────────────────────────
         builder.ToTable(t => t.HasCheckConstraint(
