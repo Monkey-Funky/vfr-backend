@@ -1,10 +1,13 @@
 using API.Controllers.BaseControllers;
+using Application.Features.Customer.Catalog.DTOs;
 using Application.Features.Customer.Outfits.Commands.CreateOutfit;
 using Application.Features.Customer.Outfits.Commands.DeleteOutfit;
 using Application.Features.Customer.Outfits.Commands.UpdateOutfit;
 using Application.Features.Customer.Outfits.DTOs;
 using Application.Features.Customer.Outfits.Queries.GetOutfitDetail;
 using Application.Features.Customer.Outfits.Queries.GetOutfits;
+using Application.Features.Customer.OutfitSuggestions.Queries.GetComplementaryOutfits;
+using MediatR;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace API.Controllers.Customer;
@@ -130,6 +133,23 @@ public sealed class OutfitsController : CustomerBaseApiController
 
         await Sender.Send(new DeleteOutfitCommand(outfitId), cancellationToken);
         return NoContentResponse();
+    }
+    // =========================================================================
+    // Get api/customers/{customerId}/outfits/complementary
+    // =========================================================================
+    [HttpGet("complementary")]
+    [SwaggerOperation(
+        Summary = "Get AI complementary style recommendations",
+        Description = "Returns a list of products that visually match the target product.")]
+    [ProducesResponseType(typeof(ApiResponse<List<ProductCardDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetComplementaryOutfits(
+        [FromQuery] GetComplementaryOutfitsQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await Sender.Send(query, cancellationToken);
+
+        return Ok(result);
     }
 }
 
