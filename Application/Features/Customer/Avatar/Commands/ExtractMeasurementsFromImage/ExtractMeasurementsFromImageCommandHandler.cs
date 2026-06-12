@@ -41,19 +41,23 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedException("Customer identity missing.");
 
-        // 1. Validate magic bytes — reject anything that isn't JPEG or PNG.
-        //    This prevents a renamed malicious file from being forwarded to the AI API.
+        // 1. Validate magic bytes for BOTH images before forwarding anything to the AI.
+        //    This prevents a renamed malicious file (e.g. virus.exe → photo.jpg) from
+        //    being sent upstream to the AI model.
         BodyMeasurements measurements;
+<<<<<<< HEAD
         string? avatar3dModelUrl = null;
 
         await using (var stream = request.ImageFile.Content)
         {
             await ValidateImageMagicBytesAsync(stream, cancellationToken);
+=======
+>>>>>>> 9c3b20b (chore: WIP)
 
-            // Reset stream position after reading the header bytes.
-            if (stream.CanSeek)
-                stream.Seek(0, SeekOrigin.Begin);
+        await using var frontStream = request.FrontImage.Content;
+        await using var sideStream  = request.SideImage.Content;
 
+<<<<<<< HEAD
             // 2. Stream the image to the AI model — image is NOT persisted.
             measurements = await _extractionService.ExtractAsync(
                 stream,
@@ -98,10 +102,29 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                     customerId);
             }
         }
+=======
+        await ValidateImageMagicBytesAsync(frontStream, "front_image", cancellationToken);
+        await ValidateImageMagicBytesAsync(sideStream,  "side_image",  cancellationToken);
+
+        // Reset stream positions after reading the header bytes.
+        if (frontStream.CanSeek) frontStream.Seek(0, SeekOrigin.Begin);
+        if (sideStream.CanSeek)  sideStream.Seek(0, SeekOrigin.Begin);
+
+        // 2. Stream both images to the AI model — neither image is persisted.
+        measurements = await _extractionService.ExtractAsync(
+            frontImageStream:  frontStream,
+            frontFileName:     request.FrontImage.FileName,
+            frontContentType:  request.FrontImage.ContentType,
+            sideImageStream:   sideStream,
+            sideFileName:      request.SideImage.FileName,
+            sideContentType:   request.SideImage.ContentType,
+            heightCm:          request.HeightCm,
+            ct:                cancellationToken);
+>>>>>>> 9c3b20b (chore: WIP)
 
         const string source = "AIEstimate";
 
-        // 3. Upsert: check if the customer already has an avatar.
+        // 3. Upsert: check if the customer already has an active avatar.
         var existingAvatar = await _context.Avatars
             .FirstOrDefaultAsync(a => a.CustomerId == customerId, cancellationToken);
 
@@ -111,43 +134,53 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         {
             // UPDATE existing avatar — mutate entity state directly.
             existingAvatar.UpdateMeasurements(measurements, source);
+<<<<<<< HEAD
 
             // Apply 3D model URL if generation succeeded
             if (avatar3dModelUrl is not null)
                 existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl);
 
+=======
+>>>>>>> 9c3b20b (chore: WIP)
             avatar = existingAvatar;
         }
         else
         {
-            // CREATE new avatar
+            // CREATE new avatar.
             avatar = Domain.Entities.Customer.Avatar.Create(
-                customerId: customerId,
-                heightCm: measurements.HeightCm,
-                weightKg: measurements.WeightKg,
-                chestCm: measurements.ChestCm,
-                waistCm: measurements.WaistCm,
-                hipsCm: measurements.HipsCm,
+                customerId:      customerId,
+                heightCm:        measurements.HeightCm,
+                weightKg:        measurements.WeightKg,
+                chestCm:         measurements.ChestCm,
+                waistCm:         measurements.WaistCm,
+                hipsCm:          measurements.HipsCm,
                 shoulderWidthCm: measurements.ShoulderWidthCm,
+<<<<<<< HEAD
                 inseamCm: measurements.InseamCm,
                 neckCm: measurements.NeckCm,
                 armLengthCm: measurements.ArmLengthCm,
                 shoeSizeEu: measurements.ShoeSizeEu,
                 bodyShape: measurements.BodyShape,
                 avatar3dModelUrl: avatar3dModelUrl);
+=======
+                inseamCm:        measurements.InseamCm,
+                neckCm:          measurements.NeckCm,
+                armLengthCm:     measurements.ArmLengthCm,
+                shoeSizeEu:      measurements.ShoeSizeEu,
+                bodyShape:       measurements.BodyShape);
+>>>>>>> 9c3b20b (chore: WIP)
 
             _context.Avatars.Add(avatar);
         }
 
-        // 4. Record history snapshot — same approach for BOTH paths.
-        //    This is committed atomically in the same SaveChangesAsync transaction.
-        //    No domain events are published before save, so no side-effects leak
-        //    if the transaction rolls back.
+        // 4. Record history snapshot — committed atomically in the same SaveChangesAsync transaction.
+        //    No domain events are published before save, so no side-effects leak if the
+        //    transaction rolls back.
         var measurementsJson = Domain.Entities.Customer.Avatar.BuildMeasurementJson(measurements);
         var history = AvatarMeasurementHistory.CreateSnapshot(
-            avatarId: avatar.Id,
+            avatarId:           avatar.Id,
             measurementDataJson: measurementsJson,
-            source: source);
+            source:             source);
 
         _context.AvatarMeasurementHistory.Add(history);
 
@@ -165,14 +198,19 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
     /// Throws <see cref="BusinessRuleException"/> if the magic bytes do not match.
     /// The caller is responsible for resetting the stream position after this method returns.
     /// </summary>
-    private static async Task ValidateImageMagicBytesAsync(Stream stream, CancellationToken ct)
+    /// <param name="stream">The image stream to inspect.</param>
+    /// <param name="fieldName">Used in the error message to tell the user which image failed (e.g. "front_image").</param>
+    private static async Task ValidateImageMagicBytesAsync(
+        Stream stream,
+        string fieldName,
+        CancellationToken ct)
     {
         var header = new byte[4];
         var bytesRead = await stream.ReadAsync(header.AsMemory(0, 4), ct);
 
         if (bytesRead < 3)
             throw new BusinessRuleException("INVALID_FILE_TYPE",
-                "Only JPEG and PNG images are allowed. The uploaded file is too small to be a valid image.");
+                $"The {fieldName} is too small to be a valid image. Only JPEG and PNG files are accepted.");
 
         // JPEG: FF D8 FF
         bool isJpeg = header[0] == JpegMagic[0]
@@ -188,6 +226,6 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
 
         if (!isJpeg && !isPng)
             throw new BusinessRuleException("INVALID_FILE_TYPE",
-                "Only JPEG and PNG images are allowed. The uploaded file does not match a supported image format.");
+                $"The {fieldName} does not match a supported image format. Only JPEG and PNG files are accepted.");
     }
 }

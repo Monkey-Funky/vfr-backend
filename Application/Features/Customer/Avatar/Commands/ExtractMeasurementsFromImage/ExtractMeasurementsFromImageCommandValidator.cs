@@ -13,14 +13,23 @@ public sealed class ExtractMeasurementsFromImageCommandValidator
 
     public ExtractMeasurementsFromImageCommandValidator()
     {
-        RuleFor(x => x.ImageFile)
-            .NotNull().WithMessage("Body image is required.");
+        RuleFor(x => x.FrontImage)
+            .NotNull().WithMessage("Front image is required.");
 
-        RuleFor(x => x.ImageFile.Length)
-            .GreaterThan(0).WithMessage("Image file must not be empty.")
+        RuleFor(x => x.SideImage)
+            .NotNull().WithMessage("Side image is required.");
+
+        RuleFor(x => x.FrontImage.Length)
+            .GreaterThan(0).WithMessage("Front image file must not be empty.")
             .LessThanOrEqualTo(MaxImageSizeBytes)
-            .WithMessage($"Image file must not exceed {MaxImageSizeBytes / (1024 * 1024)} MB.")
-            .When(x => x.ImageFile is not null);
+            .WithMessage($"Front image file must not exceed {MaxImageSizeBytes / (1024 * 1024)} MB.")
+            .When(x => x.FrontImage is not null);
+
+        RuleFor(x => x.SideImage.Length)
+            .GreaterThan(0).WithMessage("Side image file must not be empty.")
+            .LessThanOrEqualTo(MaxImageSizeBytes)
+            .WithMessage($"Side image file must not exceed {MaxImageSizeBytes / (1024 * 1024)} MB.")
+            .When(x => x.SideImage is not null);
 
         RuleFor(x => x.HeightCm)
             .GreaterThan(0).WithMessage("Height must be greater than zero.")
