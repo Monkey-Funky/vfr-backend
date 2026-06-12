@@ -153,19 +153,14 @@ public sealed class AvatarController : CustomerBaseApiController
     {
         EnsureCustomerOwnership(customerId);
 
-        // Map IFormFile → FileUploadDto in the API layer.
-        var frontImageUpload = new FileUploadDto(
-            Content: request.FrontImage.OpenReadStream(),
-            FileName: request.FrontImage.FileName,
-            ContentType: request.FrontImage.ContentType,
-            Length: request.FrontImage.Length);
+        // Map IFormFile → FileUploadDto in the API layer (same pattern as ProductsController).
+        var imageUpload = new FileUploadDto(
+            Content: request.ImageFile.OpenReadStream(),
+            FileName: request.ImageFile.FileName,
+            ContentType: request.ImageFile.ContentType,
+            Length: request.ImageFile.Length);
 
-        var sideImageUpload = new FileUploadDto(
-            Content: request.SideImage.OpenReadStream(),
-            FileName: request.SideImage.FileName,
-            ContentType: request.SideImage.ContentType,
-            Length: request.SideImage.Length);
-        var command = new ExtractMeasurementsFromImageCommand(frontImageUpload, sideImageUpload, request.HeightCm);
+        var command = new ExtractMeasurementsFromImageCommand(imageUpload, request.HeightCm);
         var result = await Sender.Send(command, cancellationToken);
 
         return OkResponse(result, "Measurements extracted and saved successfully.");
@@ -179,13 +174,9 @@ public sealed class AvatarController : CustomerBaseApiController
 public sealed class ExtractMeasurementsFromImageRequest
 {
     /// <summary>
-    /// Front Image photo of the customer. JPEG or PNG. Max 5 MB.
+    /// Full-body photo of the customer. JPEG or PNG. Max 5 MB.
     /// </summary>
-    public IFormFile FrontImage { get; init; } = null!;
-    /// <summary>
-    /// Side Image photo of the customer. JPEG or PNG. Max 5 MB.
-    /// </summary>
-    public IFormFile SideImage { get; init; } = null!;
+    public IFormFile ImageFile { get; init; } = null!;
 
     /// <summary>
     /// The customer's actual height in centimeters (required for the AI model to scale estimates).

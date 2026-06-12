@@ -23,8 +23,7 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
     }
 
     public async Task<BodyMeasurements> ExtractAsync(
-        Stream frontImageStream, string frontFileName, string frontContentType,
-        Stream sideImageStream, string sideFileName, string sideContentType,
+        Stream imageStream, string fileName, string contentType,
         decimal heightCm,
         CancellationToken ct = default)
     {
@@ -66,18 +65,13 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
                 heightCm.ToString(global::System.Globalization.CultureInfo.InvariantCulture)),
             "user_height_cm");
 
-        // 2. Front image.
-        var frontContent = new StreamContent(frontImageStream);
-        frontContent.Headers.ContentType = MediaTypeHeaderValue.Parse(frontContentType);
-        requestContent.Add(frontContent, "front_image", frontFileName);
-
-        // 3. Side image.
-        var sideContent = new StreamContent(sideImageStream);
-        sideContent.Headers.ContentType = MediaTypeHeaderValue.Parse(sideContentType);
-        requestContent.Add(sideContent, "side_image", sideFileName);
+        // 2. Image file.
+        var imageContent = new StreamContent(imageStream);
+        imageContent.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
+        requestContent.Add(imageContent, "image", fileName);
 
         _logger.LogInformation(
-            "Sending front + side images to AI model at {Url} for measurement extraction…",
+            "Sending image to AI model at {Url} for measurement extraction…",
             aiApiUrl);
 
         // Polly resilience pipeline (60 s timeout + 2 retries) is configured in DI.

@@ -23,22 +23,16 @@ public interface IBodyMeasurementExtractionService
     /// Sends both image streams and the customer's height to the AI model
     /// and returns the extracted body measurements.
     /// </summary>
-    /// <param name="frontImageStream">Readable stream of the front-view photograph.</param>
-    /// <param name="frontFileName">Original filename of the front image, including extension (e.g. "front.jpg").</param>
-    /// <param name="frontContentType">MIME type of the front image (e.g. "image/jpeg").</param>
-    /// <param name="sideImageStream">Readable stream of the side-view photograph.</param>
-    /// <param name="sideFileName">Original filename of the side image, including extension (e.g. "side.jpg").</param>
-    /// <param name="sideContentType">MIME type of the side image (e.g. "image/jpeg").</param>
+    /// <param name="imageStream">Readable stream of the full-body photograph.</param>
+    /// <param name="fileName">Original filename of the image, including extension (e.g. "image.jpg").</param>
+    /// <param name="contentType">MIME type of the image (e.g. "image/jpeg").</param>
     /// <param name="heightCm">The person's actual height in centimeters (required for scaling).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>A <see cref="BodyMeasurements"/> record populated by the AI model.</returns>
     Task<BodyMeasurements> ExtractAsync(
-        Stream frontImageStream,
-        string frontFileName,
-        string frontContentType,
-        Stream sideImageStream,
-        string sideFileName,
-        string sideContentType,
+        Stream imageStream,
+        string fileName,
+        string contentType,
         decimal heightCm,
         CancellationToken ct = default);
 }
