@@ -22,7 +22,7 @@ internal sealed class ComplementaryStyleService : IComplementaryStyleService
 
     public async Task<List<string>> GetComplementaryItemsAsync(string productAiId, int topK, CancellationToken ct = default)
     {
-        var aiApiUrl = _configuration["AiModels:StyleRecommendationUrl"];
+        var aiApiUrl = _configuration["AiModels:SimilarUrl"];
 
         var requestBody = new AiStyleRequest
         {
@@ -52,7 +52,32 @@ internal sealed class ComplementaryStyleService : IComplementaryStyleService
 
         return aiResponse.Matches;
     }
+    public async Task<List<string>> GetSimilarItemsAsync(string modelId, int topK, CancellationToken ct = default)
+    {
+        var aiApiUrl = "https://mariamehab7704--style-recommendation-host-fastapi.modal.run/similar_products";
 
+        var requestBody = new AiStyleRequest
+        {
+            ProductId = modelId,
+            TopK = topK
+        };
+
+        _logger.LogInformation("Requesting {TopK} similar items for product {ModelId} from AI...", topK, modelId);
+
+        using var response = await _httpClient.PostAsJsonAsync(aiApiUrl, requestBody, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("AI similar products failed. Status: {StatusCode}. Body: {Body}", response.StatusCode, errorBody);
+
+            throw new BusinessRuleException("AI_VALIDATION_ERROR", "The AI model rejected the product ID format.");
+        }
+
+        var aiResponse = await response.Content.ReadFromJsonAsync<AiStyleResponse>(cancellationToken: ct);
+
+        return aiResponse?.Matches ?? new List<string>();
+    }
     // ─── Private DTOs for the AI Model's JSON ────
     private sealed class AiStyleRequest
     {
