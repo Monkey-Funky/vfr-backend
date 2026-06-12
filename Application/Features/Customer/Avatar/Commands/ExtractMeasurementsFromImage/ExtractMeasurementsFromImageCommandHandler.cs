@@ -14,15 +14,24 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IBodyMeasurementExtractionService _extractionService;
+    private readonly IFalAiService _falAiService;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly ILogger<ExtractMeasurementsFromImageCommandHandler> _logger;
 
     public ExtractMeasurementsFromImageCommandHandler(
         IApplicationDbContext context,
         ICurrentUserService currentUserService,
-        IBodyMeasurementExtractionService extractionService)
+        IBodyMeasurementExtractionService extractionService,
+        IFalAiService falAiService,
+        IFileStorageService fileStorageService,
+        ILogger<ExtractMeasurementsFromImageCommandHandler> logger)
     {
         _context = context;
         _currentUserService = currentUserService;
         _extractionService = extractionService;
+        _falAiService = falAiService;
+        _fileStorageService = fileStorageService;
+        _logger = logger;
     }
 
     public async Task<AvatarDto> Handle(
@@ -35,6 +44,8 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         // 1. Validate magic bytes — reject anything that isn't JPEG or PNG.
         //    This prevents a renamed malicious file from being forwarded to the AI API.
         BodyMeasurements measurements;
+        string? avatar3dModelUrl = null;
+
         await using (var stream = request.ImageFile.Content)
         {
             await ValidateImageMagicBytesAsync(stream, cancellationToken);
@@ -50,6 +61,42 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 request.ImageFile.ContentType,
                 request.HeightCm,
                 cancellationToken);
+
+            // 2.5. Generate 3D body model (best-effort — does not abort the flow on failure)
+            try
+            {
+                // Reset stream to beginning for Cloudinary upload
+                if (stream.CanSeek)
+                    stream.Seek(0, SeekOrigin.Begin);
+
+                // Upload image to Cloudinary via IFileStorageService to get a public URL for fal.ai
+                var uniqueFileName = $"{customerId}_{Guid.NewGuid():N}{Path.GetExtension(request.ImageFile.FileName)}";
+                var cloudinaryUrl = await _fileStorageService.UploadAsync(
+                    stream, uniqueFileName, "avatars/3d-source", cancellationToken);
+
+                _logger.LogInformation(
+                    "Uploaded avatar source image for 3D generation. CustomerId: {CustomerId}, URL: {CloudinaryUrl}",
+                    customerId, cloudinaryUrl);
+
+                var bodyResult = await _falAiService.GenerateBody3dAsync(cloudinaryUrl, cancellationToken);
+                avatar3dModelUrl = bodyResult.GlbUrl;
+
+                _logger.LogInformation(
+                    "3D avatar model generated successfully. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}",
+                    customerId, avatar3dModelUrl);
+            }
+            catch (ExternalServiceException ex)
+            {
+                _logger.LogWarning(ex,
+                    "fal.ai 3D body generation failed for CustomerId {CustomerId}. Continuing without 3D model.",
+                    customerId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Unexpected error during 3D body generation for CustomerId {CustomerId}. Continuing without 3D model.",
+                    customerId);
+            }
         }
 
         const string source = "AIEstimate";
@@ -64,6 +111,10 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         {
             // UPDATE existing avatar — mutate entity state directly.
             existingAvatar.UpdateMeasurements(measurements, source);
+
+            // Apply 3D model URL if generation succeeded
+            if (avatar3dModelUrl is not null)
+                existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl);
 
             avatar = existingAvatar;
         }
@@ -82,7 +133,8 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 neckCm: measurements.NeckCm,
                 armLengthCm: measurements.ArmLengthCm,
                 shoeSizeEu: measurements.ShoeSizeEu,
-                bodyShape: measurements.BodyShape);
+                bodyShape: measurements.BodyShape,
+                avatar3dModelUrl: avatar3dModelUrl);
 
             _context.Avatars.Add(avatar);
         }

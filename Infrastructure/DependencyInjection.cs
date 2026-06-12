@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using Amazon;
 using Amazon.S3;
 using Application.Interfaces.External;
@@ -80,6 +81,9 @@ public static class DependencyInjection
         services.Configure<GoogleSettings>(options =>
             configuration.GetSection("Google").Bind(options));
 
+        services.Configure<FalAiSettings>(options =>
+            configuration.GetSection("FalAi").Bind(options));
+
         // ── 3. Polly resilience pipelines ─────────────────────────────────────
 
         services.AddResiliencePipeline("s3", builder =>
@@ -114,7 +118,7 @@ public static class DependencyInjection
         services.AddResiliencePipeline("tryon", builder =>
         {
             builder
-                .AddTimeout(TimeSpan.FromSeconds(30))
+                .AddTimeout(TimeSpan.FromSeconds(90))
                 .AddRetry(new RetryStrategyOptions
                 {
                     MaxRetryAttempts = 1,
@@ -185,6 +189,14 @@ public static class DependencyInjection
                     });
             });
 
+        // ── 3c. Named HttpClient for fal.ai SAM 3D API ──────────────────────────
+        services.AddHttpClient("fal-ai", (sp, client) =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(90);
+            client.DefaultRequestHeaders.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/json"));
+        });
+
         // ── 4. S3-Compatible Client (AWS S3 / Cloudflare R2) ─────────────────
         //
         // لسه محتاجين S3 client علشان IS3StorageService (reports).
@@ -239,6 +251,7 @@ public static class DependencyInjection
         services.AddScoped<IGoogleAuthService, GoogleAuthService>();
         services.AddScoped<ISizeRecommendationService, SizeRecommendationService>();
         services.AddScoped<IVirtualTryOnService, VirtualTryOnService>();
+        services.AddScoped<IFalAiService, FalAiService>();
 
         // ── 6. Repository & Unit of Work ──────────────────────────────────────
         services.AddScoped<IUnitOfWork, UnitOfWork>();
