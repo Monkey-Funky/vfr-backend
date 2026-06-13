@@ -16,45 +16,42 @@ namespace Infrastructure.Migrations
     /// redundant column. The configuration has since been corrected (relationship
     /// is only configured from the Avatar side in AvatarConfiguration), but the
     /// database still has the three orphan artifacts.
+    ///
+    /// NOTE: Migration 20260523 (FixConfigrationInSubscriptionTable) already
+    /// removed these artifacts on some database instances. The IF EXISTS guards
+    /// below make this migration idempotent so it succeeds regardless.
     /// </summary>
     public partial class RemoveShadowAvatarFkColumn : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropForeignKey(
-                name: "fk_avatar_measurement_history_avatars_avatar_id1",
-                table: "avatar_measurement_history");
+            // Use idempotent raw SQL so the migration succeeds whether or not
+            // a previous migration already removed these artifacts.
+            migrationBuilder.Sql(
+                """
+                ALTER TABLE avatar_measurement_history
+                    DROP CONSTRAINT IF EXISTS fk_avatar_measurement_history_avatars_avatar_id1;
+                """);
 
-            migrationBuilder.DropIndex(
-                name: "ix_avatar_measurement_history_avatar_id1",
-                table: "avatar_measurement_history");
+            migrationBuilder.Sql(
+                """
+                DROP INDEX IF EXISTS ix_avatar_measurement_history_avatar_id1;
+                """);
 
-            migrationBuilder.DropColumn(
-                name: "avatar_id1",
-                table: "avatar_measurement_history");
+            migrationBuilder.Sql(
+                """
+                ALTER TABLE avatar_measurement_history
+                    DROP COLUMN IF EXISTS avatar_id1;
+                """);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<Guid>(
-                name: "avatar_id1",
-                table: "avatar_measurement_history",
-                type: "uuid",
-                nullable: true);
-
-            migrationBuilder.CreateIndex(
-                name: "ix_avatar_measurement_history_avatar_id1",
-                table: "avatar_measurement_history",
-                column: "avatar_id1");
-
-            migrationBuilder.AddForeignKey(
-                name: "fk_avatar_measurement_history_avatars_avatar_id1",
-                table: "avatar_measurement_history",
-                column: "avatar_id1",
-                principalTable: "avatars",
-                principalColumn: "id");
+            // Intentionally left empty — re-adding the shadow column is not desired.
+            // The avatar_id1 column was a spurious artifact that should never exist.
         }
     }
 }
+
