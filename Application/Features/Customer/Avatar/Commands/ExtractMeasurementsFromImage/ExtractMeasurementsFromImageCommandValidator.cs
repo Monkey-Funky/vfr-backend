@@ -14,8 +14,7 @@ public sealed class ExtractMeasurementsFromImageCommandValidator
     public ExtractMeasurementsFromImageCommandValidator()
     {
         RuleFor(x => x.ImageFile)
-            .NotNull().WithMessage("Body image is required.");
-
+            .NotNull().WithMessage("Image file is required.");
         RuleFor(x => x.ImageFile.Length)
             .GreaterThan(0).WithMessage("Image file must not be empty.")
             .LessThanOrEqualTo(MaxImageSizeBytes)

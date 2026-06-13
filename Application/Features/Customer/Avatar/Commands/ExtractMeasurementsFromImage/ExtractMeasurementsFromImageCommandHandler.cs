@@ -158,7 +158,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
 
     // ── Magic byte constants ─────────────────────────────────────────────────
     private static readonly byte[] JpegMagic = [0xFF, 0xD8, 0xFF];
-    private static readonly byte[] PngMagic  = [0x89, 0x50, 0x4E, 0x47];
+    private static readonly byte[] PngMagic = [0x89, 0x50, 0x4E, 0x47];
 
     /// <summary>
     /// Reads the first 4 bytes of the stream to verify the JPEG or PNG file signature.

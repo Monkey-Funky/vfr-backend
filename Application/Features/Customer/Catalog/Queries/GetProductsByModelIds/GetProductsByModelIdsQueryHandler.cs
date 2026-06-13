@@ -72,38 +72,74 @@ internal sealed class GetProductsByModelIdsQueryHandler
         //
         // Both are fire-and-forget until Task.WhenAll; neither depends on the other.
 
+        //var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        //// Active offer lookup: keyed by product ID for O(1) lookup in step 4.
+        //var offersTask = _context.Offers
+        //    .AsNoTracking()
+        //    .Where(o => o.Status == "Active"
+        //             && o.StartDate <= today
+        //             && (o.EndDate == null || o.EndDate >= today)
+        //             && (productIds.Contains(o.ProductId!.Value) || o.ProductId == null))
+        //    .GroupBy(o => o.ProductId)
+        //    .Select(g => g.OrderByDescending(o => o.DiscountValue).First())
+        //    .ToListAsync(cancellationToken);
+
+        //// Favorite status: only relevant for authenticated customers.
+        //var isFavoriteTask = (_currentUserService.IsAuthenticated
+        //                      && _currentUserService.CustomerId.HasValue
+        //                      && _currentUserService.CustomerId.Value != Guid.Empty)
+        //    ? _context.CustomerFavorites
+        //        .AsNoTracking()
+        //        .Where(f => f.CustomerId == _currentUserService.CustomerId!.Value
+        //                 && productIds.Contains(f.ProductId))
+        //        .Select(f => f.ProductId)
+        //        .ToListAsync(cancellationToken)
+        //    : Task.FromResult(new List<Guid>());
+
+        //await Task.WhenAll(offersTask, isFavoriteTask);
+
+
+        //var offersByProductId = (await offersTask)
+        //    .Where(o => o.ProductId.HasValue)
+        //    .ToDictionary(o => o.ProductId!.Value);
+
+        //var favoriteSet = new HashSet<Guid>(await isFavoriteTask);
+        // ── 2. Sequential execution (EF Core DbContext is NOT thread-safe) ───────────────
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        // Active offer lookup: keyed by product ID for O(1) lookup in step 4.
-        var offersTask = _context.Offers
+        // 1. Fetch the raw, flat offers from the database FIRST
+        var rawOffers = await _context.Offers
             .AsNoTracking()
             .Where(o => o.Status == "Active"
                      && o.StartDate <= today
                      && (o.EndDate == null || o.EndDate >= today)
                      && (productIds.Contains(o.ProductId!.Value) || o.ProductId == null))
-            .GroupBy(o => o.ProductId)
-            .Select(g => g.OrderByDescending(o => o.DiscountValue).First())
             .ToListAsync(cancellationToken);
 
-        // Favorite status: only relevant for authenticated customers.
-        var isFavoriteTask = (_currentUserService.IsAuthenticated
+        // 2. Safely group and pick the highest discount IN MEMORY
+        var offersByProductId = rawOffers
+            .Where(o => o != null && o.ProductId.HasValue) // Bulletproof null check
+            .GroupBy(o => o.ProductId!.Value)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(o => o.DiscountValue).First()
+            );
+
+        // 3. THEN fetch favorites...
+        var favoriteList = (_currentUserService.IsAuthenticated
                               && _currentUserService.CustomerId.HasValue
                               && _currentUserService.CustomerId.Value != Guid.Empty)
-            ? _context.CustomerFavorites
+            ? await _context.CustomerFavorites
                 .AsNoTracking()
                 .Where(f => f.CustomerId == _currentUserService.CustomerId!.Value
                          && productIds.Contains(f.ProductId))
                 .Select(f => f.ProductId)
                 .ToListAsync(cancellationToken)
-            : Task.FromResult(new List<Guid>());
+            : new List<Guid>();
 
-        await Task.WhenAll(offersTask, isFavoriteTask);
-
-        var offersByProductId = (await offersTask)
-            .Where(o => o.ProductId.HasValue)
-            .ToDictionary(o => o.ProductId!.Value);
-
-        var favoriteSet = new HashSet<Guid>(await isFavoriteTask);
+        var favoriteSet = new HashSet<Guid>(favoriteList);
 
         // ── 3. Build a lookup keyed by model_id for rank-preserving projection ─
         var productByModelId = products.ToDictionary(p => p.ModelId!);
