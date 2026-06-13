@@ -83,7 +83,7 @@ internal sealed class TestAccountSeeder : ISeeder
                  {"customer@vfr-test.com"},
                  {passwordHash},
                  {"+201000000001"},
-                 {"1998-05-15"},
+                 {new DateOnly(1998, 5, 15)},
                  {"Male"},
                  {true},
                  {"Active"},
