@@ -17,7 +17,10 @@ public static class CatalogMappings
                 : Math.Max(0, product.Price.Value - activeOffer.DiscountValue), 2);
         }
 
-        string? primaryImage = product.Images?.OrderBy(i => i.DisplayOrder).FirstOrDefault()?.ImageUrl;
+        string? primaryImage = product.Images?
+            .Where(i => !i.IsDeleted)
+            .OrderBy(i => i.DisplayOrder)
+            .FirstOrDefault()?.ImageUrl;
         string? brandName = product.Brand;
 
         return new ProductCardDto(
@@ -42,7 +45,10 @@ public static class CatalogMappings
                 : Math.Max(0, product.Price.Value - activeOffer.DiscountValue), 2);
         }
 
-        string? primaryImage = product.Images?.OrderBy(i => i.DisplayOrder).FirstOrDefault()?.ImageUrl;
+        string? primaryImage = product.Images?
+            .Where(i => !i.IsDeleted)
+            .OrderBy(i => i.DisplayOrder)
+            .FirstOrDefault()?.ImageUrl;
         string? brandName = product.Brand;
 
         var attributes = new ProductAttributesDto(
