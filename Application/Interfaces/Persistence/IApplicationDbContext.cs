@@ -30,6 +30,10 @@ public interface IApplicationDbContext
     DbSet<WardrobeCollection> WardrobeCollections { get; }
     DbSet<WardrobeCollectionItem> WardrobeCollectionItems { get; }
 
+    // ── Customer Ordering ────────────────────────────────
+    DbSet<Cart> Carts { get; }
+    DbSet<CartItem> CartItems { get; }
+
     // ── Subscriptions (P-015) ─────────────────────────────────────────────────
     DbSet<SubscriptionPlan> SubscriptionPlans { get; }
     DbSet<Subscription> Subscriptions { get; }
