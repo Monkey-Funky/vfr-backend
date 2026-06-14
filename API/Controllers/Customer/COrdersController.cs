@@ -6,7 +6,7 @@ namespace API.Controllers;
 
 [Route("api/customers/{customerAccountId}/orders")]
 [ApiController]
-[AllowAnonymous] //for testing through API
+//[AllowAnonymous] //for testing through API
 public class COrdersController : ControllerBase
 {
     private readonly IMediator _mediator;
