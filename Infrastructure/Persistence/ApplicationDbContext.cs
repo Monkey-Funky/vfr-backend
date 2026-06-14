@@ -40,6 +40,11 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Cart> Carts { get; set; }
     public DbSet<CartItem> CartItems { get; set; }
 
+    // Checkout Service
+    public DbSet<Domain.Entities.CustomerOrders.COrder> COrders { get; set; }
+    public DbSet<Domain.Entities.CustomerOrders.COrderItem> COrderItems { get; set; }
+
+
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<SubscriptionPayment> SubscriptionPayments => Set<SubscriptionPayment>();
