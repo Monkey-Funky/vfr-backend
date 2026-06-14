@@ -1,6 +1,7 @@
 using Application.Features.Customer.CustomerOrders.Commands.CreateCOrder;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Application.Features.Customer.CustomerOrders.Commands.CreatePaymentIntent;
 
 namespace API.Controllers;
 
@@ -28,6 +29,24 @@ public class COrdersController : ControllerBase
             success = true, 
             message = "Order placed successfully!", 
             orderId = orderId 
+        });
+        
+    }
+    [HttpPost("{orderId}/payment-intent")]
+    public async Task<IActionResult> CreatePaymentIntent(Guid customerAccountId, Guid orderId)
+    {
+        var command = new CreatePaymentIntentCommand 
+        { 
+            COrderId = orderId 
+        };
+        
+        var clientSecret = await _mediator.Send(command);
+        
+        return Ok(new 
+        { 
+            success = true, 
+            message = "Payment Intent created successfully",
+            clientSecret = clientSecret 
         });
     }
 }

@@ -44,6 +44,8 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Domain.Entities.CustomerOrders.COrder> COrders { get; set; }
     public DbSet<Domain.Entities.CustomerOrders.COrderItem> COrderItems { get; set; }
 
+    // Payment Service
+    public DbSet<Domain.Entities.CustomerOrders.Payment> Payments { get; set; }
 
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
