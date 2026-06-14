@@ -35,7 +35,9 @@ public sealed class FalAiService : IFalAiService
 
     public async Task<FalBodyResult> GenerateBody3dAsync(string imageUrl, CancellationToken ct = default)
     {
-        var requestBody = new BodyRequest(imageUrl, true, false);
+        var requestBody = new BodyRequest(imageUrl, true, true);
+
+
         var result = await SubmitAndPollAsync<BodyRequest, BodyResponse>(
             _settings.BodyApiId, requestBody, ct);
 
