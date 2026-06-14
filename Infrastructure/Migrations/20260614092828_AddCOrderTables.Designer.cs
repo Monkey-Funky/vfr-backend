@@ -3,6 +3,7 @@ using System;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -12,9 +13,11 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260614092828_AddCOrderTables")]
+    partial class AddCOrderTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1399,10 +1402,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("c_order_id");
 
-                    b.Property<string>("CarrierName")
-                        .HasColumnType("text")
-                        .HasColumnName("carrier_name");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -1422,15 +1421,6 @@ namespace Infrastructure.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("integer")
                         .HasColumnName("quantity");
-
-                    b.Property<string>("ShippingAddress")
-                        .HasColumnType("text")
-                        .HasColumnName("shipping_address");
-
-                    b.Property<string>("Size")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("size");
 
                     b.Property<decimal>("TotalUnitPrice")
                         .HasColumnType("numeric")
@@ -1455,115 +1445,6 @@ namespace Infrastructure.Migrations
                         .HasDatabaseName("ix_c_order_items_c_order_id");
 
                     b.ToTable("c_order_items", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.Payment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("numeric")
-                        .HasColumnName("amount");
-
-                    b.Property<Guid>("COrderId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("c_order_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("created_by");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_deleted");
-
-                    b.Property<string>("PaymentMethod")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("payment_method");
-
-                    b.Property<string>("StripePaymentIntentId")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("stripe_payment_intent_id");
-
-                    b.Property<DateTime>("TransactionDate")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("transaction_date");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_payments");
-
-                    b.ToTable("payments", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.TrackingHistory", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("COrderId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("c_order_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("created_by");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_deleted");
-
-                    b.Property<string>("Location")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("location");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("timestamp");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_tracking_history");
-
-                    b.HasIndex("COrderId")
-                        .HasDatabaseName("ix_tracking_history_c_order_id");
-
-                    b.ToTable("tracking_history", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Notifications.Notification", b =>
@@ -3295,16 +3176,6 @@ namespace Infrastructure.Migrations
                         .HasConstraintName("fk_c_order_items_c_orders_c_order_id");
                 });
 
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.TrackingHistory", b =>
-                {
-                    b.HasOne("Domain.Entities.CustomerOrders.COrder", null)
-                        .WithMany("TrackingHistories")
-                        .HasForeignKey("COrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_tracking_history_c_orders_c_order_id");
-                });
-
             modelBuilder.Entity("Domain.Entities.Notifications.Notification", b =>
                 {
                     b.HasOne("Domain.Entities.Retailer.RetailerAccount", null)
@@ -3576,8 +3447,6 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("Domain.Entities.CustomerOrders.COrder", b =>
                 {
                     b.Navigation("COrderItems");
-
-                    b.Navigation("TrackingHistories");
                 });
 
             modelBuilder.Entity("Domain.Entities.Orders.Order", b =>

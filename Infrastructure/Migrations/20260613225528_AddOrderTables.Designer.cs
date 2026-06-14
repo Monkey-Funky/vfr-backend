@@ -3,6 +3,7 @@ using System;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -12,9 +13,11 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260613225528_AddOrderTables")]
+    partial class AddOrderTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -941,6 +944,154 @@ namespace Infrastructure.Migrations
                     b.ToTable("customer_favorites", (string)null);
                 });
 
+            modelBuilder.Entity("Domain.Entities.Customer.CustomerOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("CurrentStatus")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("current_status");
+
+                    b.Property<Guid>("CustomerAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_account_id");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_id");
+
+                    b.Property<DateTime?>("DeliveryDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("delivery_date");
+
+                    b.Property<decimal>("Discount")
+                        .HasColumnType("numeric")
+                        .HasColumnName("discount");
+
+                    b.Property<decimal>("GrandTotal")
+                        .HasColumnType("numeric")
+                        .HasColumnName("grand_total");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<decimal>("MethodCost")
+                        .HasColumnType("numeric")
+                        .HasColumnName("method_cost");
+
+                    b.Property<DateTime>("OrderDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("order_date");
+
+                    b.Property<string>("OrderDescription")
+                        .HasColumnType("text")
+                        .HasColumnName("order_description");
+
+                    b.Property<string>("OrderNumber")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("order_number");
+
+                    b.Property<string>("ShippingMethod")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("shipping_method");
+
+                    b.Property<decimal>("Subtotal")
+                        .HasColumnType("numeric")
+                        .HasColumnName("subtotal");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_customer_orders");
+
+                    b.ToTable("customer_orders", (string)null);
+                });
+
+            modelBuilder.Entity("Domain.Entities.Customer.CustomerOrderItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_id");
+
+                    b.Property<Guid?>("CustomerOrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_order_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_deleted");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("quantity");
+
+                    b.Property<decimal>("TotalUnitPrice")
+                        .HasColumnType("numeric")
+                        .HasColumnName("total_unit_price");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasColumnType("numeric")
+                        .HasColumnName("unit_price");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_customer_order_items");
+
+                    b.HasIndex("CustomerOrderId")
+                        .HasDatabaseName("ix_customer_order_items_customer_order_id");
+
+                    b.ToTable("customer_order_items", (string)null);
+                });
+
             modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfit", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1306,264 +1457,6 @@ namespace Infrastructure.Migrations
                         .HasFilter("is_deleted = false");
 
                     b.ToTable("wardrobe_collection_items", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.COrder", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("created_by");
-
-                    b.Property<string>("CurrentStatus")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("current_status");
-
-                    b.Property<Guid>("CustomerAccountId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("customer_account_id");
-
-                    b.Property<DateTime?>("DeliveryDate")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("delivery_date");
-
-                    b.Property<decimal>("Discount")
-                        .HasColumnType("numeric")
-                        .HasColumnName("discount");
-
-                    b.Property<decimal>("GrandTotal")
-                        .HasColumnType("numeric")
-                        .HasColumnName("grand_total");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_deleted");
-
-                    b.Property<decimal>("MethodCost")
-                        .HasColumnType("numeric")
-                        .HasColumnName("method_cost");
-
-                    b.Property<DateTime>("OrderDate")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("order_date");
-
-                    b.Property<string>("OrderDescription")
-                        .HasColumnType("text")
-                        .HasColumnName("order_description");
-
-                    b.Property<string>("OrderNumber")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("order_number");
-
-                    b.Property<string>("ShippingMethod")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("shipping_method");
-
-                    b.Property<decimal>("Subtotal")
-                        .HasColumnType("numeric")
-                        .HasColumnName("subtotal");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_c_orders");
-
-                    b.ToTable("c_orders", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.COrderItem", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("COrderId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("c_order_id");
-
-                    b.Property<string>("CarrierName")
-                        .HasColumnType("text")
-                        .HasColumnName("carrier_name");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("created_by");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_deleted");
-
-                    b.Property<Guid>("ProductId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("product_id");
-
-                    b.Property<int>("Quantity")
-                        .HasColumnType("integer")
-                        .HasColumnName("quantity");
-
-                    b.Property<string>("ShippingAddress")
-                        .HasColumnType("text")
-                        .HasColumnName("shipping_address");
-
-                    b.Property<string>("Size")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("size");
-
-                    b.Property<decimal>("TotalUnitPrice")
-                        .HasColumnType("numeric")
-                        .HasColumnName("total_unit_price");
-
-                    b.Property<decimal>("UnitPrice")
-                        .HasColumnType("numeric")
-                        .HasColumnName("unit_price");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_c_order_items");
-
-                    b.HasIndex("COrderId")
-                        .HasDatabaseName("ix_c_order_items_c_order_id");
-
-                    b.ToTable("c_order_items", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.Payment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("numeric")
-                        .HasColumnName("amount");
-
-                    b.Property<Guid>("COrderId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("c_order_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("created_by");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_deleted");
-
-                    b.Property<string>("PaymentMethod")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("payment_method");
-
-                    b.Property<string>("StripePaymentIntentId")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("stripe_payment_intent_id");
-
-                    b.Property<DateTime>("TransactionDate")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("transaction_date");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_payments");
-
-                    b.ToTable("payments", (string)null);
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.TrackingHistory", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("COrderId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("c_order_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("created_by");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_deleted");
-
-                    b.Property<string>("Location")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("location");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("status");
-
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("timestamp");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("text")
-                        .HasColumnName("updated_by");
-
-                    b.HasKey("Id")
-                        .HasName("pk_tracking_history");
-
-                    b.HasIndex("COrderId")
-                        .HasDatabaseName("ix_tracking_history_c_order_id");
-
-                    b.ToTable("tracking_history", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Notifications.Notification", b =>
@@ -3202,6 +3095,14 @@ namespace Infrastructure.Migrations
                         .HasConstraintName("fk_customer_favorites_products");
                 });
 
+            modelBuilder.Entity("Domain.Entities.Customer.CustomerOrderItem", b =>
+                {
+                    b.HasOne("Domain.Entities.Customer.CustomerOrder", null)
+                        .WithMany("OrderItems")
+                        .HasForeignKey("CustomerOrderId")
+                        .HasConstraintName("fk_customer_order_items_customer_orders_customer_order_id");
+                });
+
             modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfit", b =>
                 {
                     b.HasOne("Domain.Entities.Customer.CustomerAccount", null)
@@ -3283,26 +3184,6 @@ namespace Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_wardrobe_collection_items_favorites");
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.COrderItem", b =>
-                {
-                    b.HasOne("Domain.Entities.CustomerOrders.COrder", null)
-                        .WithMany("COrderItems")
-                        .HasForeignKey("COrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_c_order_items_c_orders_c_order_id");
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.TrackingHistory", b =>
-                {
-                    b.HasOne("Domain.Entities.CustomerOrders.COrder", null)
-                        .WithMany("TrackingHistories")
-                        .HasForeignKey("COrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_tracking_history_c_orders_c_order_id");
                 });
 
             modelBuilder.Entity("Domain.Entities.Notifications.Notification", b =>
@@ -3568,16 +3449,14 @@ namespace Infrastructure.Migrations
                     b.Navigation("Items");
                 });
 
+            modelBuilder.Entity("Domain.Entities.Customer.CustomerOrder", b =>
+                {
+                    b.Navigation("OrderItems");
+                });
+
             modelBuilder.Entity("Domain.Entities.Customer.CustomerOutfit", b =>
                 {
                     b.Navigation("Items");
-                });
-
-            modelBuilder.Entity("Domain.Entities.CustomerOrders.COrder", b =>
-                {
-                    b.Navigation("COrderItems");
-
-                    b.Navigation("TrackingHistories");
                 });
 
             modelBuilder.Entity("Domain.Entities.Orders.Order", b =>

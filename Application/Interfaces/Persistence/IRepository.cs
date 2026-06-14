@@ -1,4 +1,6 @@
-﻿namespace Application.Interfaces.Persistence;
+﻿using Domain.Entities.Customer;
+
+namespace Application.Interfaces.Persistence;
 
 public interface IRepository<T> where T : BaseEntity
 {

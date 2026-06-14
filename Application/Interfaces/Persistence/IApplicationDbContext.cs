@@ -5,6 +5,7 @@ using Domain.Entities.Orders;
 using Domain.Entities.Customer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Domain.Entities.CustomerOrders;
 
 namespace Application.Interfaces.Persistence;
 
@@ -29,6 +30,13 @@ public interface IApplicationDbContext
     DbSet<CustomerOutfitItem> CustomerOutfitItems { get; }
     DbSet<WardrobeCollection> WardrobeCollections { get; }
     DbSet<WardrobeCollectionItem> WardrobeCollectionItems { get; }
+
+    // ── Customer Ordering ────────────────────────────────
+    DbSet<Cart> Carts { get; }
+    DbSet<CartItem> CartItems { get; }
+
+    DbSet<COrder> COrders { get; }
+    DbSet<COrderItem> COrderItems { get; }
 
     // ── Subscriptions (P-015) ─────────────────────────────────────────────────
     DbSet<SubscriptionPlan> SubscriptionPlans { get; }

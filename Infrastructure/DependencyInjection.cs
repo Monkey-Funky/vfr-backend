@@ -25,6 +25,7 @@ using Polly;
 using Polly.CircuitBreaker;
 using Polly.Retry;
 using StackExchange.Redis;
+using Infrastructure.Services;
 
 namespace Infrastructure;
 
@@ -322,6 +323,9 @@ public static class DependencyInjection
         services.AddHostedService<RecurringPaymentJob>();
 
         services.AddScoped<IPlanLimitService, PlanLimitService>();
+
+        // Payment for Customer
+        services.AddScoped<IStripeService, StripeService>();
 
         return services;
     }
