@@ -1,4 +1,4 @@
-using Application.Features.Customer.Avatar.Commands.CreateAvatar;
+﻿using Application.Features.Customer.Avatar.Commands.CreateAvatar;
 using Application.Features.Customer.Avatar.Commands.DeleteAvatar;
 using Application.Features.Customer.Avatar.Commands.UpdateAvatarMeasurements;
 using Application.Features.Customer.Avatar.DTOs;
@@ -23,6 +23,7 @@ public sealed class AvatarControllerTests : IntegrationTestBase
     [Fact]
     public async Task CreateAvatar_WithValidMeasurements_ShouldReturn201()
     {
+        await CleanupAvatarAsync();
         var command = new CreateAvatarCommand(
             HeightCm: 175m,
             WeightKg: 70m,
@@ -58,7 +59,7 @@ public sealed class AvatarControllerTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task CreateAvatar_WhenAvatarAlreadyExists_ShouldReturn409()
+    public async Task CreateAvatar_WhenAvatarAlreadyExists_ShouldReturn422()
     {
         await SeedAvatarAsync();
 
@@ -288,6 +289,7 @@ public sealed class AvatarControllerTests : IntegrationTestBase
     [Fact]
     public async Task CreateAvatar_WithInvalidBodyShape_ShouldReturn422()
     {
+        await CleanupAvatarAsync();
         var command = new CreateAvatarCommand(
             HeightCm: 175m,
             WeightKg: 70m,
@@ -311,6 +313,7 @@ public sealed class AvatarControllerTests : IntegrationTestBase
     [Fact]
     public async Task CreateAvatar_WithZeroHeight_ShouldReturn422()
     {
+        await CleanupAvatarAsync();
         var command = new CreateAvatarCommand(
             HeightCm: 0m,
             WeightKg: 70m,
@@ -334,6 +337,7 @@ public sealed class AvatarControllerTests : IntegrationTestBase
     [Fact]
     public async Task CreateAvatar_WithInvalidSource_ShouldReturn422()
     {
+        await CleanupAvatarAsync();
         var command = new CreateAvatarCommand(
             HeightCm: 175m,
             WeightKg: 70m,
@@ -421,6 +425,7 @@ public sealed class AvatarControllerTests : IntegrationTestBase
     [Fact]
     public async Task CreateAvatar_WithAllOptionalMeasurements_ShouldReturn201AndPersistAll()
     {
+        await CleanupAvatarAsync();
         var command = new CreateAvatarCommand(
             HeightCm: 180m,
             WeightKg: 80m,
@@ -458,6 +463,7 @@ public sealed class AvatarControllerTests : IntegrationTestBase
 
     private async Task<Guid> SeedAvatarAsync()
     {
+        await CleanupAvatarAsync();
         var command = new CreateAvatarCommand(
             HeightCm: 175m,
             WeightKg: 70m,
@@ -483,6 +489,7 @@ public sealed class AvatarControllerTests : IntegrationTestBase
 
     private async Task CreateAvatarViaApiAsync()
     {
+        await CleanupAvatarAsync();
         var command = new CreateAvatarCommand(
             HeightCm: 175m,
             WeightKg: 70m,
@@ -499,5 +506,34 @@ public sealed class AvatarControllerTests : IntegrationTestBase
 
         await CustomerClient.PostAsJsonAsync(
             $"/api/customers/{_customerId}/avatar", command);
+    }
+
+    
+    /// <summary>
+    /// Defensive cleanup: hard-deletes any existing avatar for the test customer
+    /// so each test starts with a clean slate regardless of prior test outcomes.
+    /// </summary>
+    private async Task CleanupAvatarAsync()
+    {
+        await Factory.ExecuteDbContextAsync(async db =>
+        {
+            var existingAvatars = await db.Avatars
+                .IgnoreQueryFilters()
+                .Where(a => a.CustomerId == _customerId)
+                .ToListAsync();
+
+            if (existingAvatars.Count > 0)
+            {
+                foreach (var avatar in existingAvatars)
+                {
+                    var histories = await db.AvatarMeasurementHistory
+                        .Where(h => h.AvatarId == avatar.Id)
+                        .ToListAsync();
+                    db.AvatarMeasurementHistory.RemoveRange(histories);
+                }
+                db.Avatars.RemoveRange(existingAvatars);
+                await db.SaveChangesAsync();
+            }
+        });
     }
 }

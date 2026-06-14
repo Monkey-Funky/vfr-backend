@@ -8,8 +8,9 @@ namespace Application.Features.Customer.Catalog.Queries.GetProductDetail;
 
 /// <summary>
 /// Returns full product detail for the customer catalog.
-/// Parallelises 4 independent DB calls (offer, inventory, isFavorite, category)
-/// using Task.WhenAll — ~3× faster than serial awaits.
+/// All DB calls are executed sequentially because EF Core's DbContext
+/// is NOT thread-safe - concurrent async operations on the same context
+/// throw InvalidOperationException at runtime.
 /// ViewsCount is incremented atomically before the fetch.
 /// </summary>
 internal sealed class GetProductDetailQueryHandler : IRequestHandler<GetProductDetailQuery, ProductDetailDto>
@@ -27,7 +28,7 @@ internal sealed class GetProductDetailQueryHandler : IRequestHandler<GetProductD
 
     public async Task<ProductDetailDto> Handle(GetProductDetailQuery request, CancellationToken cancellationToken)
     {
-        // 1. Increment ViewsCount atomically (fire-and-forget style — no tracking needed).
+        // 1. Increment ViewsCount atomically (fire-and-forget style - no tracking needed).
         await _context.Database.ExecuteSqlRawAsync(
             "UPDATE products SET views_count = views_count + 1 WHERE id = {0}",
             request.ProductId);
@@ -41,8 +42,10 @@ internal sealed class GetProductDetailQueryHandler : IRequestHandler<GetProductD
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        // 3. Parallelise the 4 remaining independent DB calls.
-        var offerTask = _context.Offers.AsNoTracking()
+        // 3. Execute the 4 remaining independent DB calls sequentially.
+        //    EF Core's DbContext is NOT thread-safe - Task.WhenAll on the same
+        //    context instance throws InvalidOperationException at runtime.
+        var activeOffer = await _context.Offers.AsNoTracking()
             .Where(o => o.Status == "Active"
                      && o.StartDate <= today
                      && (o.EndDate == null || o.EndDate >= today))
@@ -51,32 +54,23 @@ internal sealed class GetProductDetailQueryHandler : IRequestHandler<GetProductD
             .OrderByDescending(o => o.DiscountValue)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var inventoryTask = _context.InventoryRecords.AsNoTracking()
+        var inventory = await _context.InventoryRecords.AsNoTracking()
             .FirstOrDefaultAsync(i => i.ProductId == product.Id, cancellationToken);
 
-        var isFavoriteTask = (_currentUserService.IsAuthenticated
-                              && _currentUserService.CustomerId.HasValue
-                              && _currentUserService.CustomerId.Value != Guid.Empty)
-            ? _context.CustomerFavorites.AsNoTracking()
+        bool isFavorite = (_currentUserService.IsAuthenticated
+                           && _currentUserService.CustomerId.HasValue
+                           && _currentUserService.CustomerId.Value != Guid.Empty)
+            ? await _context.CustomerFavorites.AsNoTracking()
                 .AnyAsync(f => f.CustomerId == _currentUserService.CustomerId!.Value
                             && f.ProductId == product.Id, cancellationToken)
-            : Task.FromResult(false);
+            : false;
 
-        // FIX: Use a concrete anonymous-type projection via a typed local method
-        // instead of Task<dynamic?>, which the compiler cannot unify in a ternary.
-        Task<CategoryProjection?> categoryTask = product.CategoryId.HasValue
-            ? _context.Categories.AsNoTracking()
+        CategoryProjection? categoryProj = product.CategoryId.HasValue
+            ? await _context.Categories.AsNoTracking()
                 .Where(c => c.Id == product.CategoryId.Value)
                 .Select(c => new CategoryProjection(c.Id, c.Name, c.Description))
                 .FirstOrDefaultAsync(cancellationToken)
-            : Task.FromResult<CategoryProjection?>(null);
-
-        await Task.WhenAll(offerTask, inventoryTask, isFavoriteTask, categoryTask);
-
-        var activeOffer = await offerTask;
-        var inventory = await inventoryTask;
-        bool isFavorite = await isFavoriteTask;
-        var categoryProj = await categoryTask;
+            : null;
 
         // 4. Compute discounted price.
         decimal? discountedPrice = null;
@@ -139,7 +133,7 @@ internal sealed class GetProductDetailQueryHandler : IRequestHandler<GetProductD
         );
     }
 
-    // Private projection record — gives the ternary a concrete, unambiguous type
+    // Private projection record - gives the ternary a concrete, unambiguous type
     // so the compiler does not have to unify Task<AnonymousType> with Task<dynamic?>.
     private sealed record CategoryProjection(Guid Id, string Name, string? Description);
 }
