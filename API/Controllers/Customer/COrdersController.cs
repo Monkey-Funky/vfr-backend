@@ -2,6 +2,7 @@ using Application.Features.Customer.CustomerOrders.Commands.CreateCOrder;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Application.Features.Customer.CustomerOrders.Commands.CreatePaymentIntent;
+using Application.Features.Customer.CustomerOrders.Commands.ConfirmPayment;
 
 namespace API.Controllers;
 
@@ -47,6 +48,23 @@ public class COrdersController : ControllerBase
             success = true, 
             message = "Payment Intent created successfully",
             clientSecret = clientSecret 
+        });
+    }
+
+    [HttpPost("{orderId}/confirm")]
+    public async Task<IActionResult> ConfirmPayment(Guid customerAccountId, Guid orderId)
+    {
+        var command = new ConfirmPaymentCommand 
+        { 
+            COrderId = orderId 
+        };
+        
+        var result = await _mediator.Send(command);
+        
+        return Ok(new 
+        { 
+            success = true, 
+            message = "Payment confirmed and order is now ready for shipping!" 
         });
     }
 }
