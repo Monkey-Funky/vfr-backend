@@ -19,7 +19,7 @@ public sealed class AvatarController : CustomerBaseApiController
     // ==============================================================
     // GET api/customers/{customerId}/avatar
     // ==============================================================
-    [HttpGet]
+    [HttpGet(Name = "GetAvatar")]
     [SwaggerOperation(
         Summary = "Get active avatar",
         Description = "Returns the customer's current avatar and most recent body measurements. Returns 404 if no avatar exists.")]
@@ -71,7 +71,7 @@ public sealed class AvatarController : CustomerBaseApiController
     {
         EnsureCustomerOwnership(customerId);
         var resultId = await Sender.Send(command, cancellationToken);
-        return CreatedAtAction(nameof(GetAvatar), new { customerId }, new ApiResponse<Guid> { Success = true, Data = resultId });
+        return CreatedResponse("GetAvatar", new { customerId }, resultId);
     }
 
     // ==============================================================

@@ -50,13 +50,14 @@ internal sealed class BrowseCategoriesQueryHandler : IRequestHandler<BrowseCateg
         // OrderBy MUST come before Select so EF Core can translate it to SQL against
         // the mapped Category.Name column. Placing OrderBy after Select makes 'c'
         // a CategoryBrowseDto (a CLR object), which EF cannot project back to a
-        // SQL column — this was the cause of the LINQ-to-SQL translation exception.
+        // SQL column - this was the cause of the LINQ-to-SQL translation exception.
         var categories = await query
             .OrderBy(c => c.Name)
             .Select(c => new CategoryBrowseDto(
                 c.Id,
                 c.Name,
                 c.Description,
+                c.CoverImageUrl,
                 _context.Products.Count(p => p.CategoryId == c.Id && p.Status == "Active" && !p.IsDeleted)
             ))
             .ToListAsync(cancellationToken);
