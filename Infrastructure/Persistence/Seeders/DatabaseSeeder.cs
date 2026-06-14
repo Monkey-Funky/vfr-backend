@@ -49,6 +49,9 @@ public static class DatabaseSeeder
         // Transactional / analytics data — depends on ExcelDataSeeder products being present.
         await RunSeederAsync<TransactionalDataSeeder>(scope, logger, cancellationToken);
 
+        // Test accounts — depends on ExcelDataSeeder's seed retailer being present.
+        await RunSeederAsync<TestAccountSeeder>(scope, logger, cancellationToken);
+
         // Future seeders go here:
         // await RunSeederAsync<AdminAccountSeeder>(scope, logger, cancellationToken);
 

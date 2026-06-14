@@ -6,5 +6,6 @@ public sealed record CategoryBrowseDto(
     Guid Id,
     string Name,
     string? Description,
+    string? ImageUrl,
     int ProductCount
 );
