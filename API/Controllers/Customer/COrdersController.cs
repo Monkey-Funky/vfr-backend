@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Application.Features.Customer.CustomerOrders.Commands.CreatePaymentIntent;
 using Application.Features.Customer.CustomerOrders.Commands.ConfirmPayment;
+using Application.Features.Customer.CustomerOrders.Queries.GetCustomerOrders;
 
 namespace API.Controllers;
 
@@ -65,6 +66,24 @@ public class COrdersController : ControllerBase
         { 
             success = true, 
             message = "Payment confirmed and order is now ready for shipping!" 
+        });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetCustomerOrders(Guid customerAccountId, [FromQuery] string? status = "All")
+    {
+        var query = new GetCustomerOrdersQuery 
+        { 
+            CustomerAccountId = customerAccountId,
+            StatusFilter = status
+        };
+        
+        var orders = await _mediator.Send(query);
+        
+        return Ok(new 
+        { 
+            success = true, 
+            data = orders 
         });
     }
 }

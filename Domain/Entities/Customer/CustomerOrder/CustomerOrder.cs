@@ -19,4 +19,6 @@ public class COrder : BaseEntity
     public DateTime? DeliveryDate { get; set; }
 
     public ICollection<COrderItem> COrderItems { get; set; } = new List<COrderItem>();
+    public virtual ICollection<TrackingHistory> TrackingHistories { get; set; } = new List<TrackingHistory>();
+    
 }
