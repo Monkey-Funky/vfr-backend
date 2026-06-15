@@ -30,9 +30,12 @@ public interface IBodyMeasurementExtractionService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>A <see cref="BodyMeasurements"/> record populated by the AI model.</returns>
     Task<BodyMeasurements> ExtractAsync(
-        Stream imageStream,
-        string fileName,
-        string contentType,
+        Stream frontImageStream,
+        string frontFileName,
+        string frontContentType,
+        Stream sideImageStream,
+        string sideFileName,
+        string sideContentType,
         decimal heightCm,
         CancellationToken ct = default);
 }

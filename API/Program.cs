@@ -376,6 +376,16 @@ await DatabaseSeeder.SeedAsync(app.Services);
 // Request.Scheme or RemoteIpAddress (rate limiting, logging, auth).
 app.UseForwardedHeaders();
 
+// Serilog MUST be outermost so it sees the final response status code
+// that ExceptionHandlingMiddleware writes (e.g. 404, 422) instead of
+// the unset default (500) that is logged when Serilog sits inside the
+// exception handler and the exception hasn't been mapped yet.
+app.UseSerilogRequestLogging(opts =>
+{
+    opts.MessageTemplate =
+        "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000}ms";
+});
+
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 // Response compression — before any content-producing middleware
@@ -393,12 +403,6 @@ app.UseSwaggerUI(c =>
 });
 
 app.UseIpRateLimiting(); // ← after swagger
-
-app.UseSerilogRequestLogging(opts =>
-{
-    opts.MessageTemplate =
-        "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000}ms";
-});
 
 // Do NOT use HTTPS redirection — Render.com terminates TLS at the proxy.
 // app.UseHttpsRedirection();

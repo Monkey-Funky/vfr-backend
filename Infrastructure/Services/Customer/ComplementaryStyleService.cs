@@ -22,7 +22,7 @@ internal sealed class ComplementaryStyleService : IComplementaryStyleService
 
     public async Task<List<string>> GetComplementaryItemsAsync(string productAiId, int topK, CancellationToken ct = default)
     {
-        var aiApiUrl = _configuration["AiModels:SimilarUrl"];
+        var aiApiUrl = _configuration["AiModels:StyleRecommendationUrl"];
 
         var requestBody = new AiStyleRequest
         {
@@ -54,7 +54,7 @@ internal sealed class ComplementaryStyleService : IComplementaryStyleService
     }
     public async Task<List<string>> GetSimilarItemsAsync(string modelId, int topK, CancellationToken ct = default)
     {
-        var aiApiUrl = "https://mariamehab7704--style-recommendation-host-fastapi.modal.run/similar_products";
+        var aiApiUrl = _configuration["AiModels:SimilarUrl"];
 
         var requestBody = new AiStyleRequest
         {

@@ -139,10 +139,10 @@ public sealed class AvatarController : CustomerBaseApiController
     [HttpPost("extract-from-image")]
     [Consumes("multipart/form-data")]
     [SwaggerOperation(
-        Summary = "Extract measurements from image",
-        Description = "Uploads a full-body photo to an AI model that extracts body measurements. " +
+        Summary = "Extract measurements from images",
+        Description = "Uploads TWO full-body photos (front view + side view) to an AI model that extracts body measurements. " +
                       "Creates a new avatar if none exists, or updates the existing one. " +
-                      "The image is NOT persisted — it is streamed to the AI model and discarded.")]
+                      "The images are NOT persisted — they are streamed to the AI model and discarded.")]
     [ProducesResponseType(typeof(ApiResponse<AvatarDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
@@ -153,14 +153,19 @@ public sealed class AvatarController : CustomerBaseApiController
     {
         EnsureCustomerOwnership(customerId);
 
-        // Map IFormFile → FileUploadDto in the API layer (same pattern as ProductsController).
-        var imageUpload = new FileUploadDto(
-            Content: request.ImageFile.OpenReadStream(),
-            FileName: request.ImageFile.FileName,
-            ContentType: request.ImageFile.ContentType,
-            Length: request.ImageFile.Length);
+        var frontImageUpload = new FileUploadDto(
+            Content: request.FrontImageFile.OpenReadStream(),
+            FileName: request.FrontImageFile.FileName,
+            ContentType: request.FrontImageFile.ContentType,
+            Length: request.FrontImageFile.Length);
 
-        var command = new ExtractMeasurementsFromImageCommand(imageUpload, request.HeightCm);
+        var sideImageUpload = new FileUploadDto(
+            Content: request.SideImageFile.OpenReadStream(),
+            FileName: request.SideImageFile.FileName,
+            ContentType: request.SideImageFile.ContentType,
+            Length: request.SideImageFile.Length);
+
+        var command = new ExtractMeasurementsFromImageCommand(frontImageUpload, sideImageUpload, request.HeightCm);
         var result = await Sender.Send(command, cancellationToken);
 
         return OkResponse(result, "Measurements extracted and saved successfully.");
@@ -174,9 +179,16 @@ public sealed class AvatarController : CustomerBaseApiController
 public sealed class ExtractMeasurementsFromImageRequest
 {
     /// <summary>
-    /// Full-body photo of the customer. JPEG or PNG. Max 5 MB.
+    /// Front-facing full-body photo. JPEG or PNG. Max 5 MB.
+    /// The customer should face directly toward the camera with arms slightly away from the body.
     /// </summary>
-    public IFormFile ImageFile { get; init; } = null!;
+    public IFormFile FrontImageFile { get; init; } = null!;
+
+    /// <summary>
+    /// Side-view full-body photo. JPEG or PNG. Max 5 MB.
+    /// The customer should stand 90° to the side with arms slightly away from the body.
+    /// </summary>
+    public IFormFile SideImageFile { get; init; } = null!;
 
     /// <summary>
     /// The customer's actual height in centimeters (required for the AI model to scale estimates).

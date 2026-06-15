@@ -12,6 +12,7 @@ namespace Application.Features.Customer.Avatar.Commands.ExtractMeasurementsFromI
 /// • The image is ephemeral — it is NOT persisted to storage after extraction.
 /// </summary>
 public sealed record ExtractMeasurementsFromImageCommand(
-    FileUploadDto ImageFile,
+    FileUploadDto FrontImageFile,
+    FileUploadDto SideImageFile,
     decimal HeightCm
 ) : IRequest<AvatarDto>;

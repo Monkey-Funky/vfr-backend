@@ -295,7 +295,7 @@ public static class DependencyInjection
 
 
         services.AddScoped<IOutfitSuggestionService, MockOutfitSuggestionService>();
-        services.AddScoped<IComplementaryStyleService, ComplementaryStyleService>();
+        services.AddHttpClient<IComplementaryStyleService, ComplementaryStyleService>();
 
         services.AddScoped<SubscriptionPlanSeeder>();
         services.AddScoped<ExcelDataSeeder>();
