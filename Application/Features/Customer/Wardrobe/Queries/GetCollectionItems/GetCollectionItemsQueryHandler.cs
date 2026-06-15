@@ -1,4 +1,4 @@
-using Application.Features.Customer.Catalog.DTOs;
+﻿using Application.Features.Customer.Catalog.DTOs;
 using Application.Features.Customer.Catalog.Mappings;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
@@ -81,8 +81,10 @@ internal sealed class GetCollectionItemsQueryHandler
             return empty;
         }
 
-        // Fetch product details and active offers in parallel.
-        var productsTask = _context.Products
+        // FIX: EF Core DbContext is NOT thread-safe — Task.WhenAll on the same context instance
+        // causes "A second operation was started on this context before a previous operation completed"
+        // (InvalidOperationException → 500). Queries must be awaited sequentially.
+        var products = await _context.Products
             .AsNoTracking()
             .Include(p => p.Images)
             .Where(p => productIds.Contains(p.Id) && p.Status == ProductStatus.Active)
@@ -91,7 +93,7 @@ internal sealed class GetCollectionItemsQueryHandler
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        var offersTask = _context.Offers
+        var activeOffers = await _context.Offers
             .AsNoTracking()
             .Where(o => o.Status == "Active"
                      && o.StartDate <= today
@@ -99,11 +101,6 @@ internal sealed class GetCollectionItemsQueryHandler
                      && o.ProductId.HasValue
                      && productIds.Contains(o.ProductId.Value))
             .ToListAsync(cancellationToken);
-
-        await Task.WhenAll(productsTask, offersTask);
-
-        var products = await productsTask;
-        var activeOffers = await offersTask;
 
         // Preserve the collection-order (by item CreatedAt) from productIds.
         var productDict = products.ToDictionary(p => p.Id);
@@ -114,7 +111,7 @@ internal sealed class GetCollectionItemsQueryHandler
             {
                 var p = productDict[id];
                 var offer = activeOffers.FirstOrDefault(o => o.ProductId == p.Id);
-                return p.ToProductCardDto(offer, isFavorite: true); // always favorited � it's in their collection
+                return p.ToProductCardDto(offer, isFavorite: true); // always favorited — it's in their collection
             })
             .ToList();
 

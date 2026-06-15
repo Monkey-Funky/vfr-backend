@@ -52,11 +52,28 @@ internal sealed class UpdateOutfitCommandHandler : IRequestHandler<UpdateOutfitC
 
         outfit.UpdateStyle(request.StyleCategory);
 
-        // Clear existing items then re-add using the correct domain method.
+        // Snapshot the IDs already tracked by EF Core (items loaded via .Include above).
+        // These are either Unchanged or will become Modified after ClearItems().
+        var trackedItemIds = outfit.Items
+            .Select(i => i.Id)
+            .ToHashSet();
+
+        // Soft-delete all existing active items via the domain method.
         outfit.ClearItems();
 
+        // Re-add the desired items via the domain method.
         foreach (var item in request.Items)
             outfit.AddOrUpdateItem(item.ProductId, item.SlotType, item.DisplayOrder);
+
+        // FIX: EF Core does NOT automatically track new entities added directly to a
+        // private backing field (List<T>). Items created inside AddOrUpdateItem() via
+        // CustomerOutfitItem.Create() are Detached — EF Core won't INSERT them.
+        // We must explicitly register any item that EF Core has never seen before.
+        foreach (var item in outfit.Items.Where(i => !i.IsDeleted))
+        {
+            if (!trackedItemIds.Contains(item.Id))
+                _context.CustomerOutfitItems.Add(item);
+        }
 
         await _context.SaveChangesAsync(cancellationToken);
 

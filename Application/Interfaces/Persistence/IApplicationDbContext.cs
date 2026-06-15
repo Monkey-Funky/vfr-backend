@@ -5,6 +5,7 @@ using Domain.Entities.Orders;
 using Domain.Entities.Customer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Domain.Entities.CustomerOrders;
 
 namespace Application.Interfaces.Persistence;
 

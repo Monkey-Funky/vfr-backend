@@ -23,7 +23,8 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
     }
 
     public async Task<BodyMeasurements> ExtractAsync(
-        Stream imageStream, string fileName, string contentType,
+        Stream frontImageStream, string frontFileName, string frontContentType,
+        Stream sideImageStream, string sideFileName, string sideContentType,
         decimal heightCm,
         CancellationToken ct = default)
     {
@@ -39,20 +40,20 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
                 "AiModels:MeasurementExtractionUrl is not configured. " +
                 "Returning mock measurements for development.");
 
-            await Task.Delay(1500, ct); // Simulate AI processing latency.
+            await Task.Delay(1500, ct);
 
             return new BodyMeasurements(
-                HeightCm:        heightCm,
-                WeightKg:        70m,
-                ChestCm:         95m,
-                WaistCm:         80m,
-                HipsCm:          100m,
+                HeightCm: heightCm,
+                WeightKg: 70m,
+                ChestCm: 95m,
+                WaistCm: 80m,
+                HipsCm: 100m,
                 ShoulderWidthCm: 45m,
-                InseamCm:        82m,
-                NeckCm:          38m,
-                ArmLengthCm:     60m,
-                ShoeSizeEu:      42m,
-                BodyShape:       "Rectangle"
+                InseamCm: 82m,
+                NeckCm: 38m,
+                ArmLengthCm: 60m,
+                ShoeSizeEu: 42m,
+                BodyShape: "Rectangle"
             );
         }
 
@@ -65,13 +66,18 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
                 heightCm.ToString(global::System.Globalization.CultureInfo.InvariantCulture)),
             "user_height_cm");
 
-        // 2. Image file.
-        var imageContent = new StreamContent(imageStream);
-        imageContent.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
-        requestContent.Add(imageContent, "image", fileName);
+        // 2. Front image.
+        var frontContent = new StreamContent(frontImageStream);
+        frontContent.Headers.ContentType = MediaTypeHeaderValue.Parse(frontContentType);
+        requestContent.Add(frontContent, "front_image", frontFileName);
+
+        // 3. Side image.
+        var sideContent = new StreamContent(sideImageStream);
+        sideContent.Headers.ContentType = MediaTypeHeaderValue.Parse(sideContentType);
+        requestContent.Add(sideContent, "side_image", sideFileName);
 
         _logger.LogInformation(
-            "Sending image to AI model at {Url} for measurement extraction…",
+            "Sending front + side images to AI model at {Url} for measurement extraction…",
             aiApiUrl);
 
         // Polly resilience pipeline (60 s timeout + 2 retries) is configured in DI.
@@ -93,7 +99,7 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
         var responseStream = await response.Content.ReadAsStreamAsync(ct);
 
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var aiResponse = await JsonSerializer.DeserializeAsync<AiMeasureResponse>(responseStream, cancellationToken: ct);
+        var aiResponse = await JsonSerializer.DeserializeAsync<AiMeasureResponse>(responseStream, options, cancellationToken: ct);
 
         if (aiResponse?.Data?.Measurements == null)
         {
@@ -104,15 +110,15 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
         var aiData = aiResponse.Data.Measurements;
 
         return new BodyMeasurements(
-            HeightCm: heightCm, 
-            WeightKg: 65m,       
+            HeightCm: heightCm,
+            WeightKg: 65m,
             ChestCm: aiData.Chest?.CircumferenceCm,
             WaistCm: aiData.Waist?.CircumferenceCm,
             HipsCm: aiData.Hip?.CircumferenceCm,
-            ShoulderWidthCm: aiData.Shoulder?.WidthCm, 
-            InseamCm: null,     
+            ShoulderWidthCm: aiData.Shoulder?.WidthCm,
+            InseamCm: null,
             NeckCm: aiData.Neck?.CircumferenceCm,
-            ArmLengthCm: null,     
+            ArmLengthCm: null,
             ShoeSizeEu: null,
             BodyShape: null
         );

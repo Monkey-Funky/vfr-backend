@@ -1,4 +1,4 @@
-using Application.Interfaces.Persistence;
+﻿using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 using Application.Features.Customer.Outfits.DTOs;
@@ -49,21 +49,22 @@ internal sealed class GetOutfitDetailQueryHandler : IRequestHandler<GetOutfitDet
 
         var productIds = outfit.Items.Select(i => i.ProductId).Distinct().ToList();
 
-        // Parallelise product + inventory fetches
-        var productsTask = _context.Products.AsNoTracking()
+        // FIX: EF Core DbContext is NOT thread-safe — Task.WhenAll on the same context instance
+        // causes "A second operation was started on this context before a previous operation completed"
+        // (InvalidOperationException → 500). Queries must be awaited sequentially.
+        var products = await _context.Products
+            .AsNoTracking()
             .Include(p => p.Images)
             .Where(p => productIds.Contains(p.Id))
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
-        var inventoryTask = _context.InventoryRecords.AsNoTracking()
+        var inventoryDict = await _context.InventoryRecords
+            .AsNoTracking()
             .Where(ir => productIds.Contains(ir.ProductId))
             .ToDictionaryAsync(ir => ir.ProductId, cancellationToken);
 
-        await Task.WhenAll(productsTask, inventoryTask);
-
-        var productDict = (await productsTask).ToDictionary(p => p.Id);
-        var inventoryDict = await inventoryTask;
+        var productDict = products.ToDictionary(p => p.Id);
 
         var dto = outfit.ToOutfitDetailDto(productDict, inventoryDict);
 
