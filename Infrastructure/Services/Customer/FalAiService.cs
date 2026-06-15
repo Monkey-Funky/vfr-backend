@@ -193,8 +193,36 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("include_3d_keypoints")] bool Include3dKeypoints);
 
     private sealed record BodyResponse(
-        [property: JsonPropertyName("model_glb")] FalFileResponse? ModelGlb,
+        [property: JsonPropertyName("model_glb")]
+        [property: JsonConverter(typeof(FalFileOrStringConverter))]
+        FalFileResponse? ModelGlb,
         [property: JsonPropertyName("metadata")] BodyMetadata? Metadata);
+
+    /// <summary>
+    /// fal.ai may return File fields as either a plain URL string or a full
+    /// object { url, content_type, file_name, file_size }. This converter
+    /// handles both forms transparently.
+    /// </summary>
+    private sealed class FalFileOrStringConverter : JsonConverter<FalFileResponse?>
+    {
+        public override FalFileResponse? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+                return null;
+
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                var url = reader.GetString();
+                return new FalFileResponse(url, null, null, null);
+            }
+
+            // It's an object — deserialize normally.
+            return JsonSerializer.Deserialize<FalFileResponse>(ref reader, options);
+        }
+
+        public override void Write(Utf8JsonWriter writer, FalFileResponse? value, JsonSerializerOptions options)
+            => JsonSerializer.Serialize(writer, value, options);
+    }
 
     private sealed record BodyMetadata(
         [property: JsonPropertyName("people")] List<BodyPerson>? People);

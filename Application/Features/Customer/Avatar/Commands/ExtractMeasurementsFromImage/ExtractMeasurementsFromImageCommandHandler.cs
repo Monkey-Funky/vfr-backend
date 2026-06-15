@@ -44,27 +44,25 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         BodyMeasurements measurements;
         string? avatar3dModelUrl = null;
 
-        // 1. Copy the front image into a reusable MemoryStream.
-        //    The original IFormFile stream (ReferenceReadStream) gets disposed by
-        //    HttpClient/MultipartFormDataContent after ExtractAsync completes, so
-        //    we must buffer it before any downstream consumer takes ownership.
+        // 1. Buffer the front image bytes so we can reuse them across multiple
+        //    downstream consumers (ExtractAsync, Cloudinary upload). Each consumer
+        //    wraps the stream in StreamContent which disposes the stream on completion,
+        //    so we give each one a fresh, disposable MemoryStream from the same byte[].
         await using var originalFrontStream = request.FrontImageFile.Content;
         await using var sideStream = request.SideImageFile.Content;
 
-        var frontBuffer = new MemoryStream();
-        await originalFrontStream.CopyToAsync(frontBuffer, cancellationToken);
-        frontBuffer.Position = 0;
+        var frontBytes = await ReadAllBytesAsync(originalFrontStream, cancellationToken);
 
         // Validate magic bytes for both images before forwarding to AI.
-        await ValidateImageMagicBytesAsync(frontBuffer, "front image", cancellationToken);
-        frontBuffer.Position = 0;
+        await using (var validateStream = new MemoryStream(frontBytes, writable: false))
+            await ValidateImageMagicBytesAsync(validateStream, "front image", cancellationToken);
 
         await ValidateImageMagicBytesAsync(sideStream, "side image", cancellationToken);
         if (sideStream.CanSeek) sideStream.Seek(0, SeekOrigin.Begin);
 
-        // 2. Send both images to the AI model.
+        // 2. Send both images to the AI model (uses a throwaway stream for front).
         measurements = await _extractionService.ExtractAsync(
-            frontBuffer,
+            new MemoryStream(frontBytes, writable: false),
             request.FrontImageFile.FileName,
             request.FrontImageFile.ContentType,
             sideStream,
@@ -76,12 +74,9 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         // 3. Generate 3D body model from the front image (best-effort — does not abort the flow).
         try
         {
-            // Reset the buffered stream — it survives ExtractAsync disposal.
-            frontBuffer.Position = 0;
-
             var uniqueFileName = $"{customerId}_{Guid.NewGuid():N}{Path.GetExtension(request.FrontImageFile.FileName)}";
             var cloudinaryUrl = await _fileStorageService.UploadAsync(
-                frontBuffer, uniqueFileName, "avatars/3d-source", cancellationToken);
+                new MemoryStream(frontBytes, writable: false), uniqueFileName, "avatars/3d-source", cancellationToken);
 
             _logger.LogInformation(
                 "Uploaded avatar source image for 3D generation. CustomerId: {CustomerId}, URL: {CloudinaryUrl}",
@@ -186,5 +181,15 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         if (!isJpeg && !isPng)
             throw new BusinessRuleException("INVALID_FILE_TYPE",
                 $"Only JPEG and PNG images are allowed. The uploaded {imageLabel} does not match a supported image format.");
+    }
+
+    /// <summary>
+    /// Reads the entire content of a stream into a byte array.
+    /// </summary>
+    private static async Task<byte[]> ReadAllBytesAsync(Stream stream, CancellationToken ct)
+    {
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct);
+        return ms.ToArray();
     }
 }
