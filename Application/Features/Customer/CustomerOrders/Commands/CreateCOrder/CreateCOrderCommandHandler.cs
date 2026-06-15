@@ -1,6 +1,5 @@
 using Application.Interfaces.Persistence;
 using Domain.Entities.CustomerOrders;
-using Domain.Entities.Customer;
 using MediatR;
 using Microsoft.EntityFrameworkCore; // FirstOrDefaultAsync, include
 
