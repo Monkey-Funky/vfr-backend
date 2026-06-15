@@ -98,7 +98,7 @@ public sealed class FalAiService : IFalAiService
         _logger.LogInformation("Submitting fal.ai request to {ApiId}", apiId);
 
         using var submitResponse = await submitClient.PostAsJsonAsync(submitUrl, requestBody, JsonOptions, ct);
-        submitResponse.EnsureSuccessStatusCode();
+        await EnsureSuccessOrLogAsync(submitResponse, "submit", apiId, ct);
 
         var queueResult = await submitResponse.Content.ReadFromJsonAsync<QueueSubmitResponse>(JsonOptions, ct)
             ?? throw new ExternalServiceException("FalAi", $"Failed to parse queue submit response for {apiId}.");
@@ -106,10 +106,17 @@ public sealed class FalAiService : IFalAiService
         var requestId = queueResult.RequestId
             ?? throw new ExternalServiceException("FalAi", $"Queue submit response did not contain a request_id for {apiId}.");
 
-        _logger.LogInformation("fal.ai request queued. API: {ApiId}, RequestId: {RequestId}", apiId, requestId);
+        // Use server-provided URLs when available; fall back to manual construction.
+        var statusUrl = queueResult.StatusUrl
+            ?? $"{baseUrl}/{apiId}/requests/{requestId}/status";
+        var responseUrl = queueResult.ResponseUrl
+            ?? $"{baseUrl}/{apiId}/requests/{requestId}/response";
+
+        _logger.LogInformation(
+            "fal.ai request queued. API: {ApiId}, RequestId: {RequestId}, StatusUrl: {StatusUrl}, ResponseUrl: {ResponseUrl}",
+            apiId, requestId, statusUrl, responseUrl);
 
         // 2. Poll for completion
-        var statusUrl = $"{baseUrl}/{apiId}/requests/{requestId}/status";
         var deadline = DateTime.UtcNow.AddSeconds(_settings.MaxPollSeconds);
 
         while (DateTime.UtcNow < deadline)
@@ -119,7 +126,7 @@ public sealed class FalAiService : IFalAiService
 
             using var pollClient = CreateAuthorizedClient();
             using var pollResponse = await pollClient.GetAsync(statusUrl, ct);
-            pollResponse.EnsureSuccessStatusCode();
+            await EnsureSuccessOrLogAsync(pollResponse, "poll-status", apiId, ct);
 
             var status = await pollResponse.Content.ReadFromJsonAsync<QueueStatusResponse>(JsonOptions, ct);
             var statusValue = status?.Status ?? "UNKNOWN";
@@ -145,11 +152,10 @@ public sealed class FalAiService : IFalAiService
                 $"Processing timed out after {_settings.MaxPollSeconds} seconds.");
         }
 
-        // 3. Fetch the result
-        var resultUrl = $"{baseUrl}/{apiId}/requests/{requestId}";
+        // 3. Fetch the result using the response URL (note: must end with /response)
         using var fetchClient = CreateAuthorizedClient();
-        using var fetchResponse = await fetchClient.GetAsync(resultUrl, ct);
-        fetchResponse.EnsureSuccessStatusCode();
+        using var fetchResponse = await fetchClient.GetAsync(responseUrl, ct);
+        await EnsureSuccessOrLogAsync(fetchResponse, "fetch-result", apiId, ct);
 
         var result = await fetchResponse.Content.ReadFromJsonAsync<TResult>(JsonOptions, ct)
             ?? throw new ExternalServiceException("FalAi", $"Failed to parse result for request {requestId}.");
@@ -158,6 +164,27 @@ public sealed class FalAiService : IFalAiService
             apiId, requestId);
 
         return result;
+    }
+
+    /// <summary>
+    /// Reads the response body and logs it when the status code indicates failure,
+    /// then throws <see cref="HttpRequestException"/> so callers get a clear error.
+    /// </summary>
+    private async Task EnsureSuccessOrLogAsync(
+        HttpResponseMessage response, string phase, string apiId, CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        _logger.LogError(
+            "fal.ai {Phase} failed for {ApiId}. Status: {StatusCode}, Body: {Body}",
+            phase, apiId, (int)response.StatusCode, body);
+
+        throw new HttpRequestException(
+            $"fal.ai {phase} returned {(int)response.StatusCode} ({response.ReasonPhrase}). Body: {body}",
+            inner: null,
+            statusCode: response.StatusCode);
     }
 
     private HttpClient CreateAuthorizedClient()
@@ -172,11 +199,15 @@ public sealed class FalAiService : IFalAiService
 
     private sealed record QueueSubmitResponse(
         [property: JsonPropertyName("request_id")] string? RequestId,
-        [property: JsonPropertyName("status")] string? Status);
+        [property: JsonPropertyName("status")] string? Status,
+        [property: JsonPropertyName("status_url")] string? StatusUrl,
+        [property: JsonPropertyName("response_url")] string? ResponseUrl,
+        [property: JsonPropertyName("cancel_url")] string? CancelUrl);
 
     private sealed record QueueStatusResponse(
         [property: JsonPropertyName("status")] string? Status,
-        [property: JsonPropertyName("error")] string? Error);
+        [property: JsonPropertyName("error")] string? Error,
+        [property: JsonPropertyName("response_url")] string? ResponseUrl);
 
     // ── Shared File DTO (fal.ai returns file references as { url, content_type, … }) ─
     private sealed record FalFileResponse(
