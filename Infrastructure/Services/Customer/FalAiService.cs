@@ -41,7 +41,7 @@ public sealed class FalAiService : IFalAiService
         var result = await SubmitAndPollAsync<BodyRequest, BodyResponse>(
             _settings.BodyApiId, requestBody, ct);
 
-        var glbUrl = result.ModelGlb
+        var glbUrl = result.ModelGlb?.Url
             ?? throw new ExternalServiceException("FalAi", "Body 3D response did not contain a model_glb URL.");
 
         double focalLength = 1000.0; // safe default
@@ -178,6 +178,13 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("status")] string? Status,
         [property: JsonPropertyName("error")] string? Error);
 
+    // ── Shared File DTO (fal.ai returns file references as { url, content_type, … }) ─
+    private sealed record FalFileResponse(
+        [property: JsonPropertyName("url")] string? Url,
+        [property: JsonPropertyName("content_type")] string? ContentType,
+        [property: JsonPropertyName("file_name")] string? FileName,
+        [property: JsonPropertyName("file_size")] long? FileSize);
+
     // ── Body API DTOs ────────────────────────────────────────────────────────
 
     private sealed record BodyRequest(
@@ -186,7 +193,7 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("include_3d_keypoints")] bool Include3dKeypoints);
 
     private sealed record BodyResponse(
-        [property: JsonPropertyName("model_glb")] string? ModelGlb,
+        [property: JsonPropertyName("model_glb")] FalFileResponse? ModelGlb,
         [property: JsonPropertyName("metadata")] BodyMetadata? Metadata);
 
     private sealed record BodyMetadata(
