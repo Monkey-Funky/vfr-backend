@@ -20,15 +20,13 @@ COPY . .
 RUN dotnet publish API/API.csproj -c Release -o /app/publish --no-restore
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS runtime
 WORKDIR /app
 
-# Install ICU libraries for full globalization support (required by .NET on Alpine).
-RUN apk add --no-cache icu-libs
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 
 # Security: run as non-root user.
-RUN adduser -D -h /app appuser
+RUN useradd --no-create-home --home-dir /app appuser
 USER appuser
 
 COPY --from=build /app/publish .
