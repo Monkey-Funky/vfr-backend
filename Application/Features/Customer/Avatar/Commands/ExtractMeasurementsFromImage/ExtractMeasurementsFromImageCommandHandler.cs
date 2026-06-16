@@ -72,66 +72,36 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
             request.HeightCm,
             cancellationToken);
 
-        // 3. Generate 3D avatar model using the full preprocessing pipeline (best-effort).
-        //    Pipeline: Upload both images → BiRefNet (bg removal) → AuraSR (upscale) → Rodin (3D)
-        //    Using BOTH front+side images gives Rodin multi-view data for much better 3D reconstruction.
+        // 3. Generate 3D body model via SAM 3D Body (best-effort — does not abort the flow).
+        //    SAM 3D Body is purpose-built for human reconstruction: $0.02/call, 5-10s, single image.
+        //    Front-facing view produces optimal results per the official documentation.
         try
         {
-            // 3a. Upload both images to Cloudinary for public URLs (parallel).
-            var frontFileName = $"{customerId}_{Guid.NewGuid():N}_front{Path.GetExtension(request.FrontImageFile.FileName)}";
-            var sideFileName = $"{customerId}_{Guid.NewGuid():N}_side{Path.GetExtension(request.SideImageFile.FileName)}";
-
-            var frontUploadTask = _fileStorageService.UploadAsync(
-                new MemoryStream(frontBytes, writable: false), frontFileName, "avatars/3d-source", cancellationToken);
-            var sideUploadTask = _fileStorageService.UploadAsync(
-                new MemoryStream(sideBytes, writable: false), sideFileName, "avatars/3d-source", cancellationToken);
-
-            var cloudinaryUrls = await Task.WhenAll(frontUploadTask, sideUploadTask);
-            var frontCloudinaryUrl = cloudinaryUrls[0];
-            var sideCloudinaryUrl = cloudinaryUrls[1];
+            var uniqueFileName = $"{customerId}_{Guid.NewGuid():N}_front{Path.GetExtension(request.FrontImageFile.FileName)}";
+            var cloudinaryUrl = await _fileStorageService.UploadAsync(
+                new MemoryStream(frontBytes, writable: false), uniqueFileName, "avatars/3d-source", cancellationToken);
 
             _logger.LogInformation(
-                "Uploaded both source images for 3D generation. CustomerId: {CustomerId}, Front: {FrontUrl}, Side: {SideUrl}",
-                customerId, frontCloudinaryUrl, sideCloudinaryUrl);
+                "Uploaded front image for 3D body generation. CustomerId: {CustomerId}, URL: {CloudinaryUrl}",
+                customerId, cloudinaryUrl);
 
-            // 3b. Preprocess: Background removal + Upscale (parallel for both images).
-            var frontBgTask = _falAiService.RemoveBackgroundAsync(frontCloudinaryUrl, cancellationToken);
-            var sideBgTask = _falAiService.RemoveBackgroundAsync(sideCloudinaryUrl, cancellationToken);
-
-            var bgRemovedUrls = await Task.WhenAll(frontBgTask, sideBgTask);
+            var bodyResult = await _falAiService.GenerateBody3dAsync(cloudinaryUrl, cancellationToken);
+            avatar3dModelUrl = bodyResult.GlbUrl;
 
             _logger.LogInformation(
-                "Background removed from both images. CustomerId: {CustomerId}",
-                customerId);
-
-            var frontUpscaleTask = _falAiService.UpscaleImageAsync(bgRemovedUrls[0], cancellationToken);
-            var sideUpscaleTask = _falAiService.UpscaleImageAsync(bgRemovedUrls[1], cancellationToken);
-
-            var upscaledUrls = await Task.WhenAll(frontUpscaleTask, sideUpscaleTask);
-
-            _logger.LogInformation(
-                "Both images upscaled. CustomerId: {CustomerId}",
-                customerId);
-
-            // 3c. Generate 3D avatar from BOTH preprocessed images (multi-view concat mode).
-            var avatarResult = await _falAiService.GenerateAvatar3dAsync(
-                upscaledUrls, cancellationToken);
-            avatar3dModelUrl = avatarResult.GlbUrl;
-
-            _logger.LogInformation(
-                "3D avatar model generated successfully. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}",
-                customerId, avatar3dModelUrl);
+                "SAM 3D Body generation completed. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}, FocalLength: {FocalLength}",
+                customerId, avatar3dModelUrl, bodyResult.FocalLength);
         }
         catch (ExternalServiceException ex)
         {
             _logger.LogWarning(ex,
-                "fal.ai 3D avatar generation pipeline failed for CustomerId {CustomerId}. Continuing without 3D model.",
+                "fal.ai 3D body generation failed for CustomerId {CustomerId}. Continuing without 3D model.",
                 customerId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex,
-                "Unexpected error during 3D avatar generation pipeline for CustomerId {CustomerId}. Continuing without 3D model.",
+                "Unexpected error during 3D body generation for CustomerId {CustomerId}. Continuing without 3D model.",
                 customerId);
         }
 
