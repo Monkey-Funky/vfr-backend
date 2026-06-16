@@ -18,7 +18,16 @@ public sealed class FalAiSettings
 
     // ── Queue Configuration ───────────────────────────────────────────────
     public string QueueBaseUrl { get; init; } = "https://queue.fal.run";
-    /// <summary>SAM 3D is fast (5-30s). 120s timeout handles high-res inputs.</summary>
-    public int MaxPollSeconds { get; init; } = 120;
-    public int PollIntervalMs { get; init; } = 2000;
+    /// <summary>SAM 3D is fast (5-30s). 90s timeout handles high-res inputs.</summary>
+    public int MaxPollSeconds { get; init; } = 90;
+    /// <summary>
+    /// Wait this long before the FIRST poll. SAM 3D Body needs ~4-5s minimum.
+    /// Skips wasted poll cycles at the start.
+    /// </summary>
+    public int InitialPollDelayMs { get; init; } = 4000;
+    /// <summary>
+    /// Interval between subsequent polls after the first check.
+    /// 1500ms hits the completion window without over-polling.
+    /// </summary>
+    public int PollIntervalMs { get; init; } = 1500;
 }

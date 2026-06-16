@@ -47,11 +47,14 @@ public sealed class FalAiService : IFalAiService
     {
         _logger.LogInformation("Generating 3D body via SAM 3D Body. Image: {ImageUrl}", imageUrl);
 
+        // Use a random seed per request to prevent fal.ai from returning
+        // a cached result when the same person re-uploads photos.
         var requestBody = new BodyRequest
         {
             ImageUrl = imageUrl,
             ExportMeshes = true,
-            Include3dKeypoints = true
+            Include3dKeypoints = true,
+            Seed = Random.Shared.Next(1, int.MaxValue)
         };
 
         var result = await SubmitAndPollAsync<BodyRequest, BodyResponse>(
@@ -145,13 +148,14 @@ public sealed class FalAiService : IFalAiService
 
         _logger.LogDebug("fal.ai queued. API: {ApiId}, RequestId: {RequestId}", apiId, requestId);
 
-        // 2. Poll
+        // 2. Poll — SAM 3D typically completes in 5-10s.
+        //    Wait 4s before first check, then poll every 1.5s to catch completion fast.
         var deadline = DateTime.UtcNow.AddSeconds(_settings.MaxPollSeconds);
+        await Task.Delay(_settings.InitialPollDelayMs, ct);
 
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            await Task.Delay(_settings.PollIntervalMs, ct);
 
             using var pollClient = CreateAuthorizedClient();
             using var pollResponse = await pollClient.GetAsync(statusUrl, ct);
@@ -168,6 +172,8 @@ public sealed class FalAiService : IFalAiService
                 _logger.LogError("fal.ai {RequestId} failed: {Error}", requestId, status?.Error);
                 throw new ExternalServiceException("FalAi", $"fal.ai processing failed: {status?.Error ?? "Unknown"}");
             }
+
+            await Task.Delay(_settings.PollIntervalMs, ct);
         }
 
         if (DateTime.UtcNow >= deadline)
@@ -234,6 +240,13 @@ public sealed class FalAiService : IFalAiService
 
         [JsonPropertyName("include_3d_keypoints")]
         public bool Include3dKeypoints { get; init; } = true;
+
+        /// <summary>
+        /// Random seed per request — prevents fal.ai from returning a cached
+        /// result when the same image URL is submitted multiple times.
+        /// </summary>
+        [JsonPropertyName("seed")]
+        public int Seed { get; init; }
     }
 
     private sealed record BodyResponse(
