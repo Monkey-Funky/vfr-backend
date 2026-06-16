@@ -12,7 +12,9 @@ namespace Infrastructure.Services.Customer;
 /// Production implementation of <see cref="IFalAiService"/> that integrates with the
 /// fal.ai API suite using the async queue pattern (submit → poll → fetch).
 ///
-/// Avatar generation uses Hyper3D Rodin for production-ready, textured 3D models.
+/// Pipeline for avatar generation:
+///   Raw Photo → BiRefNet (background removal) → AuraSR (upscale) → Rodin (3D)
+///
 /// Clothing and alignment still use SAM 3D Objects / Align APIs.
 /// </summary>
 public sealed class FalAiService : IFalAiService
@@ -36,13 +38,69 @@ public sealed class FalAiService : IFalAiService
         _logger = logger;
     }
 
-    // ── Avatar Generation (Hyper3D Rodin) ────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  IMAGE PREPROCESSING
+    // ══════════════════════════════════════════════════════════════════════
 
-    public async Task<FalAvatarResult> GenerateAvatar3dAsync(string imageUrl, CancellationToken ct = default)
+    public async Task<string> RemoveBackgroundAsync(string imageUrl, CancellationToken ct = default)
     {
+        _logger.LogInformation("Removing background via BiRefNet v2 (Portrait). Image: {ImageUrl}", imageUrl);
+
+        var requestBody = new BiRefNetRequest
+        {
+            ImageUrl = imageUrl,
+            Model = "Portrait",
+            OperatingResolution = "2048x2048",
+            OutputFormat = "png",
+            RefineForeground = true
+        };
+
+        var result = await SubmitAndPollAsync<BiRefNetRequest, BiRefNetResponse>(
+            _settings.BackgroundRemovalApiId, requestBody, ct);
+
+        var cleanUrl = result.Image?.Url
+            ?? throw new ExternalServiceException("FalAi", "BiRefNet background removal did not return an image URL.");
+
+        _logger.LogInformation("Background removed successfully. Clean image: {CleanUrl}", cleanUrl);
+        return cleanUrl;
+    }
+
+    public async Task<string> UpscaleImageAsync(string imageUrl, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Upscaling image via AuraSR. Image: {ImageUrl}", imageUrl);
+
+        var requestBody = new AuraSrRequest
+        {
+            ImageUrl = imageUrl,
+            UpscaleFactor = 4,
+            OverlappingTiles = true,
+            Checkpoint = "v2"
+        };
+
+        var result = await SubmitAndPollAsync<AuraSrRequest, AuraSrResponse>(
+            _settings.ImageUpscaleApiId, requestBody, ct);
+
+        var upscaledUrl = result.Image?.Url
+            ?? throw new ExternalServiceException("FalAi", "AuraSR upscale did not return an image URL.");
+
+        _logger.LogInformation("Image upscaled successfully. Upscaled image: {UpscaledUrl}", upscaledUrl);
+        return upscaledUrl;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  3D AVATAR GENERATION (Hyper3D Rodin with multi-view)
+    // ══════════════════════════════════════════════════════════════════════
+
+    public async Task<FalAvatarResult> GenerateAvatar3dAsync(
+        IReadOnlyList<string> imageUrls, CancellationToken ct = default)
+    {
+        // Use "concat" mode when multiple images are provided (front+side),
+        // "fuse" mode for a single image.
+        var conditionMode = imageUrls.Count > 1 ? "concat" : "fuse";
+
         var requestBody = new RodinRequest
         {
-            InputImageUrls = [imageUrl],
+            InputImageUrls = imageUrls.ToList(),
             Prompt = "photorealistic full-body 3D human avatar, sharp detailed facial features, " +
                      "clear eyes nose and mouth, natural skin texture with pores and subtle color variation, " +
                      "detailed hair strands, realistic clothing with fabric wrinkles and folds, " +
@@ -52,14 +110,17 @@ public sealed class FalAiService : IFalAiService
             Quality = _settings.AvatarQuality,
             Material = _settings.AvatarMaterial,
             GeometryFileFormat = "glb",
-            ConditionMode = "fuse",
+            ConditionMode = conditionMode,
             TAPose = true,
             Addons = _settings.EnableHighPack ? "HighPack" : null
         };
 
         _logger.LogInformation(
-            "Generating 3D avatar via Hyper3D Rodin. Quality={Quality}, Material={Material}, Tier={Tier}",
-            _settings.AvatarQuality, _settings.AvatarMaterial, _settings.AvatarTier);
+            "Generating 3D avatar via Hyper3D Rodin. Images={ImageCount}, Mode={ConditionMode}, " +
+            "Quality={Quality}, Material={Material}, Tier={Tier}, HighPack={HighPack}",
+            imageUrls.Count, conditionMode,
+            _settings.AvatarQuality, _settings.AvatarMaterial, _settings.AvatarTier,
+            _settings.EnableHighPack);
 
         var result = await SubmitAndPollAsync<RodinRequest, RodinResponse>(
             _settings.BodyApiId, requestBody, ct);
@@ -71,9 +132,12 @@ public sealed class FalAiService : IFalAiService
         return new FalAvatarResult(glbUrl);
     }
 
-    // ── Clothing 3D (SAM 3D Objects — unchanged) ─────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  CLOTHING 3D (SAM 3D Objects)
+    // ══════════════════════════════════════════════════════════════════════
 
-    public async Task<FalObjectResult> GenerateObject3dAsync(string imageUrl, string prompt, CancellationToken ct = default)
+    public async Task<FalObjectResult> GenerateObject3dAsync(
+        string imageUrl, string prompt, CancellationToken ct = default)
     {
         var requestBody = new ObjectsRequest(imageUrl, prompt, 42);
         var result = await SubmitAndPollAsync<ObjectsRequest, ObjectsResponse>(
@@ -89,7 +153,9 @@ public sealed class FalAiService : IFalAiService
         return new FalObjectResult(glbUrl);
     }
 
-    // ── Scene Alignment (SAM 3D Align — unchanged) ───────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  SCENE ALIGNMENT (SAM 3D Align)
+    // ══════════════════════════════════════════════════════════════════════
 
     public async Task<string> AlignSceneAsync(
         string imageUrl, string bodyMeshUrl, string objectMeshUrl,
@@ -106,7 +172,9 @@ public sealed class FalAiService : IFalAiService
         return sceneUrl;
     }
 
-    // ── Queue Pattern: Submit → Poll → Fetch ─────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  QUEUE PATTERN: Submit → Poll → Fetch
+    // ══════════════════════════════════════════════════════════════════════
 
     private async Task<TResult> SubmitAndPollAsync<TRequest, TResult>(
         string apiId, TRequest requestBody, CancellationToken ct)
@@ -114,7 +182,7 @@ public sealed class FalAiService : IFalAiService
         var baseUrl = _settings.QueueBaseUrl.TrimEnd('/');
         var submitUrl = $"{baseUrl}/{apiId}";
 
-        // 1. Submit the request to the queue
+        // 1. Submit
         using var submitClient = CreateAuthorizedClient();
         _logger.LogInformation("Submitting fal.ai request to {ApiId}", apiId);
 
@@ -127,17 +195,16 @@ public sealed class FalAiService : IFalAiService
         var requestId = queueResult.RequestId
             ?? throw new ExternalServiceException("FalAi", $"Queue submit response did not contain a request_id for {apiId}.");
 
-        // Use server-provided URLs when available; fall back to manual construction.
         var statusUrl = queueResult.StatusUrl
             ?? $"{baseUrl}/{apiId}/requests/{requestId}/status";
         var responseUrl = queueResult.ResponseUrl
             ?? $"{baseUrl}/{apiId}/requests/{requestId}/response";
 
         _logger.LogInformation(
-            "fal.ai request queued. API: {ApiId}, RequestId: {RequestId}, StatusUrl: {StatusUrl}, ResponseUrl: {ResponseUrl}",
-            apiId, requestId, statusUrl, responseUrl);
+            "fal.ai request queued. API: {ApiId}, RequestId: {RequestId}",
+            apiId, requestId);
 
-        // 2. Poll for completion
+        // 2. Poll
         var deadline = DateTime.UtcNow.AddSeconds(_settings.MaxPollSeconds);
 
         while (DateTime.UtcNow < deadline)
@@ -167,18 +234,17 @@ public sealed class FalAiService : IFalAiService
 
         if (DateTime.UtcNow >= deadline)
         {
-            _logger.LogError("fal.ai request {RequestId} timed out after {MaxPollSeconds} seconds",
+            _logger.LogError("fal.ai request {RequestId} timed out after {MaxPollSeconds}s",
                 requestId, _settings.MaxPollSeconds);
             throw new ExternalServiceException("FalAi",
                 $"Processing timed out after {_settings.MaxPollSeconds} seconds.");
         }
 
-        // 3. Fetch the result using the response URL (note: must end with /response)
+        // 3. Fetch result
         using var fetchClient = CreateAuthorizedClient();
         using var fetchResponse = await fetchClient.GetAsync(responseUrl, ct);
         await EnsureSuccessOrLogAsync(fetchResponse, "fetch-result", apiId, ct);
 
-        // Log the raw JSON for debugging (helps diagnose unexpected response shapes)
         var rawJson = await fetchResponse.Content.ReadAsStringAsync(ct);
         _logger.LogDebug("fal.ai raw result for {ApiId}, RequestId {RequestId}: {RawJson}",
             apiId, requestId, rawJson);
@@ -186,16 +252,10 @@ public sealed class FalAiService : IFalAiService
         var result = JsonSerializer.Deserialize<TResult>(rawJson, JsonOptions)
             ?? throw new ExternalServiceException("FalAi", $"Failed to parse result for request {requestId}.");
 
-        _logger.LogInformation("fal.ai result fetched successfully. API: {ApiId}, RequestId: {RequestId}",
-            apiId, requestId);
-
+        _logger.LogInformation("fal.ai result fetched. API: {ApiId}, RequestId: {RequestId}", apiId, requestId);
         return result;
     }
 
-    /// <summary>
-    /// Reads the response body and logs it when the status code indicates failure,
-    /// then throws <see cref="HttpRequestException"/> so callers get a clear error.
-    /// </summary>
     private async Task EnsureSuccessOrLogAsync(
         HttpResponseMessage response, string phase, string apiId, CancellationToken ct)
     {
@@ -221,7 +281,9 @@ public sealed class FalAiService : IFalAiService
         return client;
     }
 
-    // ── Queue Pattern DTOs (private nested records) ──────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  DTOs — Queue Pattern
+    // ══════════════════════════════════════════════════════════════════════
 
     private sealed record QueueSubmitResponse(
         [property: JsonPropertyName("request_id")] string? RequestId,
@@ -235,14 +297,79 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("error")] string? Error,
         [property: JsonPropertyName("response_url")] string? ResponseUrl);
 
-    // ── Shared File DTO (fal.ai returns file references as { url, content_type, … }) ─
+    // ── Shared file DTO ──────────────────────────────────────────────────
     private sealed record FalFileResponse(
         [property: JsonPropertyName("url")] string? Url,
         [property: JsonPropertyName("content_type")] string? ContentType,
         [property: JsonPropertyName("file_name")] string? FileName,
         [property: JsonPropertyName("file_size")] long? FileSize);
 
-    // ── Hyper3D Rodin Avatar DTOs ────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  DTOs — BiRefNet v2 (Background Removal)
+    // ══════════════════════════════════════════════════════════════════════
+
+    private sealed class BiRefNetRequest
+    {
+        [JsonPropertyName("image_url")]
+        public string ImageUrl { get; init; } = "";
+
+        /// <summary>Portrait model is specifically trained for human subjects.</summary>
+        [JsonPropertyName("model")]
+        public string Model { get; init; } = "Portrait";
+
+        /// <summary>2048×2048 for maximum accuracy on high-res photos.</summary>
+        [JsonPropertyName("operating_resolution")]
+        public string OperatingResolution { get; init; } = "2048x2048";
+
+        [JsonPropertyName("output_format")]
+        public string OutputFormat { get; init; } = "png";
+
+        [JsonPropertyName("refine_foreground")]
+        public bool RefineForeground { get; init; } = true;
+    }
+
+    private sealed record BiRefNetResponse(
+        [property: JsonPropertyName("image")] BiRefNetImageFile? Image);
+
+    private sealed record BiRefNetImageFile(
+        [property: JsonPropertyName("url")] string? Url,
+        [property: JsonPropertyName("width")] int? Width,
+        [property: JsonPropertyName("height")] int? Height,
+        [property: JsonPropertyName("content_type")] string? ContentType);
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  DTOs — AuraSR (Image Upscaling)
+    // ══════════════════════════════════════════════════════════════════════
+
+    private sealed class AuraSrRequest
+    {
+        [JsonPropertyName("image_url")]
+        public string ImageUrl { get; init; } = "";
+
+        /// <summary>4× super-resolution for maximum detail.</summary>
+        [JsonPropertyName("upscale_factor")]
+        public int UpscaleFactor { get; init; } = 4;
+
+        /// <summary>Overlapping tiles remove seam artifacts (doubles inference time).</summary>
+        [JsonPropertyName("overlapping_tiles")]
+        public bool OverlappingTiles { get; init; } = true;
+
+        /// <summary>v2 checkpoint is newer and more accurate.</summary>
+        [JsonPropertyName("checkpoint")]
+        public string Checkpoint { get; init; } = "v2";
+    }
+
+    private sealed record AuraSrResponse(
+        [property: JsonPropertyName("image")] AuraSrImageFile? Image);
+
+    private sealed record AuraSrImageFile(
+        [property: JsonPropertyName("url")] string? Url,
+        [property: JsonPropertyName("width")] int? Width,
+        [property: JsonPropertyName("height")] int? Height);
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  DTOs — Hyper3D Rodin (Avatar 3D)
+    // ══════════════════════════════════════════════════════════════════════
 
     private sealed class RodinRequest
     {
@@ -264,16 +391,14 @@ public sealed class FalAiService : IFalAiService
         [JsonPropertyName("geometry_file_format")]
         public string GeometryFileFormat { get; init; } = "glb";
 
+        /// <summary>"concat" for multi-view, "fuse" for single image.</summary>
         [JsonPropertyName("condition_mode")]
         public string ConditionMode { get; init; } = "fuse";
 
         [JsonPropertyName("TAPose")]
         public bool TAPose { get; init; }
 
-        /// <summary>
-        /// HighPack addon: 4K textures + high-poly mesh for maximum face/skin detail.
-        /// Costs 3× the standard billable units but dramatically improves realism.
-        /// </summary>
+        /// <summary>HighPack: 4K textures + high-poly mesh (3× cost).</summary>
         [JsonPropertyName("addons")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Addons { get; init; }
@@ -303,7 +428,6 @@ public sealed class FalAiService : IFalAiService
                 return new FalFileResponse(url, null, null, null);
             }
 
-            // It's an object — deserialize normally.
             return JsonSerializer.Deserialize<FalFileResponse>(ref reader, options);
         }
 
@@ -311,7 +435,9 @@ public sealed class FalAiService : IFalAiService
             => JsonSerializer.Serialize(writer, value, options);
     }
 
-    // ── Objects API DTOs ─────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  DTOs — SAM 3D Objects
+    // ══════════════════════════════════════════════════════════════════════
 
     private sealed record ObjectsRequest(
         [property: JsonPropertyName("image_url")] string ImageUrl,
@@ -324,7 +450,9 @@ public sealed class FalAiService : IFalAiService
     private sealed record GlbEntry(
         [property: JsonPropertyName("url")] string? Url);
 
-    // ── Align API DTOs ───────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  DTOs — SAM 3D Align
+    // ══════════════════════════════════════════════════════════════════════
 
     private sealed record AlignRequest(
         [property: JsonPropertyName("image_url")] string ImageUrl,
