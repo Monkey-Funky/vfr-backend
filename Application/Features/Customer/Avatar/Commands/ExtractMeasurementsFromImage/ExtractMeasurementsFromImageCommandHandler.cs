@@ -82,8 +82,8 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 "Uploaded avatar source image for 3D generation. CustomerId: {CustomerId}, URL: {CloudinaryUrl}",
                 customerId, cloudinaryUrl);
 
-            var bodyResult = await _falAiService.GenerateBody3dAsync(cloudinaryUrl, cancellationToken);
-            avatar3dModelUrl = bodyResult.GlbUrl;
+            var avatarResult = await _falAiService.GenerateAvatar3dAsync(cloudinaryUrl, cancellationToken);
+            avatar3dModelUrl = avatarResult.GlbUrl;
 
             _logger.LogInformation(
                 "3D avatar model generated successfully. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}",
