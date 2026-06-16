@@ -9,7 +9,7 @@ namespace Application.Features.Customer.Avatar.Commands.ExtractMeasurementsFromI
 public sealed class ExtractMeasurementsFromImageCommandValidator
     : AbstractValidator<ExtractMeasurementsFromImageCommand>
 {
-    private const long MaxImageSizeBytes = 5 * 1024 * 1024; // 5 MB
+    private const long MaxImageSizeBytes = 10 * 1024 * 1024; // 10 MB
 
     public ExtractMeasurementsFromImageCommandValidator()
     {

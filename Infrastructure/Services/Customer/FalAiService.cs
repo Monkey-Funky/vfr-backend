@@ -43,13 +43,18 @@ public sealed class FalAiService : IFalAiService
         var requestBody = new RodinRequest
         {
             InputImageUrls = [imageUrl],
-            Prompt = "realistic full-body 3D human avatar, high quality, detailed clothing, natural skin texture, proper proportions",
+            Prompt = "photorealistic full-body 3D human avatar, sharp detailed facial features, " +
+                     "clear eyes nose and mouth, natural skin texture with pores and subtle color variation, " +
+                     "detailed hair strands, realistic clothing with fabric wrinkles and folds, " +
+                     "proper human proportions, studio lighting, 8K resolution textures, " +
+                     "cinematic quality, production-ready 3D character",
             Tier = _settings.AvatarTier,
             Quality = _settings.AvatarQuality,
             Material = _settings.AvatarMaterial,
             GeometryFileFormat = "glb",
             ConditionMode = "fuse",
-            TAPose = true
+            TAPose = true,
+            Addons = _settings.EnableHighPack ? "HighPack" : null
         };
 
         _logger.LogInformation(
@@ -264,6 +269,14 @@ public sealed class FalAiService : IFalAiService
 
         [JsonPropertyName("TAPose")]
         public bool TAPose { get; init; }
+
+        /// <summary>
+        /// HighPack addon: 4K textures + high-poly mesh for maximum face/skin detail.
+        /// Costs 3× the standard billable units but dramatically improves realism.
+        /// </summary>
+        [JsonPropertyName("addons")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Addons { get; init; }
     }
 
     private sealed record RodinResponse(

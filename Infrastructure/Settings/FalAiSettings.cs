@@ -30,4 +30,10 @@ public sealed class FalAiSettings
 
     /// <summary>Tier: Regular (production) | Sketch (fast draft).</summary>
     public string AvatarTier { get; init; } = "Regular";
+
+    /// <summary>
+    /// Enable HighPack addon for 4K textures + high-poly mesh.
+    /// Dramatically improves face and skin detail but costs 3× standard.
+    /// </summary>
+    public bool EnableHighPack { get; init; } = true;
 }

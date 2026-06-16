@@ -179,13 +179,13 @@ public sealed class AvatarController : CustomerBaseApiController
 public sealed class ExtractMeasurementsFromImageRequest
 {
     /// <summary>
-    /// Front-facing full-body photo. JPEG or PNG. Max 5 MB.
+    /// Front-facing full-body photo. JPEG or PNG. Max 10 MB.
     /// The customer should face directly toward the camera with arms slightly away from the body.
     /// </summary>
     public IFormFile FrontImageFile { get; init; } = null!;
 
     /// <summary>
-    /// Side-view full-body photo. JPEG or PNG. Max 5 MB.
+    /// Side-view full-body photo. JPEG or PNG. Max 10 MB.
     /// The customer should stand 90° to the side with arms slightly away from the body.
     /// </summary>
     public IFormFile SideImageFile { get; init; } = null!;
