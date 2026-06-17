@@ -45,33 +45,39 @@ public sealed class FalAiService : IFalAiService
 
     public async Task<FalBodyResult> GenerateBody3dAsync(string imageUrl, CancellationToken ct = default)
     {
-        _logger.LogInformation("Generating 3D body via SAM 3D Body. Image: {ImageUrl}", imageUrl);
+        _logger.LogInformation("Generating photorealistic 3D avatar via Hyper3D Rodin. Image: {ImageUrl}", imageUrl);
 
-        var requestBody = new BodyRequest
+        // Hyper3D Rodin produces a fully textured PBR GLB with realistic skin,
+        // visible facial features, and accurate body/clothing appearance.
+        // Settings: quality=high, material=PBR, single image (fuse mode).
+        // NO HighPack (3× cost), NO multi-view (extra upload), NO preprocessing.
+        // This is the optimal balance: great quality, one API call, ~30-60s.
+        var requestBody = new RodinRequest
         {
-            ImageUrl = imageUrl,
-            ExportMeshes = true,
-            Include3dKeypoints = true,
-            // Lean metadata — only keypoints + camera params, no full MHR pack.
-            // Faster response, lower payload size.
-            IncludeMhrParams = false
+            InputImageUrls = [imageUrl],
+            Prompt = "photorealistic full-body human avatar, detailed face with clear eyes nose and mouth, " +
+                     "natural skin texture, realistic clothing with fabric detail, " +
+                     "proper human proportions, neutral pose, clean studio lighting, " +
+                     "high resolution PBR textures, production-ready 3D character",
+            Tier = "Regular",
+            Quality = "high",
+            Material = "PBR",
+            GeometryFileFormat = "glb",
+            ConditionMode = "fuse",
+            TAPose = true
         };
 
-        var result = await SubmitAndPollAsync<BodyRequest, BodyResponse>(
+        var result = await SubmitAndPollAsync<RodinRequest, RodinResponse>(
             _settings.BodyApiId, requestBody, ct);
 
-        // model_glb is a File object { url, content_type, file_name, file_size }
-        var glbUrl = result.ModelGlb?.Url
-            ?? throw new ExternalServiceException("FalAi", "SAM 3D Body did not return a model_glb URL.");
+        // Rodin returns model_mesh as a File object { url, content_type, file_name, file_size }
+        var glbUrl = result.ModelMesh?.Url
+            ?? throw new ExternalServiceException("FalAi", "Hyper3D Rodin did not return a model_mesh URL.");
 
-        // Extract focal length from metadata (needed for the Align step).
-        var focalLength = result.Metadata?.People?.FirstOrDefault()?.FocalLength ?? 1000.0;
+        _logger.LogInformation("Hyper3D Rodin avatar generation completed. GLB: {GlbUrl}", glbUrl);
 
-        _logger.LogInformation(
-            "SAM 3D Body completed. GLB: {GlbUrl}, FocalLength: {FocalLength}",
-            glbUrl, focalLength);
-
-        return new FalBodyResult(glbUrl, focalLength);
+        // FocalLength not available from Rodin — use standard value for Align step.
+        return new FalBodyResult(glbUrl, FocalLength: 1000.0);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -228,48 +234,50 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("error")] string? Error);
 
     // ══════════════════════════════════════════════════════════════════════
-    //  DTOs — SAM 3D Body
+    //  DTOs — Hyper3D Rodin (Avatar Generation)
     // ══════════════════════════════════════════════════════════════════════
 
-    private sealed class BodyRequest
+    private sealed class RodinRequest
     {
-        [JsonPropertyName("image_url")]
-        public string ImageUrl { get; init; } = "";
+        [JsonPropertyName("input_image_urls")]
+        public List<string> InputImageUrls { get; init; } = [];
 
-        /// <summary>Export individual mesh files (.ply) per person.</summary>
-        [JsonPropertyName("export_meshes")]
-        public bool ExportMeshes { get; init; } = true;
+        [JsonPropertyName("prompt")]
+        public string Prompt { get; init; } = "";
 
-        /// <summary>Include 3D keypoint markers in the GLB for visualization.</summary>
-        [JsonPropertyName("include_3d_keypoints")]
-        public bool Include3dKeypoints { get; init; } = true;
+        /// <summary>Regular = production quality mesh.</summary>
+        [JsonPropertyName("tier")]
+        public string Tier { get; init; } = "Regular";
 
-        /// <summary>
-        /// false = lean metadata (keypoints + camera params only).
-        /// Faster and cheaper than true (full MHR parameter set).
-        /// </summary>
-        [JsonPropertyName("include_mhr_params")]
-        public bool IncludeMhrParams { get; init; } = false;
+        /// <summary>high | medium | low | extra-low.</summary>
+        [JsonPropertyName("quality")]
+        public string Quality { get; init; } = "high";
+
+        /// <summary>PBR = physically-based rendering (realistic skin/materials).</summary>
+        [JsonPropertyName("material")]
+        public string Material { get; init; } = "PBR";
+
+        [JsonPropertyName("geometry_file_format")]
+        public string GeometryFileFormat { get; init; } = "glb";
+
+        /// <summary>fuse = single-image reconstruction.</summary>
+        [JsonPropertyName("condition_mode")]
+        public string ConditionMode { get; init; } = "fuse";
+
+        /// <summary>T/A-pose for clean body shape and clothing fit.</summary>
+        [JsonPropertyName("TAPose")]
+        public bool TAPose { get; init; } = true;
     }
 
-    // model_glb is a File object { url, content_type, file_name, file_size }
-    private sealed record BodyResponse(
-        [property: JsonPropertyName("model_glb")] SamFileResponse? ModelGlb,
-        [property: JsonPropertyName("metadata")] BodyMetadata? Metadata);
+    private sealed record RodinResponse(
+        [property: JsonPropertyName("model_mesh")] RodinFileResponse? ModelMesh,
+        [property: JsonPropertyName("seed")] int? Seed);
 
-    // Generic file response used by SAM 3D Body outputs
-    private sealed record SamFileResponse(
+    private sealed record RodinFileResponse(
         [property: JsonPropertyName("url")] string? Url,
         [property: JsonPropertyName("content_type")] string? ContentType,
         [property: JsonPropertyName("file_name")] string? FileName,
         [property: JsonPropertyName("file_size")] long? FileSize);
-
-    private sealed record BodyMetadata(
-        [property: JsonPropertyName("people")] List<PersonData>? People);
-
-    private sealed record PersonData(
-        [property: JsonPropertyName("focal_length")] double? FocalLength,
-        [property: JsonPropertyName("keypoints_3d")] List<List<double>>? Keypoints3d);
 
     // ══════════════════════════════════════════════════════════════════════
     //  DTOs — SAM 3D Objects
