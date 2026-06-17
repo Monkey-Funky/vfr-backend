@@ -55,7 +55,35 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 throw new NotFoundException("Avatar", request.AvatarId.Value);
         }
 
+        // 2b. For Overlay2D: validate avatar eligibility BEFORE creating the session.
+        //
+        // The avatar-missing and source-image-missing checks are pure business-rule
+        // violations that can be detected from already-loaded data — there is no
+        // reason to persist a session that is guaranteed to fail because of a
+        // predictable client-side data gap.  Throwing here returns a clean 422 to
+        // the caller without ever writing a "Failed" session record to the database.
+        //
+        // (For the 3D path the avatar check is also predictable, but the 3D service
+        // owns that validation so that it can remain self-contained and testable.)
+        if (request.SessionType == TryOnSessionType.Overlay2D)
+        {
+            if (!request.AvatarId.HasValue || activeAvatar is null)
+                throw new BusinessRuleException(
+                    "TryOn2DAvatarRequired",
+                    "2D try-on requires an avatar. Please create one first.");
+
+            if (string.IsNullOrWhiteSpace(activeAvatar.SourceImageUrl))
+                throw new BusinessRuleException(
+                    "TryOn2DSourceImageMissing",
+                    "This avatar has no source image. Please re-create the avatar from a photo.");
+        }
+
         // 3. Persist the pending session before calling the external service.
+        //
+        // At this point all predictable validation errors have already been surfaced
+        // (step 2 / 2b). The only remaining failure modes are transient external
+        // service errors — those are captured in the catch block below so the session
+        // is recorded as Failed rather than left in a perpetual Pending state.
         var session = VirtualTryOnSession.Create(
             customerId: customerId,
             productId: request.ProductId,
@@ -73,7 +101,9 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         try
         {
             result = request.SessionType == TryOnSessionType.Overlay2D
-                ? await ProcessOverlay2DAsync(request, customerId, activeAvatar, cancellationToken)
+                // activeAvatar is guaranteed non-null here: step 2b would have thrown
+                // for Overlay2D if AvatarId was absent or the avatar was not found.
+                ? await ProcessOverlay2DAsync(request, customerId, activeAvatar!, cancellationToken)
                 : await _virtualTryOnService.ProcessTryOnAsync(
                     customerId,
                     request.ProductId,
@@ -112,29 +142,27 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
     }
 
     /// <summary>
-    /// Runs the 2D (Overlay2D) try-on: uses the customer's stored front image as the
-    /// person image and the product's primary image as the garment image. Unlike the
-    /// 3D path it does NOT require a generated 3D avatar model — only an avatar record
-    /// with a usable source image.
+    /// Runs the 2D (Overlay2D) try-on pipeline: sends the customer's stored front
+    /// photo as the person image and the product's primary image as the garment image
+    /// to the fal.ai FASHN model, receiving a composited 2D result image.
+    ///
+    /// <para>
+    /// Unlike the 3D path this does NOT require a generated 3D avatar model — only
+    /// an avatar record with a usable source image (<c>avatar.SourceImageUrl</c>).
+    /// </para>
+    ///
+    /// <para><b>Pre-conditions enforced by the caller (step 2b):</b></para>
+    /// <list type="bullet">
+    ///   <item><paramref name="avatar"/> is non-null.</item>
+    ///   <item><c>avatar.SourceImageUrl</c> is non-null / non-whitespace.</item>
+    /// </list>
     /// </summary>
     private async Task<TryOnResultDto> ProcessOverlay2DAsync(
         InitiateTryOnCommand request,
         Guid customerId,
-        Domain.Entities.Customer.Avatar? avatar,
+        Domain.Entities.Customer.Avatar avatar,       // guaranteed non-null by step 2b
         CancellationToken cancellationToken)
     {
-        if (avatar is null)
-            throw new BusinessRuleException(
-                "TryOn2DAvatarRequired",
-                "2D try-on requires an avatar. Please create one first.");
-
-        // Person image: the front photo persisted when the avatar was created.
-        var personImageUrl = avatar.SourceImageUrl;
-        if (string.IsNullOrWhiteSpace(personImageUrl))
-            throw new BusinessRuleException(
-                "TryOn2DSourceImageMissing",
-                "This avatar has no source image. Please re-create the avatar from a photo.");
-
         // Garment image: the product's primary image (first non-deleted by display order).
         var garmentImageUrl = await _context.Products
             .Where(p => p.Id == request.ProductId)
@@ -154,7 +182,7 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 CustomerId: customerId,
                 ProductId: request.ProductId,
                 AvatarId: avatar.Id,
-                PersonImageUrl: personImageUrl,
+                PersonImageUrl: avatar.SourceImageUrl!,   // non-null: validated by step 2b
                 GarmentImageUrl: garmentImageUrl,
                 Category: null,
                 SelectedSize: null,

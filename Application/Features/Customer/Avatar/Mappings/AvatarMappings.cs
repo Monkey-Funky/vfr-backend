@@ -21,6 +21,9 @@ public static class AvatarMappings
             ShoeSizeEu: avatar.ShoeSizeEu,
             BodyShape: avatar.BodyShape,
             Avatar3dModelUrl: avatar.Avatar3dModelUrl,
+            SourceImageUrl: avatar.SourceImageUrl,
+            Has2DCapability: !string.IsNullOrWhiteSpace(avatar.SourceImageUrl),
+            Has3DCapability: !string.IsNullOrWhiteSpace(avatar.Avatar3dModelUrl),
             LastMeasuredAt: avatar.LastMeasuredAt
         );
     }

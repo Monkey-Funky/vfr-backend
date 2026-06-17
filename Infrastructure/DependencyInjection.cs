@@ -135,7 +135,27 @@ public static class DependencyInjection
                 });
         });
 
-        // ── 3a. Stripe resilience pipeline ─────────────────────────────────────
+        // ── 3a. 2D try-on resilience pipeline (FASHN model) ───────────────────
+        //
+        // Separate from "tryon" (3D) so that a spike of 3D failures does not
+        // trip the 2D circuit breaker and vice-versa. Same non-retry rationale:
+        // FASHN calls are non-idempotent ($0.02 each) — a single authoritative
+        // attempt is correct. Timeout is shorter than 3D because FASHN is one
+        // fal.ai call vs the 3D pipeline's two sequential calls.
+        services.AddResiliencePipeline("tryon-2d", builder =>
+        {
+            builder
+                .AddTimeout(TimeSpan.FromSeconds(120))  // single fal.ai call; 120s is generous
+                .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+                {
+                    FailureRatio = 1.0,
+                    MinimumThroughput = 3,               // open only after 3 consecutive failures
+                    SamplingDuration = TimeSpan.FromSeconds(60),
+                    BreakDuration = TimeSpan.FromSeconds(30)
+                });
+        });
+
+        // ── 3b. Stripe resilience pipeline ─────────────────────────────────────
         services.AddResiliencePipeline("stripe", builder =>
         {
             builder
@@ -155,7 +175,7 @@ public static class DependencyInjection
                 });
         });
 
-        // ── 3b. External API resilience (Weather + AI Suggestions) ─────────────
+        // ── 3c. External API resilience (Weather + AI Suggestions) ─────────────
         services.AddHttpClient<IWeatherService, WeatherService>()
             .AddResilienceHandler("external-api", builder =>
             {
@@ -191,12 +211,15 @@ public static class DependencyInjection
                     });
             });
 
-        // ── 3c. Named HttpClient for fal.ai SAM 3D API ──────────────────────────
+        // ── 3d. Named HttpClient for fal.ai SAM 3D API ──────────────────────────
+        //
+        // Shared by FalAiQueueClient (3D SAM pipeline) and FalAiVirtualTryOn2DService
+        // (2D FASHN pipeline). Timeout is set to 180s to accommodate the longest
+        // possible fal.ai polling cycle (two sequential SAM 3D calls). Both pipelines
+        // rely on Polly ("tryon" / "tryon-2d") for their own timeout enforcement;
+        // the HttpClient timeout is a safety net for network-level hangs.
         services.AddHttpClient("fal-ai", (sp, client) =>
         {
-            // 180s matches the Polly tryon pipeline timeout.
-            // Each fal.ai call (submit + poll + fetch) takes up to 30s.
-            // Two sequential calls (objects + align) can take up to 60s in the worst case.
             client.Timeout = TimeSpan.FromSeconds(180);
             client.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
