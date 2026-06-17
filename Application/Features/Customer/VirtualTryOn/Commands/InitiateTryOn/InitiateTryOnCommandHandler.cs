@@ -13,17 +13,20 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IVirtualTryOnService _virtualTryOnService;
+    private readonly IVirtualTryOn2DService _virtualTryOn2DService;
     private readonly ICacheService _cacheService;
 
     public InitiateTryOnCommandHandler(
         IApplicationDbContext context,
         ICurrentUserService currentUserService,
         IVirtualTryOnService virtualTryOnService,
+        IVirtualTryOn2DService virtualTryOn2DService,
         ICacheService cacheService)
     {
         _context = context;
         _currentUserService = currentUserService;
         _virtualTryOnService = virtualTryOnService;
+        _virtualTryOn2DService = virtualTryOn2DService;
         _cacheService = cacheService;
     }
 
@@ -64,15 +67,19 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         await _context.SaveChangesAsync(cancellationToken);
 
         // 4. Call the external try-on service; mark the session failed on any exception.
+        //    Overlay2D uses the flat 2D image pipeline; Model3D/ARLiveView keep the
+        //    existing 3D SAM pipeline unchanged.
         TryOnResultDto result;
         try
         {
-            result = await _virtualTryOnService.ProcessTryOnAsync(
-                customerId,
-                request.ProductId,
-                request.SessionType,
-                activeAvatar,
-                cancellationToken);
+            result = request.SessionType == TryOnSessionType.Overlay2D
+                ? await ProcessOverlay2DAsync(request, customerId, activeAvatar, cancellationToken)
+                : await _virtualTryOnService.ProcessTryOnAsync(
+                    customerId,
+                    request.ProductId,
+                    request.SessionType,
+                    activeAvatar,
+                    cancellationToken);
         }
         catch
         {
@@ -102,5 +109,64 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         await _cacheService.RemoveByPrefixAsync($"tryon:{customerId:N}:", cancellationToken);
 
         return result;
+    }
+
+    /// <summary>
+    /// Runs the 2D (Overlay2D) try-on: uses the customer's stored front image as the
+    /// person image and the product's primary image as the garment image. Unlike the
+    /// 3D path it does NOT require a generated 3D avatar model — only an avatar record
+    /// with a usable source image.
+    /// </summary>
+    private async Task<TryOnResultDto> ProcessOverlay2DAsync(
+        InitiateTryOnCommand request,
+        Guid customerId,
+        Domain.Entities.Customer.Avatar? avatar,
+        CancellationToken cancellationToken)
+    {
+        if (avatar is null)
+            throw new BusinessRuleException(
+                "TryOn2DAvatarRequired",
+                "2D try-on requires an avatar. Please create one first.");
+
+        // Person image: the front photo persisted when the avatar was created.
+        var personImageUrl = avatar.SourceImageUrl;
+        if (string.IsNullOrWhiteSpace(personImageUrl))
+            throw new BusinessRuleException(
+                "TryOn2DSourceImageMissing",
+                "This avatar has no source image. Please re-create the avatar from a photo.");
+
+        // Garment image: the product's primary image (first non-deleted by display order).
+        var garmentImageUrl = await _context.Products
+            .Where(p => p.Id == request.ProductId)
+            .SelectMany(p => p.Images)
+            .Where(i => !i.IsDeleted)
+            .OrderBy(i => i.DisplayOrder)
+            .Select(i => i.ImageUrl)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(garmentImageUrl))
+            throw new BusinessRuleException(
+                "TryOn2DProductImageMissing",
+                "This product has no image available for try-on.");
+
+        var tryOnResult = await _virtualTryOn2DService.ProcessTryOnAsync(
+            new TryOn2DRequest(
+                CustomerId: customerId,
+                ProductId: request.ProductId,
+                AvatarId: avatar.Id,
+                PersonImageUrl: personImageUrl,
+                GarmentImageUrl: garmentImageUrl,
+                Category: null,
+                SelectedSize: null,
+                SelectedColor: null),
+            cancellationToken);
+
+        return new TryOnResultDto(
+            Status: SessionStatus.Completed,
+            ResultImageUrl: tryOnResult.ResultImageUrl,
+            RecommendedSize: null,
+            ConfidenceScore: tryOnResult.ConfidenceScore,
+            DurationSeconds: tryOnResult.DurationSeconds,
+            ResultType: TryOnResultType.Image2D);
     }
 }

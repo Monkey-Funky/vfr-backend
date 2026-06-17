@@ -1,5 +1,3 @@
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Application.Interfaces.Services.Customer;
@@ -10,17 +8,17 @@ namespace Infrastructure.Services.Customer;
 
 /// <summary>
 /// Production implementation of <see cref="IFalAiService"/> using the SAM 3D API suite.
-/// 
+///
 /// SAM 3D is purpose-built for human + object 3D reconstruction from single images.
 /// - Body: $0.02, 5-10s — accurate human body geometry with skeletal keypoints
 /// - Objects: $0.02, 5-10s — photorealistic object meshes via Gaussian splatting
 /// - Align: $0.02, 5-10s — perspective-correct scene composition
 ///
-/// Uses the async queue pattern: Submit → Poll → Fetch.
+/// The async queue plumbing (Submit → Poll → Fetch) lives in <see cref="IFalAiQueueClient"/>.
 /// </summary>
 public sealed class FalAiService : IFalAiService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IFalAiQueueClient _queueClient;
     private readonly FalAiSettings _settings;
     private readonly ILogger<FalAiService> _logger;
 
@@ -30,11 +28,11 @@ public sealed class FalAiService : IFalAiService
     };
 
     public FalAiService(
-        IHttpClientFactory httpClientFactory,
+        IFalAiQueueClient queueClient,
         IOptions<FalAiSettings> settings,
         ILogger<FalAiService> logger)
     {
-        _httpClientFactory = httpClientFactory;
+        _queueClient = queueClient;
         _settings = settings.Value;
         _logger = logger;
     }
@@ -58,7 +56,7 @@ public sealed class FalAiService : IFalAiService
             IncludeMhrParams = false
         };
 
-        var result = await SubmitAndPollAsync<Sam3dBodyRequest, Sam3dBodyResponse>(
+        var result = await _queueClient.SubmitAndPollAsync<Sam3dBodyRequest, Sam3dBodyResponse>(
             _settings.BodyApiId, requestBody, ct);
 
         // SAM 3D Body returns model_glb as either a File object or a direct URL string.
@@ -103,7 +101,7 @@ public sealed class FalAiService : IFalAiService
             imageUrl, prompt);
 
         var requestBody = new ObjectsRequest(imageUrl, prompt, 42);
-        var result = await SubmitAndPollAsync<ObjectsRequest, ObjectsResponse>(
+        var result = await _queueClient.SubmitAndPollAsync<ObjectsRequest, ObjectsResponse>(
             _settings.ObjectsApiId, requestBody, ct);
 
         // SAM 3D Objects response: model_glb can be a File object OR a direct URL string.
@@ -134,7 +132,7 @@ public sealed class FalAiService : IFalAiService
             "Aligning scene via SAM 3D Align. FocalLength: {FocalLength}", focalLength);
 
         var requestBody = new AlignRequest(imageUrl, bodyMeshUrl, objectMeshUrl, focalLength);
-        var result = await SubmitAndPollAsync<AlignRequest, AlignResponse>(
+        var result = await _queueClient.SubmitAndPollAsync<AlignRequest, AlignResponse>(
             _settings.AlignApiId, requestBody, ct);
 
         var sceneUrl = result.SceneGlb?.Url
@@ -144,112 +142,6 @@ public sealed class FalAiService : IFalAiService
         _logger.LogInformation("SAM 3D Align completed. Scene GLB: {SceneGlbUrl}", sceneUrl);
         return sceneUrl;
     }
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  Queue Pattern: Submit → Poll → Fetch
-    // ══════════════════════════════════════════════════════════════════════
-
-    private async Task<TResult> SubmitAndPollAsync<TRequest, TResult>(
-        string apiId, TRequest requestBody, CancellationToken ct)
-    {
-        var baseUrl = _settings.QueueBaseUrl.TrimEnd('/');
-        var submitUrl = $"{baseUrl}/{apiId}";
-
-        // 1. Submit
-        using var submitClient = CreateAuthorizedClient();
-        using var submitResponse = await submitClient.PostAsJsonAsync(submitUrl, requestBody, JsonOptions, ct);
-        await EnsureSuccessOrLogAsync(submitResponse, "submit", apiId, ct);
-
-        var queueResult = await submitResponse.Content.ReadFromJsonAsync<QueueSubmitResponse>(JsonOptions, ct)
-            ?? throw new ExternalServiceException("FalAi", $"Failed to parse queue submit response for {apiId}.");
-
-        var requestId = queueResult.RequestId
-            ?? throw new ExternalServiceException("FalAi", $"No request_id in queue submit response for {apiId}.");
-
-        var statusUrl = queueResult.StatusUrl
-            ?? $"{baseUrl}/{apiId}/requests/{requestId}/status";
-        var responseUrl = queueResult.ResponseUrl
-            ?? $"{baseUrl}/{apiId}/requests/{requestId}/response";
-
-        _logger.LogDebug("fal.ai queued. API: {ApiId}, RequestId: {RequestId}", apiId, requestId);
-
-        // 2. Poll — SAM 3D typically completes in 5-10s.
-        //    Wait before first check, then poll at interval to catch completion fast.
-        var deadline = DateTime.UtcNow.AddSeconds(_settings.MaxPollSeconds);
-        await Task.Delay(_settings.InitialPollDelayMs, ct);
-
-        while (DateTime.UtcNow < deadline)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            using var pollClient = CreateAuthorizedClient();
-            using var pollResponse = await pollClient.GetAsync(statusUrl, ct);
-            await EnsureSuccessOrLogAsync(pollResponse, "poll", apiId, ct);
-
-            var status = await pollResponse.Content.ReadFromJsonAsync<QueueStatusResponse>(JsonOptions, ct);
-            var statusValue = status?.Status ?? "UNKNOWN";
-
-            if (string.Equals(statusValue, "COMPLETED", StringComparison.OrdinalIgnoreCase))
-                break;
-
-            if (string.Equals(statusValue, "FAILED", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogError("fal.ai {RequestId} failed: {Error}", requestId, status?.Error);
-                throw new ExternalServiceException("FalAi", $"fal.ai processing failed: {status?.Error ?? "Unknown"}");
-            }
-
-            await Task.Delay(_settings.PollIntervalMs, ct);
-        }
-
-        if (DateTime.UtcNow >= deadline)
-            throw new ExternalServiceException("FalAi", $"Timed out after {_settings.MaxPollSeconds}s.");
-
-        // 3. Fetch
-        using var fetchClient = CreateAuthorizedClient();
-        using var fetchResponse = await fetchClient.GetAsync(responseUrl, ct);
-        await EnsureSuccessOrLogAsync(fetchResponse, "fetch", apiId, ct);
-
-        var rawJson = await fetchResponse.Content.ReadAsStringAsync(ct);
-        _logger.LogDebug("fal.ai result for {ApiId}: {RawJson}", apiId, rawJson);
-
-        return JsonSerializer.Deserialize<TResult>(rawJson, JsonOptions)
-            ?? throw new ExternalServiceException("FalAi", $"Failed to parse result for {requestId}.");
-    }
-
-    private async Task EnsureSuccessOrLogAsync(
-        HttpResponseMessage response, string phase, string apiId, CancellationToken ct)
-    {
-        if (response.IsSuccessStatusCode) return;
-
-        var body = await response.Content.ReadAsStringAsync(ct);
-        _logger.LogError("fal.ai {Phase} failed for {ApiId}. {StatusCode}: {Body}",
-            phase, apiId, (int)response.StatusCode, body);
-
-        throw new HttpRequestException(
-            $"fal.ai {phase} returned {(int)response.StatusCode}: {body}",
-            inner: null, statusCode: response.StatusCode);
-    }
-
-    private HttpClient CreateAuthorizedClient()
-    {
-        var client = _httpClientFactory.CreateClient("fal-ai");
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Key", _settings.ApiKey);
-        return client;
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  DTOs — Queue
-    // ══════════════════════════════════════════════════════════════════════
-
-    private sealed record QueueSubmitResponse(
-        [property: JsonPropertyName("request_id")] string? RequestId,
-        [property: JsonPropertyName("status_url")] string? StatusUrl,
-        [property: JsonPropertyName("response_url")] string? ResponseUrl);
-
-    private sealed record QueueStatusResponse(
-        [property: JsonPropertyName("status")] string? Status,
-        [property: JsonPropertyName("error")] string? Error);
 
     // ══════════════════════════════════════════════════════════════════════
     //  DTOs — SAM 3D Body (Human Reconstruction)
