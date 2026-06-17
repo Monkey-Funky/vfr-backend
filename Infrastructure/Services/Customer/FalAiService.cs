@@ -19,6 +19,7 @@ namespace Infrastructure.Services.Customer;
 public sealed class FalAiService : IFalAiService
 {
     private readonly IFalAiQueueClient _queueClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly FalAiSettings _settings;
     private readonly ILogger<FalAiService> _logger;
 
@@ -29,10 +30,12 @@ public sealed class FalAiService : IFalAiService
 
     public FalAiService(
         IFalAiQueueClient queueClient,
+        IHttpClientFactory httpClientFactory,
         IOptions<FalAiSettings> settings,
         ILogger<FalAiService> logger)
     {
         _queueClient = queueClient;
+        _httpClientFactory = httpClientFactory;
         _settings = settings.Value;
         _logger = logger;
     }
@@ -148,58 +151,36 @@ public sealed class FalAiService : IFalAiService
         return sceneUrl;
     }
 
-            await Task.Delay(_settings.PollIntervalMs, ct);
+    // ══════════════════════════════════════════════════════════════════════
+    //  Preflight — Image URL Validation
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Verifies an image URL is publicly reachable before handing it to fal.ai.
+    /// fal.ai silently fails (FAILED status after a long wait) when it cannot fetch
+    /// the URL, so we surface a clear error up front instead of waiting it out.
+    /// </summary>
+    private async Task ValidateImageUrlAsync(string imageUrl, string label, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(imageUrl))
+            throw new ExternalServiceException("FalAi", $"The {label} image URL is empty.");
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("fal-ai");
+            using var request = new HttpRequestMessage(HttpMethod.Head, imageUrl);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
+            if (!response.IsSuccessStatusCode)
+                throw new ExternalServiceException("FalAi",
+                    $"The {label} image is not publicly accessible ({(int)response.StatusCode}): {imageUrl}");
         }
-
-        if (DateTime.UtcNow >= deadline)
-            throw new ExternalServiceException("FalAi", $"Timed out after {_settings.MaxPollSeconds}s.");
-
-        // 3. Fetch
-        using var fetchClient = CreateAuthorizedClient();
-        using var fetchResponse = await fetchClient.GetAsync(responseUrl, ct);
-        await EnsureSuccessOrLogAsync(fetchResponse, "fetch", apiId, ct);
-
-        var rawJson = await fetchResponse.Content.ReadAsStringAsync(ct);
-        _logger.LogDebug("fal.ai result for {ApiId}: {RawJson}", apiId, rawJson);
-
-        return JsonSerializer.Deserialize<TResult>(rawJson, JsonOptions)
-            ?? throw new ExternalServiceException("FalAi", $"Failed to parse result for {requestId}.");
+        catch (HttpRequestException ex)
+        {
+            throw new ExternalServiceException("FalAi",
+                $"The {label} image URL could not be reached: {imageUrl}. {ex.Message}");
+        }
     }
-
-    private async Task EnsureSuccessOrLogAsync(
-        HttpResponseMessage response, string phase, string apiId, CancellationToken ct)
-    {
-        if (response.IsSuccessStatusCode) return;
-
-        var body = await response.Content.ReadAsStringAsync(ct);
-        _logger.LogError("fal.ai {Phase} failed for {ApiId}. {StatusCode}: {Body}",
-            phase, apiId, (int)response.StatusCode, body);
-
-        throw new HttpRequestException(
-            $"fal.ai {phase} returned {(int)response.StatusCode}: {body}",
-            inner: null, statusCode: response.StatusCode);
-    }
-
-    private HttpClient CreateAuthorizedClient()
-    {
-        var client = _httpClientFactory.CreateClient("fal-ai");
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Key", _settings.ApiKey);
-        return client;
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  DTOs — Queue
-    // ══════════════════════════════════════════════════════════════════════
-
-    private sealed record QueueSubmitResponse(
-        [property: JsonPropertyName("request_id")] string? RequestId,
-        [property: JsonPropertyName("status_url")] string? StatusUrl,
-        [property: JsonPropertyName("response_url")] string? ResponseUrl);
-
-    private sealed record QueueStatusResponse(
-        [property: JsonPropertyName("status")] string? Status,
-        [property: JsonPropertyName("error")] string? Error);
 
     // ══════════════════════════════════════════════════════════════════════
     //  DTOs — SAM 3D Body (Human Reconstruction)
