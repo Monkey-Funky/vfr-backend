@@ -28,6 +28,7 @@ public sealed class AvatarConfiguration : IEntityTypeConfiguration<Avatar>
         builder.Property(a => a.BodyShape).HasColumnName("body_shape").HasMaxLength(30);
         builder.Property(a => a.Avatar3dModelUrl).HasColumnName("avatar_3d_model_url").HasColumnType("text");
         builder.Property(a => a.AvatarFocalLength).HasColumnName("avatar_focal_length").HasColumnType("double precision");
+        builder.Property(a => a.SourceImageUrl).HasColumnName("source_image_url").HasColumnType("text");
         builder.Property(a => a.LastMeasuredAt).HasColumnName("last_measured_at").IsRequired().HasDefaultValueSql("now()");
 
         // Global Query Filter for Soft Delete

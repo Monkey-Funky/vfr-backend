@@ -1,4 +1,4 @@
-﻿namespace Infrastructure.Persistence.Configurations.Product;
+namespace Infrastructure.Persistence.Configurations.Product;
 
 
 public sealed class ProductImageConfiguration : IEntityTypeConfiguration<ProductImage>
@@ -34,10 +34,9 @@ public sealed class ProductImageConfiguration : IEntityTypeConfiguration<Product
         builder.HasQueryFilter(i => !i.IsDeleted);
 
         // ── Foreign Key ───────────────────────────────────────────────────────
-        builder.HasOne<Domain.Entities.Retailer.Product>()
-            .WithMany(p => p.Images)
-            .HasForeignKey(i => i.ProductId)
-            .OnDelete(DeleteBehavior.Cascade);
+        // Relationship is configured from the Product side in ProductConfiguration
+        // (HasMany → WithOne → HasForeignKey). Configuring it from both sides risks
+        // EF Core registering two separate relationships.
 
         // ── Indexes ───────────────────────────────────────────────────────────
         builder.HasIndex(i => i.ProductId)

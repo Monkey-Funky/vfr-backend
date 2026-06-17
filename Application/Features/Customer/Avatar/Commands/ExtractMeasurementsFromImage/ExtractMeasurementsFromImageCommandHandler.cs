@@ -16,6 +16,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
     private readonly IBodyMeasurementExtractionService _extractionService;
     private readonly IFalAiService _falAiService;
     private readonly IFileStorageService _fileStorageService;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<ExtractMeasurementsFromImageCommandHandler> _logger;
 
     public ExtractMeasurementsFromImageCommandHandler(
@@ -24,6 +25,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         IBodyMeasurementExtractionService extractionService,
         IFalAiService falAiService,
         IFileStorageService fileStorageService,
+        ICacheService cacheService,
         ILogger<ExtractMeasurementsFromImageCommandHandler> logger)
     {
         _context = context;
@@ -31,6 +33,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         _extractionService = extractionService;
         _falAiService = falAiService;
         _fileStorageService = fileStorageService;
+        _cacheService = cacheService;
         _logger = logger;
     }
 
@@ -44,6 +47,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         BodyMeasurements measurements;
         string? avatar3dModelUrl = null;
         double? avatarFocalLength = null;
+        string? sourceImageUrl = null;
 
         // 1. Buffer BOTH image byte arrays upfront so we can reuse them across
         //    multiple downstream consumers (ExtractAsync, Cloudinary uploads for 3D pipeline).
@@ -89,6 +93,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
             var bodyResult = await _falAiService.GenerateBody3dAsync(cloudinaryUrl, cancellationToken);
             avatar3dModelUrl = bodyResult.GlbUrl;
             avatarFocalLength = bodyResult.FocalLength;
+            sourceImageUrl = cloudinaryUrl; // Store the person image URL — needed by SAM 3D Align
 
             _logger.LogInformation(
                 "SAM 3D Body generation completed. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}, FocalLength: {FocalLength}",
@@ -119,7 +124,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         {
             existingAvatar.UpdateMeasurements(measurements, source);
             if (avatar3dModelUrl is not null)
-                existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl, avatarFocalLength);
+                existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl, avatarFocalLength, sourceImageUrl);
             avatar = existingAvatar;
         }
         else
@@ -138,7 +143,8 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 shoeSizeEu: measurements.ShoeSizeEu,
                 bodyShape: measurements.BodyShape,
                 avatar3dModelUrl: avatar3dModelUrl,
-                avatarFocalLength: avatarFocalLength);
+                avatarFocalLength: avatarFocalLength,
+                sourceImageUrl: sourceImageUrl);
             _context.Avatars.Add(avatar);
         }
 
@@ -151,6 +157,9 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         _context.AvatarMeasurementHistory.Add(history);
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        // Invalidate the avatar cache so GetAvatar returns the fresh data immediately.
+        await _cacheService.RemoveAsync($"avatar:{customerId:N}", cancellationToken);
 
         return avatar.ToDto();
     }

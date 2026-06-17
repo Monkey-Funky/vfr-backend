@@ -146,6 +146,9 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Domain.Entit
             .HasForeignKey(i => i.ProductId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.Navigation(p => p.Images)
+            .UsePropertyAccessMode(PropertyAccessMode.Field);
+
         // ── Indexes ───────────────────────────────────────────────────────────
 
         // Partial unique: unique product name per retailer (non-deleted only)

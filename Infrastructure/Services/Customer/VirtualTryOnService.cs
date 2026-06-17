@@ -90,9 +90,12 @@ public sealed class VirtualTryOnService : IVirtualTryOnService
                 "Clothing 3D model generated. ObjectGlbUrl: {ObjectGlbUrl}",
                 objectGlb.GlbUrl);
 
-            // 6. Align body + clothing into one unified scene
+            // 6. Align body + clothing into one unified scene.
+            //    SAM 3D Align needs the PERSON's original image (not the product image)
+            //    as the reference for perspective-correct alignment.
+            var alignImageUrl = avatar.SourceImageUrl ?? productImageUrl;
             var sceneGlbUrl = await _falAiService.AlignSceneAsync(
-                imageUrl: productImageUrl,
+                imageUrl: alignImageUrl,
                 bodyMeshUrl: avatar.Avatar3dModelUrl,
                 objectMeshUrl: objectGlb.GlbUrl,
                 focalLength: avatar.AvatarFocalLength ?? 1000.0, // use real focal length from SAM 3D Body metadata
