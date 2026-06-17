@@ -20,6 +20,7 @@ public sealed class Avatar : BaseEntity
 
     public string? BodyShape { get; private set; }
     public string? Avatar3dModelUrl { get; private set; }
+    public double? AvatarFocalLength { get; private set; }
     public DateTime LastMeasuredAt { get; private set; }
 
     private readonly List<AvatarMeasurementHistory> _measurementHistories = [];
@@ -40,7 +41,8 @@ public sealed class Avatar : BaseEntity
         decimal? armLengthCm = null,
         decimal? shoeSizeEu = null,
         string? bodyShape = null,
-        string? avatar3dModelUrl = null)
+        string? avatar3dModelUrl = null,
+        double? avatarFocalLength = null)
     {
         if (heightCm <= 0) throw new BusinessRuleException("INVALID_HEIGHT", "Height must be greater than zero.");
         if (weightKg <= 0) throw new BusinessRuleException("INVALID_WEIGHT", "Weight must be greater than zero.");
@@ -61,6 +63,7 @@ public sealed class Avatar : BaseEntity
             ShoeSizeEu = shoeSizeEu,
             BodyShape = bodyShape,
             Avatar3dModelUrl = avatar3dModelUrl,
+            AvatarFocalLength = avatarFocalLength,
             LastMeasuredAt = DateTime.UtcNow
         };
 
@@ -122,9 +125,10 @@ public sealed class Avatar : BaseEntity
             "}");
     }
 
-    public void SetAvatar3dModelUrl(string url)
+    public void SetAvatar3dModelUrl(string url, double? focalLength = null)
     {
         Avatar3dModelUrl = url;
+        AvatarFocalLength = focalLength;
         UpdatedAt = DateTime.UtcNow;
     }
 }

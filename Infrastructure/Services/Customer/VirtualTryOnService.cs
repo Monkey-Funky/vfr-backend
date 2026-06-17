@@ -95,7 +95,7 @@ public sealed class VirtualTryOnService : IVirtualTryOnService
                 imageUrl: productImageUrl,
                 bodyMeshUrl: avatar.Avatar3dModelUrl,
                 objectMeshUrl: objectGlb.GlbUrl,
-                focalLength: 1000.0, // default focal length when body was generated separately
+                focalLength: avatar.AvatarFocalLength ?? 1000.0, // use real focal length from SAM 3D Body metadata
                 cancellationToken);
 
             _logger.LogInformation(

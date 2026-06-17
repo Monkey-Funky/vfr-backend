@@ -43,6 +43,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
 
         BodyMeasurements measurements;
         string? avatar3dModelUrl = null;
+        double? avatarFocalLength = null;
 
         // 1. Buffer BOTH image byte arrays upfront so we can reuse them across
         //    multiple downstream consumers (ExtractAsync, Cloudinary uploads for 3D pipeline).
@@ -87,6 +88,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
 
             var bodyResult = await _falAiService.GenerateBody3dAsync(cloudinaryUrl, cancellationToken);
             avatar3dModelUrl = bodyResult.GlbUrl;
+            avatarFocalLength = bodyResult.FocalLength;
 
             _logger.LogInformation(
                 "SAM 3D Body generation completed. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}, FocalLength: {FocalLength}",
@@ -117,7 +119,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         {
             existingAvatar.UpdateMeasurements(measurements, source);
             if (avatar3dModelUrl is not null)
-                existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl);
+                existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl, avatarFocalLength);
             avatar = existingAvatar;
         }
         else
@@ -135,7 +137,8 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 armLengthCm: measurements.ArmLengthCm,
                 shoeSizeEu: measurements.ShoeSizeEu,
                 bodyShape: measurements.BodyShape,
-                avatar3dModelUrl: avatar3dModelUrl);
+                avatar3dModelUrl: avatar3dModelUrl,
+                avatarFocalLength: avatarFocalLength);
             _context.Avatars.Add(avatar);
         }
 

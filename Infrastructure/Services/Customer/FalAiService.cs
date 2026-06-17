@@ -45,39 +45,50 @@ public sealed class FalAiService : IFalAiService
 
     public async Task<FalBodyResult> GenerateBody3dAsync(string imageUrl, CancellationToken ct = default)
     {
-        _logger.LogInformation("Generating photorealistic 3D avatar via Hyper3D Rodin. Image: {ImageUrl}", imageUrl);
+        _logger.LogInformation("Generating 3D body mesh via SAM 3D Body. Image: {ImageUrl}", imageUrl);
 
-        // Hyper3D Rodin produces a fully textured PBR GLB with realistic skin,
-        // visible facial features, and accurate body/clothing appearance.
-        // Settings: quality=high, material=PBR, single image (fuse mode).
-        // NO HighPack (3× cost), NO multi-view (extra upload), NO preprocessing.
-        // This is the optimal balance: great quality, one API call, ~30-60s.
-        var requestBody = new RodinRequest
+        // SAM 3D Body produces a body mesh GLB with skeletal keypoints and camera metadata.
+        // Cost: $0.02 per call. The output is purpose-built for use with sam-3/3d-align.
+        // We disable MHR params (not needed for alignment) to get a leaner response.
+        var requestBody = new Sam3dBodyRequest
         {
-            InputImageUrls = [imageUrl],
-            Prompt = "photorealistic full-body human avatar, detailed face with clear eyes nose and mouth, " +
-                     "natural skin texture, realistic clothing with fabric detail, " +
-                     "proper human proportions, neutral pose, clean studio lighting, " +
-                     "high resolution PBR textures, production-ready 3D character",
-            Tier = "Regular",
-            Quality = "high",
-            Material = "PBR",
-            GeometryFileFormat = "glb",
-            ConditionMode = "fuse",
-            TAPose = true
+            ImageUrl = imageUrl,
+            ExportMeshes = true,
+            Include3dKeypoints = true,
+            IncludeMhrParams = false
         };
 
-        var result = await SubmitAndPollAsync<RodinRequest, RodinResponse>(
+        var result = await SubmitAndPollAsync<Sam3dBodyRequest, Sam3dBodyResponse>(
             _settings.BodyApiId, requestBody, ct);
 
-        // Rodin returns model_mesh as a File object { url, content_type, file_name, file_size }
-        var glbUrl = result.ModelMesh?.Url
-            ?? throw new ExternalServiceException("FalAi", "Hyper3D Rodin did not return a model_mesh URL.");
+        // SAM 3D Body returns model_glb as either a File object or a direct URL string.
+        var glbUrl = result.ModelGlb?.Url
+            ?? result.ModelGlbUrl
+            ?? throw new ExternalServiceException("FalAi", "SAM 3D Body did not return a model_glb URL.");
 
-        _logger.LogInformation("Hyper3D Rodin avatar generation completed. GLB: {GlbUrl}", glbUrl);
+        // Extract focal_length from metadata.people[0].focal_length.
+        // This is critical for accurate alignment in the 3d-align step.
+        double focalLength = 1000.0; // safe fallback
+        if (result.Metadata?.People is { Count: > 0 })
+        {
+            var personFocal = result.Metadata.People[0].FocalLength;
+            if (personFocal is > 0)
+            {
+                focalLength = personFocal.Value;
+                _logger.LogInformation("SAM 3D Body focal_length extracted: {FocalLength}", focalLength);
+            }
+            else
+            {
+                _logger.LogWarning("SAM 3D Body metadata.people[0].focal_length is missing or zero. Using fallback 1000.0.");
+            }
+        }
+        else
+        {
+            _logger.LogWarning("SAM 3D Body metadata.people is empty. Using fallback focal_length 1000.0.");
+        }
 
-        // FocalLength not available from Rodin — use standard value for Align step.
-        return new FalBodyResult(glbUrl, FocalLength: 1000.0);
+        _logger.LogInformation("SAM 3D Body generation completed. GLB: {GlbUrl}, FocalLength: {FocalLength}", glbUrl, focalLength);
+        return new FalBodyResult(glbUrl, focalLength);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -95,11 +106,19 @@ public sealed class FalAiService : IFalAiService
         var result = await SubmitAndPollAsync<ObjectsRequest, ObjectsResponse>(
             _settings.ObjectsApiId, requestBody, ct);
 
-        if (result.IndividualGlbs is not { Count: > 0 })
-            throw new ExternalServiceException("FalAi", "SAM 3D Objects did not return any GLB URLs.");
+        // SAM 3D Objects response format:
+        // - For single objects: model_glb contains the combined/single mesh
+        // - For multi-object: individual_glbs contains per-object meshes
+        // We try model_glb first (always present), then fallback to individual_glbs[0].
+        string? glbUrl = result.ModelGlb?.Url;
 
-        var glbUrl = result.IndividualGlbs[0].Url
-            ?? throw new ExternalServiceException("FalAi", "SAM 3D Objects returned a null GLB URL.");
+        if (string.IsNullOrWhiteSpace(glbUrl) && result.IndividualGlbs is { Count: > 0 })
+        {
+            glbUrl = result.IndividualGlbs[0].Url;
+        }
+
+        if (string.IsNullOrWhiteSpace(glbUrl))
+            throw new ExternalServiceException("FalAi", "SAM 3D Objects did not return any GLB URL (checked model_glb and individual_glbs).");
 
         _logger.LogInformation("SAM 3D Objects completed. GLB: {GlbUrl}", glbUrl);
         return new FalObjectResult(glbUrl);
@@ -156,7 +175,7 @@ public sealed class FalAiService : IFalAiService
         _logger.LogDebug("fal.ai queued. API: {ApiId}, RequestId: {RequestId}", apiId, requestId);
 
         // 2. Poll — SAM 3D typically completes in 5-10s.
-        //    Wait 4s before first check, then poll every 1.5s to catch completion fast.
+        //    Wait before first check, then poll at interval to catch completion fast.
         var deadline = DateTime.UtcNow.AddSeconds(_settings.MaxPollSeconds);
         await Task.Delay(_settings.InitialPollDelayMs, ct);
 
@@ -234,50 +253,80 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("error")] string? Error);
 
     // ══════════════════════════════════════════════════════════════════════
-    //  DTOs — Hyper3D Rodin (Avatar Generation)
+    //  DTOs — SAM 3D Body (Human Reconstruction)
     // ══════════════════════════════════════════════════════════════════════
 
-    private sealed class RodinRequest
+    private sealed class Sam3dBodyRequest
     {
-        [JsonPropertyName("input_image_urls")]
-        public List<string> InputImageUrls { get; init; } = [];
+        [JsonPropertyName("image_url")]
+        public string ImageUrl { get; init; } = "";
 
-        [JsonPropertyName("prompt")]
-        public string Prompt { get; init; } = "";
+        [JsonPropertyName("export_meshes")]
+        public bool ExportMeshes { get; init; } = true;
 
-        /// <summary>Regular = production quality mesh.</summary>
-        [JsonPropertyName("tier")]
-        public string Tier { get; init; } = "Regular";
+        [JsonPropertyName("include_3d_keypoints")]
+        public bool Include3dKeypoints { get; init; } = true;
 
-        /// <summary>high | medium | low | extra-low.</summary>
-        [JsonPropertyName("quality")]
-        public string Quality { get; init; } = "high";
-
-        /// <summary>PBR = physically-based rendering (realistic skin/materials).</summary>
-        [JsonPropertyName("material")]
-        public string Material { get; init; } = "PBR";
-
-        [JsonPropertyName("geometry_file_format")]
-        public string GeometryFileFormat { get; init; } = "glb";
-
-        /// <summary>fuse = single-image reconstruction.</summary>
-        [JsonPropertyName("condition_mode")]
-        public string ConditionMode { get; init; } = "fuse";
-
-        /// <summary>T/A-pose for clean body shape and clothing fit.</summary>
-        [JsonPropertyName("TAPose")]
-        public bool TAPose { get; init; } = true;
+        /// <summary>
+        /// false = leaner metadata (skip MHR params we don't need for alignment).
+        /// </summary>
+        [JsonPropertyName("include_mhr_params")]
+        public bool IncludeMhrParams { get; init; } = false;
     }
 
-    private sealed record RodinResponse(
-        [property: JsonPropertyName("model_mesh")] RodinFileResponse? ModelMesh,
-        [property: JsonPropertyName("seed")] int? Seed);
+    /// <summary>
+    /// SAM 3D Body response. model_glb can be either:
+    /// - A File object with url/content_type/file_name/file_size properties
+    /// - A direct URL string
+    /// We handle both cases with ModelGlb (object) and ModelGlbUrl (string).
+    /// </summary>
+    private sealed class Sam3dBodyResponse
+    {
+        [JsonPropertyName("model_glb")]
+        public JsonElement? ModelGlbRaw { get; init; }
 
-    private sealed record RodinFileResponse(
-        [property: JsonPropertyName("url")] string? Url,
-        [property: JsonPropertyName("content_type")] string? ContentType,
-        [property: JsonPropertyName("file_name")] string? FileName,
-        [property: JsonPropertyName("file_size")] long? FileSize);
+        [JsonPropertyName("metadata")]
+        public Sam3dBodyMetadata? Metadata { get; init; }
+
+        /// <summary>Parsed File object if model_glb is an object.</summary>
+        [JsonIgnore]
+        public FileResponse? ModelGlb
+        {
+            get
+            {
+                if (ModelGlbRaw is not { } raw) return null;
+                if (raw.ValueKind == JsonValueKind.Object)
+                {
+                    return JsonSerializer.Deserialize<FileResponse>(raw.GetRawText(), JsonOptions);
+                }
+                return null;
+            }
+        }
+
+        /// <summary>Direct URL string if model_glb is a string.</summary>
+        [JsonIgnore]
+        public string? ModelGlbUrl
+        {
+            get
+            {
+                if (ModelGlbRaw is not { } raw) return null;
+                if (raw.ValueKind == JsonValueKind.String)
+                {
+                    return raw.GetString();
+                }
+                return null;
+            }
+        }
+    }
+
+    private sealed record Sam3dBodyMetadata(
+        [property: JsonPropertyName("people")] List<Sam3dBodyPersonMetadata>? People);
+
+    private sealed record Sam3dBodyPersonMetadata(
+        [property: JsonPropertyName("person_id")] int? PersonId,
+        [property: JsonPropertyName("focal_length")] double? FocalLength,
+        [property: JsonPropertyName("bbox")] List<double>? Bbox,
+        [property: JsonPropertyName("pred_cam_t")] List<double>? PredCamT);
 
     // ══════════════════════════════════════════════════════════════════════
     //  DTOs — SAM 3D Objects
@@ -289,10 +338,8 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("seed")] int Seed);
 
     private sealed record ObjectsResponse(
-        [property: JsonPropertyName("individual_glbs")] List<GlbEntry>? IndividualGlbs);
-
-    private sealed record GlbEntry(
-        [property: JsonPropertyName("url")] string? Url);
+        [property: JsonPropertyName("model_glb")] FileResponse? ModelGlb,
+        [property: JsonPropertyName("individual_glbs")] List<FileResponse>? IndividualGlbs);
 
     // ══════════════════════════════════════════════════════════════════════
     //  DTOs — SAM 3D Align
@@ -309,4 +356,14 @@ public sealed class FalAiService : IFalAiService
 
     private sealed record SceneGlb(
         [property: JsonPropertyName("url")] string? Url);
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Shared DTOs
+    // ══════════════════════════════════════════════════════════════════════
+
+    private sealed record FileResponse(
+        [property: JsonPropertyName("url")] string? Url,
+        [property: JsonPropertyName("content_type")] string? ContentType,
+        [property: JsonPropertyName("file_name")] string? FileName,
+        [property: JsonPropertyName("file_size")] long? FileSize);
 }
