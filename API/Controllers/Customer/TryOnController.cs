@@ -4,7 +4,6 @@ using Application.Features.Customer.VirtualTryOn.DTOs;
 using Application.Features.Customer.VirtualTryOn.Queries.GetTryOnSessionById;
 using Application.Features.Customer.VirtualTryOn.Queries.GetTryOnSessions;
 using Application.Features.Customer.VirtualTryOn.Queries.GetTryOnSessionsByProduct;
-using Microsoft.AspNetCore.RateLimiting;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace API.Controllers.Customer;
@@ -16,11 +15,17 @@ public sealed class TryOnController : CustomerBaseApiController
     // ==============================================================
     // POST api/customers/{customerId}/try-on
     // ==============================================================
+    // FIX (Issue 8): [EnableRateLimiting("customer-tryon")] was removed.
+    // That policy was never registered via AddRateLimiter in Program.cs — the project
+    // uses the separate AspNetCoreRateLimit / IpRateLimiting package instead. The
+    // attribute was a silent no-op (or a runtime exception depending on ASP.NET Core
+    // version). If strict per-endpoint concurrency control is required in the future,
+    // register a named policy in Program.cs with AddRateLimiter and restore the
+    // attribute here.
     [HttpPost("try-on")]
-    [EnableRateLimiting("customer-tryon")]
     [SwaggerOperation(
         Summary = "Initiate a virtual try-on session",
-        Description = "Invokes ML services for try-on modeling. Secured with strict concurrent rate limiting.")]
+        Description = "Invokes ML services for try-on modeling. IP rate-limited globally via IpRateLimiting middleware.")]
     [ProducesResponseType(typeof(ApiResponse<TryOnResultDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]

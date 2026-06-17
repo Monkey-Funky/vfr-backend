@@ -125,7 +125,7 @@ public static class DependencyInjection
             // non-idempotent. Retrying the full pipeline (objects + align) on failure
             // doubles costs and hits the timeout. Errors surface as 503 to the caller.
             builder
-                .AddTimeout(TimeSpan.FromSeconds(180))  // objects (≤30s) + align (≤30s) + poll overhead
+                .AddTimeout(TimeSpan.FromSeconds(300))  // FIX (Issue 5): worst case = 2x MaxPollSeconds(120s)=240s; 300s gives 60s headroom
                 .AddCircuitBreaker(new CircuitBreakerStrategyOptions
                 {
                     FailureRatio = 1.0,

@@ -4,6 +4,7 @@ using Application.Interfaces.Services;
 using Application.Interfaces.Services.Customer;
 using Domain.Entities.Customer;
 using Domain.Enums.Customer;
+using Domain.Enums.Product;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.Customer.VirtualTryOn.Commands.InitiateTryOn;
@@ -36,11 +37,13 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
             ?? throw new UnauthorizedException("Customer identity missing.");
 
         // 1. Validate product exists and is active.
+        // FIX (Issue 12): Use ProductStatus.Active constant instead of the hardcoded
+        // string literal "Active" to avoid silent breakage if the constant is renamed.
         var product = await _context.Products
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == request.ProductId, cancellationToken);
 
-        if (product is null || product.Status != "Active")
+        if (product is null || product.Status != ProductStatus.Active)
             throw new NotFoundException("Product", request.ProductId);
 
         // 2. Load and validate avatar ownership if one is provided.
@@ -55,16 +58,18 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 throw new NotFoundException("Avatar", request.AvatarId.Value);
         }
 
-        // 2b. For Overlay2D: validate avatar eligibility BEFORE creating the session.
+        // 2b. Pre-persist business-rule validation for all session types.
         //
-        // The avatar-missing and source-image-missing checks are pure business-rule
-        // violations that can be detected from already-loaded data — there is no
-        // reason to persist a session that is guaranteed to fail because of a
-        // predictable client-side data gap.  Throwing here returns a clean 422 to
-        // the caller without ever writing a "Failed" session record to the database.
+        // FIX (Issues 7 & 10): Previously only Overlay2D had pre-persist validation.
+        // The 3D checks lived inside VirtualTryOnService.ProcessTryOnAsync, AFTER the
+        // session row was already saved — so a customer whose avatar had no 3D model
+        // or no source image would produce a spurious "Failed" session row in the DB for
+        // a completely predictable user-state issue, polluting analytics dashboards.
         //
-        // (For the 3D path the avatar check is also predictable, but the 3D service
-        // owns that validation so that it can remain self-contained and testable.)
+        // Now ALL predictable business-rule violations are raised before SaveChangesAsync
+        // so that no session row is ever written for these cases.
+        //
+        // The service retains its own guard as a defence-in-depth safety net.
         if (request.SessionType == TryOnSessionType.Overlay2D)
         {
             if (!request.AvatarId.HasValue || activeAvatar is null)
@@ -77,11 +82,35 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                     "TryOn2DSourceImageMissing",
                     "This avatar has no source image. Please re-create the avatar from a photo.");
         }
+        else if (request.SessionType == TryOnSessionType.Model3D
+              || request.SessionType == TryOnSessionType.ARLiveView)
+        {
+            // FIX (Issue 10): 3D avatar checks moved here, BEFORE session persistence.
+            if (!request.AvatarId.HasValue || activeAvatar is null)
+                throw new BusinessRuleException(
+                    "TryOn3DAvatarRequired",
+                    "3D try-on requires a 3D avatar. Please create one first.");
+
+            if (string.IsNullOrWhiteSpace(activeAvatar.Avatar3dModelUrl))
+                throw new BusinessRuleException(
+                    "TryOn3DAvatarRequired",
+                    "Customer does not have a 3D avatar model. Please re-create the avatar from a photo.");
+
+            // FIX (Issue 7): Require SourceImageUrl for the 3D path too.
+            // VirtualTryOnService was previously substituting the product image as the
+            // align reference when SourceImageUrl was null — producing visually wrong
+            // "successful" results (product photo used instead of person photo for
+            // perspective-correct alignment). Fail loudly instead.
+            if (string.IsNullOrWhiteSpace(activeAvatar.SourceImageUrl))
+                throw new BusinessRuleException(
+                    "TryOn3DSourceImageMissing",
+                    "This avatar has no source image. Please re-create the avatar from a photo.");
+        }
 
         // 3. Persist the pending session before calling the external service.
         //
         // At this point all predictable validation errors have already been surfaced
-        // (step 2 / 2b). The only remaining failure modes are transient external
+        // (steps 2 / 2b). The only remaining failure modes are transient external
         // service errors — those are captured in the catch block below so the session
         // is recorded as Failed rather than left in a perpetual Pending state.
         var session = VirtualTryOnSession.Create(

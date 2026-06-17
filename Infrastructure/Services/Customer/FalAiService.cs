@@ -118,7 +118,13 @@ public sealed class FalAiService : IFalAiService
 
         if (string.IsNullOrWhiteSpace(glbUrl) && result.IndividualGlbs is { Count: > 0 })
         {
-            glbUrl = result.IndividualGlbs[0].Url ?? result.IndividualGlbs[0].DirectUrl;
+            var firstEntry = result.IndividualGlbs[0];
+            // FIX (Issue 11): handle both plain-string URL and File-object shapes.
+            if (firstEntry.ValueKind == JsonValueKind.String)
+                glbUrl = firstEntry.GetString();
+            else if (firstEntry.ValueKind == JsonValueKind.Object
+                     && firstEntry.TryGetProperty("url", out var urlProp))
+                glbUrl = urlProp.GetString();
         }
 
         if (string.IsNullOrWhiteSpace(glbUrl))
@@ -277,7 +283,8 @@ public sealed class FalAiService : IFalAiService
         public JsonElement? ModelGlbRaw { get; init; }
 
         [JsonPropertyName("individual_glbs")]
-        public List<IndividualGlbEntry>? IndividualGlbs { get; init; }
+        // FIX (Issue 11): Use JsonElement to handle both object {"url":"..."} and plain string URL shapes.
+        public List<JsonElement>? IndividualGlbs { get; init; }
 
         [JsonIgnore]
         public FileResponse? ModelGlb
@@ -304,16 +311,6 @@ public sealed class FalAiService : IFalAiService
         }
     }
 
-    /// <summary>An entry in individual_glbs — can be an object or a string URL.</summary>
-    private sealed class IndividualGlbEntry
-    {
-        [JsonPropertyName("url")]
-        public string? Url { get; init; }
-
-        // Fallback when the entry is a plain URL string (not an object).
-        [JsonIgnore]
-        public string? DirectUrl { get; init; }
-    }
 
     // ══════════════════════════════════════════════════════════════════════
     //  DTOs — SAM 3D Align

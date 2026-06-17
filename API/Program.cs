@@ -30,6 +30,21 @@ builder.Services.AddControllers()
     {
         opts.JsonSerializerOptions.PropertyNamingPolicy =
             System.Text.Json.JsonNamingPolicy.CamelCase;
+
+        // FIX (Issues 1 & 2): Register a global JsonStringEnumConverter so that:
+        //   - Incoming JSON strings (e.g. "sessionType": "Model3D") are correctly
+        //     model-bound to their enum values without a 400 Bad Request.
+        //   - Outgoing enum values (e.g. SessionStatus, TryOnSessionType) are
+        //     serialized as their string names ("Completed") rather than raw
+        //     integers, matching the contract documented in Frontend_Avatar_Integration_Guide.md.
+        //
+        // Individual enums also carry [JsonConverter(typeof(JsonStringEnumConverter))]
+        // so the contract is honoured even in contexts where this global options object
+        // is not in scope (e.g. System.Text.Json.JsonSerializer.Deserialize calls inside
+        // Infrastructure services that build their own JsonSerializerOptions).
+        opts.JsonSerializerOptions.Converters.Add(
+            new System.Text.Json.Serialization.JsonStringEnumConverter());
+
         // Do NOT set DefaultIgnoreCondition = WhenWritingNull.
         // Omitting null fields breaks the frontend contract:
         // optional fields like primaryImageUrl / brandName vanish from the

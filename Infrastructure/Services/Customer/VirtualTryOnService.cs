@@ -40,23 +40,29 @@ public sealed class VirtualTryOnService : IVirtualTryOnService
             "Processing Virtual Try-On for Customer {CustomerId} and Product {ProductId}",
             customerId, productId);
 
-        // 1. Validate avatar has a 3D model URL. This is a per-customer business-rule
-        //    check (e.g. they simply haven't generated a 3D avatar yet), NOT an
-        //    external-service failure. It is intentionally kept OUTSIDE the resilience
-        //    pipeline below: the "tryon" pipeline's circuit breaker is shared across ALL
-        //    customers, so if this validation ran inside it, a handful of customers
-        //    without a 3D avatar (a totally normal, expected case) would count as
-        //    "failures" and could trip the breaker for every other customer too, even
-        //    though fal.ai itself is perfectly healthy.
+        // 1. Validate avatar has a 3D model URL (defence-in-depth; primary check is now
+        //    in InitiateTryOnCommandHandler BEFORE session persistence — Issue 10 fix).
+        //    Kept here so the service remains independently testable and self-contained.
         if (avatar?.Avatar3dModelUrl is null)
         {
             throw new BusinessRuleException("TryOn3DAvatarRequired",
                 "Customer does not have a 3D avatar. Please create one first.");
         }
 
+        // FIX (Issue 7): Require SourceImageUrl for the 3D align step.
+        // The previous code silently fell back to the product image when SourceImageUrl
+        // was null (avatar?.SourceImageUrl ?? productImageUrl). SAM 3D Align needs the
+        // PERSON's photo for perspective-correct alignment — substituting the product
+        // photo produces visually wrong results with no error surfaced to the customer.
+        // We now fail loudly with a clear business rule error, consistent with how the
+        // Overlay2D path handles the same missing-source-image condition.
+        if (string.IsNullOrWhiteSpace(avatar.SourceImageUrl))
+        {
+            throw new BusinessRuleException("TryOn3DSourceImageMissing",
+                "This avatar has no source image. Please re-create the avatar from a photo.");
+        }
+
         // 2. Load product and resolve primary image URL via direct SQL projection.
-        // Using a correlated subquery instead of Include(p => p.Images) avoids
-        // navigation-collection loading issues with AsNoTracking.
         var productProjection = await _context.Products
             .AsNoTracking()
             .Where(p => p.Id == productId)
@@ -77,8 +83,6 @@ public sealed class VirtualTryOnService : IVirtualTryOnService
             throw new NotFoundException("Product", productId);
         }
 
-        // 3. Validate product has a primary image — also a business-rule check, kept
-        //    outside the resilience pipeline for the same reason as step 1 above.
         var productImageUrl = productProjection.PrimaryImageUrl;
         if (string.IsNullOrWhiteSpace(productImageUrl))
         {
@@ -86,7 +90,7 @@ public sealed class VirtualTryOnService : IVirtualTryOnService
                 "This product has no image available for try-on.");
         }
 
-        // 4. Build clothing prompt from product name
+        // 3. Build clothing prompt from product name
         var clothingPrompt = !string.IsNullOrWhiteSpace(productProjection.Name)
             ? productProjection.Name
             : "clothing item";
@@ -95,14 +99,14 @@ public sealed class VirtualTryOnService : IVirtualTryOnService
             "Starting fal.ai 3D try-on pipeline. Product: {ProductName}, Image: {ProductImageUrl}, BodyMesh: {BodyMeshUrl}, SourceImage: {SourceImageUrl}, FocalLength: {FocalLength}",
             clothingPrompt, productImageUrl, avatar.Avatar3dModelUrl, avatar.SourceImageUrl, avatar.AvatarFocalLength);
 
-        // 5. The actual external fal.ai calls — these are the genuine network/external-
+        // 4. The actual external fal.ai calls — these are the genuine network/external-
         //    service operations, so only THEY are protected by the shared "tryon"
         //    resilience pipeline (timeout + circuit breaker).
         var pipeline = _pipelineProvider.GetPipeline("tryon");
 
         return await pipeline.ExecuteAsync(async cancellationToken =>
         {
-            // 5a. Generate 3D model of the clothing item
+            // 4a. Generate 3D model of the clothing item
             var objectGlb = await _falAiService.GenerateObject3dAsync(
                 productImageUrl, clothingPrompt, cancellationToken);
 
@@ -110,25 +114,24 @@ public sealed class VirtualTryOnService : IVirtualTryOnService
                 "Clothing 3D model generated. ObjectGlbUrl: {ObjectGlbUrl}",
                 objectGlb.GlbUrl);
 
-            // 5b. Align body + clothing into one unified scene.
-            //    SAM 3D Align needs the PERSON's original image (not the product image)
-            //    as the reference for perspective-correct alignment.
-            var alignImageUrl = avatar.SourceImageUrl ?? productImageUrl;
+            // 4b. Align body + clothing into one unified scene.
+            //     SAM 3D Align needs the PERSON's original image as the reference
+            //     for perspective-correct alignment. SourceImageUrl is guaranteed
+            //     non-null here — validated in step 1 above.
             var sceneGlbUrl = await _falAiService.AlignSceneAsync(
-                imageUrl: alignImageUrl,
+                imageUrl: avatar.SourceImageUrl,   // person's photo — never substituted
                 bodyMeshUrl: avatar.Avatar3dModelUrl,
                 objectMeshUrl: objectGlb.GlbUrl,
-                focalLength: avatar.AvatarFocalLength ?? 1000.0, // use real focal length from SAM 3D Body metadata
+                focalLength: avatar.AvatarFocalLength ?? 1000.0,
                 cancellationToken);
 
             _logger.LogInformation(
                 "3D scene alignment completed. SceneGlbUrl: {SceneGlbUrl}",
                 sceneGlbUrl);
 
-            // 5c. Calculate duration
+            // 4c. Calculate duration
             var durationSeconds = (int)(DateTime.UtcNow - startTime).TotalSeconds;
 
-            // 5d. Return result
             return new TryOnResultDto(
                 Status: SessionStatus.Completed,
                 ResultImageUrl: sceneGlbUrl,
