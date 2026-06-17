@@ -47,23 +47,24 @@ public sealed class FalAiService : IFalAiService
     {
         _logger.LogInformation("Generating 3D body via SAM 3D Body. Image: {ImageUrl}", imageUrl);
 
-        // Use a random seed per request to prevent fal.ai from returning
-        // a cached result when the same person re-uploads photos.
         var requestBody = new BodyRequest
         {
             ImageUrl = imageUrl,
             ExportMeshes = true,
             Include3dKeypoints = true,
-            Seed = Random.Shared.Next(1, int.MaxValue)
+            // Lean metadata — only keypoints + camera params, no full MHR pack.
+            // Faster response, lower payload size.
+            IncludeMhrParams = false
         };
 
         var result = await SubmitAndPollAsync<BodyRequest, BodyResponse>(
             _settings.BodyApiId, requestBody, ct);
 
-        var glbUrl = result.ModelGlb
+        // model_glb is a File object { url, content_type, file_name, file_size }
+        var glbUrl = result.ModelGlb?.Url
             ?? throw new ExternalServiceException("FalAi", "SAM 3D Body did not return a model_glb URL.");
 
-        // Extract focal length from metadata (needed for Align step).
+        // Extract focal length from metadata (needed for the Align step).
         var focalLength = result.Metadata?.People?.FirstOrDefault()?.FocalLength ?? 1000.0;
 
         _logger.LogInformation(
@@ -235,23 +236,33 @@ public sealed class FalAiService : IFalAiService
         [JsonPropertyName("image_url")]
         public string ImageUrl { get; init; } = "";
 
+        /// <summary>Export individual mesh files (.ply) per person.</summary>
         [JsonPropertyName("export_meshes")]
         public bool ExportMeshes { get; init; } = true;
 
+        /// <summary>Include 3D keypoint markers in the GLB for visualization.</summary>
         [JsonPropertyName("include_3d_keypoints")]
         public bool Include3dKeypoints { get; init; } = true;
 
         /// <summary>
-        /// Random seed per request — prevents fal.ai from returning a cached
-        /// result when the same image URL is submitted multiple times.
+        /// false = lean metadata (keypoints + camera params only).
+        /// Faster and cheaper than true (full MHR parameter set).
         /// </summary>
-        [JsonPropertyName("seed")]
-        public int Seed { get; init; }
+        [JsonPropertyName("include_mhr_params")]
+        public bool IncludeMhrParams { get; init; } = false;
     }
 
+    // model_glb is a File object { url, content_type, file_name, file_size }
     private sealed record BodyResponse(
-        [property: JsonPropertyName("model_glb")] string? ModelGlb,
+        [property: JsonPropertyName("model_glb")] SamFileResponse? ModelGlb,
         [property: JsonPropertyName("metadata")] BodyMetadata? Metadata);
+
+    // Generic file response used by SAM 3D Body outputs
+    private sealed record SamFileResponse(
+        [property: JsonPropertyName("url")] string? Url,
+        [property: JsonPropertyName("content_type")] string? ContentType,
+        [property: JsonPropertyName("file_name")] string? FileName,
+        [property: JsonPropertyName("file_size")] long? FileSize);
 
     private sealed record BodyMetadata(
         [property: JsonPropertyName("people")] List<PersonData>? People);
