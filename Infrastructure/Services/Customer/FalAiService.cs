@@ -102,9 +102,14 @@ public sealed class FalAiService : IFalAiService
             "Generating 3D object via SAM 3D Objects. Image: {ImageUrl}, Prompt: {Prompt}",
             imageUrl, prompt);
 
+        // Verify the product image is publicly accessible before handing it to fal.ai.
+        // fal.ai will silently fail (FAILED status after 5-30s wait) if the URL is 404.
+        await ValidateImageUrlAsync(imageUrl, "product", ct);
+
         var requestBody = new ObjectsRequest(imageUrl, prompt, 42);
         var result = await SubmitAndPollAsync<ObjectsRequest, ObjectsResponse>(
             _settings.ObjectsApiId, requestBody, ct);
+
 
         // SAM 3D Objects response: model_glb can be a File object OR a direct URL string.
         // Try ModelGlb (object) first, then ModelGlbUrl (string), then individual_glbs[0].
@@ -222,12 +227,50 @@ public sealed class FalAiService : IFalAiService
         if (response.IsSuccessStatusCode) return;
 
         var body = await response.Content.ReadAsStringAsync(ct);
-        _logger.LogError("fal.ai {Phase} failed for {ApiId}. {StatusCode}: {Body}",
+        _logger.LogError("fal.ai {Phase} failed for {ApiId}. Status {StatusCode}: {Body}",
             phase, apiId, (int)response.StatusCode, body);
 
-        throw new HttpRequestException(
-            $"fal.ai {phase} returned {(int)response.StatusCode}: {body}",
-            inner: null, statusCode: response.StatusCode);
+        // Wrap as ExternalServiceException so ExceptionHandlingMiddleware maps it to 503.
+        // A raw HttpRequestException has no explicit mapping and falls through to 500.
+        throw new ExternalServiceException("FalAi",
+            $"fal.ai {phase} request failed ({(int)response.StatusCode}): {body}");
+    }
+
+    /// <summary>
+    /// Sends a HEAD request to verify the image URL is publicly accessible before passing
+    /// it to fal.ai. fal.ai cannot process images that return 404 or are behind auth.
+    /// Throws ExternalServiceException with a clear message if the URL is inaccessible.
+    /// </summary>
+    private async Task ValidateImageUrlAsync(string imageUrl, string label, CancellationToken ct)
+    {
+        try
+        {
+            using var client = _httpClientFactory.CreateClient(); // plain client, no auth
+            using var req = new HttpRequestMessage(HttpMethod.Head, imageUrl);
+            using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogError(
+                    "Image URL for {Label} returned {StatusCode} — fal.ai cannot process it. URL: {Url}",
+                    label, (int)resp.StatusCode, imageUrl);
+
+                throw new ExternalServiceException("FalAi",
+                    $"The {label} image URL is not accessible (HTTP {(int)resp.StatusCode}). " +
+                    $"Ensure the image is publicly reachable before initiating try-on.");
+            }
+
+            _logger.LogDebug("Image URL for {Label} verified accessible: {Url}", label, imageUrl);
+        }
+        catch (ExternalServiceException)
+        {
+            throw; // already formatted — re-throw as-is
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not verify image URL for {Label}: {Url}", label, imageUrl);
+            // Non-fatal — let fal.ai try anyway; it will surface a clear error if unreachable.
+        }
     }
 
     private HttpClient CreateAuthorizedClient()
