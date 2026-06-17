@@ -31,7 +31,7 @@ public sealed class TryOnControllerTests : IntegrationTestBase
             .Setup(s => s.ProcessTryOnAsync(
                 _customerId,
                 productId,
-                TryOnSessionType.Overlay2D,
+                TryOnSessionType.Model3D,
                 It.IsNotNull<Avatar>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new TryOnResultDto(
@@ -43,7 +43,7 @@ public sealed class TryOnControllerTests : IntegrationTestBase
 
         var command = new InitiateTryOnCommand(
             ProductId: productId,
-            SessionType: TryOnSessionType.Overlay2D,
+            SessionType: TryOnSessionType.Model3D,
             AvatarId: avatarId);
 
         var response = await CustomerClient.PostAsJsonAsync(
@@ -230,7 +230,7 @@ public sealed class TryOnControllerTests : IntegrationTestBase
 
         var command = new InitiateTryOnCommand(
             ProductId: productId,
-            SessionType: TryOnSessionType.Overlay2D,
+            SessionType: TryOnSessionType.Model3D,
             AvatarId: null);
 
         var response = await CustomerClient.PostAsJsonAsync(
