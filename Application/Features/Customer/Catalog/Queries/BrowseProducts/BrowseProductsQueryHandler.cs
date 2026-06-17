@@ -1,4 +1,4 @@
-﻿using Application.Features.Customer.Catalog.DTOs;
+using Application.Features.Customer.Catalog.DTOs;
 using Application.Features.Customer.Catalog.Mappings;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
@@ -188,15 +188,33 @@ internal sealed class BrowseProductsQueryHandler : IRequestHandler<BrowseProduct
 
         int total = await query.CountAsync(cancellationToken);
 
-        var products = await query
-            .Include(p => p.Images)
+        // Project directly into an anonymous shape that includes the primary image URL.
+        // Using a correlated subquery is more reliable than Include() + navigation collections
+        // with AsNoTracking(): avoids all backing-field / ReadOnlyCollection ambiguity and
+        // produces a single SQL SELECT instead of a split query.
+        var rawProducts = await query
             .Skip((request.PageNumber - 1) * request.PageSize)
             .Take(request.PageSize)
-            .AsSplitQuery()
+            .Select(p => new
+            {
+                p.Id,
+                p.Name,
+                p.Brand,
+                p.Price,
+                p.CategoryId,
+                p.AvailableColors,
+                // Correlated subquery — translated by EF Core to a SQL LEFT JOIN / subselect.
+                // The global query filter (is_deleted = false) on ProductImage is applied automatically.
+                PrimaryImageUrl = _context.ProductImages
+                    .Where(i => i.ProductId == p.Id)
+                    .OrderBy(i => i.DisplayOrder)
+                    .Select(i => i.ImageUrl)
+                    .FirstOrDefault()
+            })
             .ToListAsync(cancellationToken);
 
-        var productIds = products.Select(p => p.Id).ToList();
-        var categoryIds = products
+        var productIds  = rawProducts.Select(p => p.Id).ToList();
+        var categoryIds = rawProducts
             .Where(p => p.CategoryId.HasValue)
             .Select(p => p.CategoryId!.Value)
             .Distinct()
@@ -212,11 +230,29 @@ internal sealed class BrowseProductsQueryHandler : IRequestHandler<BrowseProduct
                      || (o.CategoryId.HasValue && categoryIds.Contains(o.CategoryId.Value)))
             .ToListAsync(cancellationToken);
 
-        var dtos = products.Select(p =>
+        var dtos = rawProducts.Select(p =>
         {
             var offer = activeOffers.FirstOrDefault(o => o.ProductId == p.Id)
                      ?? activeOffers.FirstOrDefault(o => o.CategoryId == p.CategoryId);
-            return p.ToProductCardDto(offer, isFavorite: false);
+
+            decimal? discountedPrice = null;
+            if (offer != null && p.Price.HasValue)
+            {
+                discountedPrice = Math.Round(offer.DiscountType == "Percentage"
+                    ? p.Price.Value * (1 - offer.DiscountValue / 100)
+                    : Math.Max(0, p.Price.Value - offer.DiscountValue), 2);
+            }
+
+            return new ProductCardDto(
+                p.Id,
+                p.Name,
+                p.Brand,
+                p.Price,
+                discountedPrice,
+                p.PrimaryImageUrl,   // fetched directly from SQL — reliable even with AsNoTracking
+                p.AvailableColors,
+                IsFavorite: false    // overlaid per-user after cache read
+            );
         }).ToList();
 
         return new PagedResult<ProductCardDto>
