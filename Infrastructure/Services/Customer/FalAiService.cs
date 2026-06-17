@@ -106,15 +106,13 @@ public sealed class FalAiService : IFalAiService
         var result = await SubmitAndPollAsync<ObjectsRequest, ObjectsResponse>(
             _settings.ObjectsApiId, requestBody, ct);
 
-        // SAM 3D Objects response format:
-        // - For single objects: model_glb contains the combined/single mesh
-        // - For multi-object: individual_glbs contains per-object meshes
-        // We try model_glb first (always present), then fallback to individual_glbs[0].
-        string? glbUrl = result.ModelGlb?.Url;
+        // SAM 3D Objects response: model_glb can be a File object OR a direct URL string.
+        // Try ModelGlb (object) first, then ModelGlbUrl (string), then individual_glbs[0].
+        string? glbUrl = result.ModelGlb?.Url ?? result.ModelGlbUrl;
 
         if (string.IsNullOrWhiteSpace(glbUrl) && result.IndividualGlbs is { Count: > 0 })
         {
-            glbUrl = result.IndividualGlbs[0].Url;
+            glbUrl = result.IndividualGlbs[0].Url ?? result.IndividualGlbs[0].DirectUrl;
         }
 
         if (string.IsNullOrWhiteSpace(glbUrl))
@@ -140,6 +138,7 @@ public sealed class FalAiService : IFalAiService
             _settings.AlignApiId, requestBody, ct);
 
         var sceneUrl = result.SceneGlb?.Url
+            ?? result.SceneGlbUrl
             ?? throw new ExternalServiceException("FalAi", "SAM 3D Align did not return a scene_glb URL.");
 
         _logger.LogInformation("SAM 3D Align completed. Scene GLB: {SceneGlbUrl}", sceneUrl);
@@ -337,9 +336,53 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("prompt")] string Prompt,
         [property: JsonPropertyName("seed")] int Seed);
 
-    private sealed record ObjectsResponse(
-        [property: JsonPropertyName("model_glb")] FileResponse? ModelGlb,
-        [property: JsonPropertyName("individual_glbs")] List<FileResponse>? IndividualGlbs);
+    /// <summary>
+    /// SAM 3D Objects response. model_glb can be a File object OR a direct URL string.
+    /// individual_glbs entries can also be either format.
+    /// </summary>
+    private sealed class ObjectsResponse
+    {
+        [JsonPropertyName("model_glb")]
+        public JsonElement? ModelGlbRaw { get; init; }
+
+        [JsonPropertyName("individual_glbs")]
+        public List<IndividualGlbEntry>? IndividualGlbs { get; init; }
+
+        [JsonIgnore]
+        public FileResponse? ModelGlb
+        {
+            get
+            {
+                if (ModelGlbRaw is not { } raw) return null;
+                if (raw.ValueKind == JsonValueKind.Object)
+                    return JsonSerializer.Deserialize<FileResponse>(raw.GetRawText(), JsonOptions);
+                return null;
+            }
+        }
+
+        [JsonIgnore]
+        public string? ModelGlbUrl
+        {
+            get
+            {
+                if (ModelGlbRaw is not { } raw) return null;
+                if (raw.ValueKind == JsonValueKind.String)
+                    return raw.GetString();
+                return null;
+            }
+        }
+    }
+
+    /// <summary>An entry in individual_glbs — can be an object or a string URL.</summary>
+    private sealed class IndividualGlbEntry
+    {
+        [JsonPropertyName("url")]
+        public string? Url { get; init; }
+
+        // Fallback when the entry is a plain URL string (not an object).
+        [JsonIgnore]
+        public string? DirectUrl { get; init; }
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     //  DTOs — SAM 3D Align
@@ -351,8 +394,38 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("object_mesh_url")] string ObjectMeshUrl,
         [property: JsonPropertyName("focal_length")] double FocalLength);
 
-    private sealed record AlignResponse(
-        [property: JsonPropertyName("scene_glb")] SceneGlb? SceneGlb);
+    /// <summary>
+    /// SAM 3D Align response. scene_glb can be a File object OR a direct URL string.
+    /// </summary>
+    private sealed class AlignResponse
+    {
+        [JsonPropertyName("scene_glb")]
+        public JsonElement? SceneGlbRaw { get; init; }
+
+        [JsonIgnore]
+        public FileResponse? SceneGlb
+        {
+            get
+            {
+                if (SceneGlbRaw is not { } raw) return null;
+                if (raw.ValueKind == JsonValueKind.Object)
+                    return JsonSerializer.Deserialize<FileResponse>(raw.GetRawText(), JsonOptions);
+                return null;
+            }
+        }
+
+        [JsonIgnore]
+        public string? SceneGlbUrl
+        {
+            get
+            {
+                if (SceneGlbRaw is not { } raw) return null;
+                if (raw.ValueKind == JsonValueKind.String)
+                    return raw.GetString();
+                return null;
+            }
+        }
+    }
 
     private sealed record SceneGlb(
         [property: JsonPropertyName("url")] string? Url);

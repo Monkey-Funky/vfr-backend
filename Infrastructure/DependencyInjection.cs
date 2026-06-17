@@ -118,19 +118,17 @@ public static class DependencyInjection
 
         services.AddResiliencePipeline("tryon", builder =>
         {
+            // NOTE: No Retry here — fal.ai calls are expensive ($0.02 each) and
+            // non-idempotent. Retrying the full pipeline (objects + align) on failure
+            // doubles costs and hits the timeout. Errors surface as 503 to the caller.
             builder
-                .AddTimeout(TimeSpan.FromSeconds(90))
-                .AddRetry(new RetryStrategyOptions
-                {
-                    MaxRetryAttempts = 1,
-                    Delay = TimeSpan.FromSeconds(2)
-                })
+                .AddTimeout(TimeSpan.FromSeconds(180))  // objects (≤30s) + align (≤30s) + poll overhead
                 .AddCircuitBreaker(new CircuitBreakerStrategyOptions
                 {
-                    FailureRatio = 1.0, // Fail on every threshold hit
-                    MinimumThroughput = 3, // 3 failures
-                    SamplingDuration = TimeSpan.FromSeconds(30), // in 30s
-                    BreakDuration = TimeSpan.FromSeconds(30) // open 30s
+                    FailureRatio = 1.0,
+                    MinimumThroughput = 3,               // open only after 3 consecutive failures
+                    SamplingDuration = TimeSpan.FromSeconds(60),
+                    BreakDuration = TimeSpan.FromSeconds(30)
                 });
         });
 
@@ -193,7 +191,10 @@ public static class DependencyInjection
         // ── 3c. Named HttpClient for fal.ai SAM 3D API ──────────────────────────
         services.AddHttpClient("fal-ai", (sp, client) =>
         {
-            client.Timeout = TimeSpan.FromSeconds(90);
+            // 180s matches the Polly tryon pipeline timeout.
+            // Each fal.ai call (submit + poll + fetch) takes up to 30s.
+            // Two sequential calls (objects + align) can take up to 60s in the worst case.
+            client.Timeout = TimeSpan.FromSeconds(180);
             client.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
         });

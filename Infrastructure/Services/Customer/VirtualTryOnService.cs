@@ -51,36 +51,44 @@ public sealed class VirtualTryOnService : IVirtualTryOnService
                     "Customer does not have a 3D avatar. Please create one first.");
             }
 
-            // 2. Load product with images
-            var product = await _context.Products
-                .Include(p => p.Images)
+            // 2. Load product and resolve primary image URL via direct SQL projection.
+            // Using a correlated subquery instead of Include(p => p.Images) avoids
+            // navigation-collection loading issues with AsNoTracking.
+            var productProjection = await _context.Products
                 .AsNoTracking()
-                .FirstOrDefaultAsync(p => p.Id == productId, cancellationToken);
+                .Where(p => p.Id == productId)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    PrimaryImageUrl = _context.ProductImages
+                        .Where(i => i.ProductId == p.Id)
+                        .OrderBy(i => i.DisplayOrder)
+                        .Select(i => i.ImageUrl)
+                        .FirstOrDefault()
+                })
+                .FirstOrDefaultAsync(cancellationToken);
 
-            if (product is null)
+            if (productProjection is null)
             {
                 throw new ExternalServiceException("FalAi", "Product not found.");
             }
 
-            // 3. Get the first non-deleted product image URL
-            var productImageUrl = product.Images
-                .Where(i => !i.IsDeleted)
-                .OrderBy(i => i.DisplayOrder)
-                .FirstOrDefault()?.ImageUrl;
-
+            // 3. Validate product has a primary image
+            var productImageUrl = productProjection.PrimaryImageUrl;
             if (string.IsNullOrWhiteSpace(productImageUrl))
             {
                 throw new ExternalServiceException("FalAi", "Product has no images for try-on.");
             }
 
             // 4. Build clothing prompt from product name
-            var clothingPrompt = !string.IsNullOrWhiteSpace(product.Name)
-                ? product.Name
+            var clothingPrompt = !string.IsNullOrWhiteSpace(productProjection.Name)
+                ? productProjection.Name
                 : "clothing item";
 
             _logger.LogInformation(
-                "Starting fal.ai 3D try-on pipeline. Product: {ProductName}, BodyMesh: {BodyMeshUrl}",
-                clothingPrompt, avatar.Avatar3dModelUrl);
+                "Starting fal.ai 3D try-on pipeline. Product: {ProductName}, Image: {ProductImageUrl}, BodyMesh: {BodyMeshUrl}, SourceImage: {SourceImageUrl}, FocalLength: {FocalLength}",
+                clothingPrompt, productImageUrl, avatar.Avatar3dModelUrl, avatar.SourceImageUrl, avatar.AvatarFocalLength);
 
             // 5. Generate 3D model of the clothing item
             var objectGlb = await _falAiService.GenerateObject3dAsync(
