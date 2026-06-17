@@ -30,8 +30,11 @@ builder.Services.AddControllers()
     {
         opts.JsonSerializerOptions.PropertyNamingPolicy =
             System.Text.Json.JsonNamingPolicy.CamelCase;
-        opts.JsonSerializerOptions.DefaultIgnoreCondition =
-            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+        // Do NOT set DefaultIgnoreCondition = WhenWritingNull.
+        // Omitting null fields breaks the frontend contract:
+        // optional fields like primaryImageUrl / brandName vanish from the
+        // JSON object, arriving as 'undefined' instead of null, so the
+        // frontend cannot distinguish "no image" from "field missing".
     });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -366,6 +369,25 @@ using (var scope = app.Services.CreateScope())
 // Runs all seeders registered in DatabaseSeeder.
 // Safe to call on every startup — every seeder is idempotent.
 await DatabaseSeeder.SeedAsync(app.Services);
+
+// ── 3. Flush stale catalog browse cache ──────────────────────────────────────
+//
+// Old cache entries may have been stored before the ProductConfiguration
+// UsePropertyAccessMode(Field) fix that enables EF Core to load the Images
+// navigation collection. Those entries have primaryImageUrl = null.
+// Flushing forces a fresh DB fetch so all product cards include image URLs.
+try
+{
+    using var flushScope = app.Services.CreateScope();
+    var cacheService = flushScope.ServiceProvider.GetRequiredService<ICacheService>();
+    await cacheService.RemoveByPrefixAsync("catalog:browse:", CancellationToken.None);
+    Log.Information("Startup: Flushed stale catalog browse cache.");
+}
+catch (Exception ex)
+{
+    // Non-fatal — the API still works; images will appear once cached entries expire.
+    Log.Warning(ex, "Startup: Could not flush catalog browse cache (Redis may be unavailable).");
+}
 
 
 
