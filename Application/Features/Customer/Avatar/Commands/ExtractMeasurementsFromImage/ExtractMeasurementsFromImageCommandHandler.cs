@@ -77,44 +77,69 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
             request.HeightCm,
             cancellationToken);
 
-        // 3. Generate 3D body model via SAM 3D Body (best-effort — does not abort the flow).
-        //    SAM 3D Body is purpose-built for human reconstruction: $0.02/call, 5-10s, single image.
-        //    Front-facing view produces optimal results per the official documentation.
+        // 3. Upload the front image to get a stable public URL. This is the person/source
+        //    image required by the 2D Overlay try-on (FASHN) AND, when available, by the
+        //    3D SAM Align step. Treated as best-effort on its own: if the upload itself
+        //    fails, the avatar still saves with measurements only (no try-on capability).
+        //    IMPORTANT: this MUST succeed independently of 3D generation below — previously
+        //    `sourceImageUrl` was only set after a successful SAM 3D Body call, which meant
+        //    a 3D failure silently broke 2D try-on too, even though 2D never needed the 3D
+        //    model at all.
+        string? uploadedSourceImageUrl = null;
         try
         {
             var uniqueFileName = $"{customerId}_{Guid.NewGuid():N}_front{Path.GetExtension(request.FrontImageFile.FileName)}";
-            var cloudinaryUrl = await _fileStorageService.UploadAsync(
+            uploadedSourceImageUrl = await _fileStorageService.UploadAsync(
                 new MemoryStream(frontBytes, writable: false), uniqueFileName, "avatars/3d-source", cancellationToken);
+            sourceImageUrl = uploadedSourceImageUrl;
 
             _logger.LogInformation(
-                "Uploaded front image for 3D body generation. CustomerId: {CustomerId}, URL: {CloudinaryUrl}",
-                customerId, cloudinaryUrl);
-
-            var bodyResult = await _falAiService.GenerateBody3dAsync(cloudinaryUrl, cancellationToken);
-            avatar3dModelUrl = bodyResult.GlbUrl;
-            avatarFocalLength = bodyResult.FocalLength;
-            sourceImageUrl = cloudinaryUrl; // Store the person image URL — needed by SAM 3D Align
-
-            _logger.LogInformation(
-                "SAM 3D Body generation completed. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}, FocalLength: {FocalLength}",
-                customerId, avatar3dModelUrl, bodyResult.FocalLength);
-        }
-        catch (ExternalServiceException ex)
-        {
-            _logger.LogWarning(ex,
-                "fal.ai 3D body generation failed for CustomerId {CustomerId}. Continuing without 3D model.",
-                customerId);
+                "Uploaded front image as avatar source. CustomerId: {CustomerId}, URL: {CloudinaryUrl}",
+                customerId, uploadedSourceImageUrl);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex,
-                "Unexpected error during 3D body generation for CustomerId {CustomerId}. Continuing without 3D model.",
+                "Failed to upload front image to storage for CustomerId {CustomerId}. Continuing without a source image (no try-on capability for now).",
                 customerId);
+        }
+
+        // 4. Generate 3D body model via SAM 3D Body (best-effort — does not abort the flow,
+        //    and is intentionally independent of the upload above). SAM 3D Body is purpose-built
+        //    for human reconstruction: $0.02/call, 5-10s, single image. Front-facing view produces
+        //    optimal results per the official documentation. If this fails or fal.ai is
+        //    unavailable/misconfigured, the customer can still fall back to 2D Overlay try-on
+        //    as long as the upload above succeeded — see Frontend_Avatar_Integration_Guide.md
+        //    "Graceful Degradation".
+        if (uploadedSourceImageUrl is not null)
+        {
+            try
+            {
+                var bodyResult = await _falAiService.GenerateBody3dAsync(uploadedSourceImageUrl, cancellationToken);
+                avatar3dModelUrl = bodyResult.GlbUrl;
+                avatarFocalLength = bodyResult.FocalLength;
+
+                _logger.LogInformation(
+                    "SAM 3D Body generation completed. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}, FocalLength: {FocalLength}",
+                    customerId, avatar3dModelUrl, bodyResult.FocalLength);
+            }
+            catch (ExternalServiceException ex)
+            {
+                _logger.LogWarning(ex,
+                    "fal.ai 3D body generation failed for CustomerId {CustomerId}. Continuing without 3D model (2D try-on still available).",
+                    customerId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Unexpected error during 3D body generation for CustomerId {CustomerId}. Continuing without 3D model (2D try-on still available).",
+                    customerId);
+            }
         }
 
         const string source = "AIEstimate";
 
-        // 4. Upsert avatar.
+        // 5. Upsert avatar.
         var existingAvatar = await _context.Avatars
             .FirstOrDefaultAsync(a => a.CustomerId == customerId, cancellationToken);
 
@@ -123,8 +148,14 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         if (existingAvatar is not null)
         {
             existingAvatar.UpdateMeasurements(measurements, source);
+
+            // Persist the source image regardless of whether 3D generation succeeded.
+            if (sourceImageUrl is not null)
+                existingAvatar.SetSourceImageUrl(sourceImageUrl);
+
             if (avatar3dModelUrl is not null)
-                existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl, avatarFocalLength, sourceImageUrl);
+                existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl, avatarFocalLength);
+
             avatar = existingAvatar;
         }
         else
@@ -148,7 +179,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
             _context.Avatars.Add(avatar);
         }
 
-        // 5. Record history snapshot atomically.
+        // 6. Record history snapshot atomically.
         var measurementsJson = Domain.Entities.Customer.Avatar.BuildMeasurementJson(measurements);
         var history = AvatarMeasurementHistory.CreateSnapshot(
             avatarId: avatar.Id,

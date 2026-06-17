@@ -9,7 +9,10 @@ namespace Application.Features.Customer.Avatar.Commands.ExtractMeasurementsFromI
 ///
 /// • If no avatar exists → creates one with source = "ai_image".
 /// • If an avatar already exists → updates measurements with source = "ai_image".
-/// • The image is ephemeral — it is NOT persisted to storage after extraction.
+/// • The front image is uploaded to persistent storage and kept as the avatar's
+///   source image — it is required later for both 2D Overlay try-on and, when
+///   available, the 3D SAM Align step. The side image is used for measurement
+///   extraction only and is not persisted.
 /// </summary>
 public sealed record ExtractMeasurementsFromImageCommand(
     FileUploadDto FrontImageFile,

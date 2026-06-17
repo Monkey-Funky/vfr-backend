@@ -137,6 +137,19 @@ public sealed class Avatar : BaseEntity
             SourceImageUrl = sourceImageUrl;
         UpdatedAt = DateTime.UtcNow;
     }
+
+    /// <summary>
+    /// Sets the person/source image used for try-on (2D Overlay garment compositing and,
+    /// when available, as the reference image for SAM 3D Align). Intentionally independent
+    /// of <see cref="SetAvatar3dModelUrl"/> so the source image can be persisted even when
+    /// 3D body-model generation fails or is disabled — keeping 2D try-on available.
+    /// </summary>
+    public void SetSourceImageUrl(string sourceImageUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceImageUrl);
+        SourceImageUrl = sourceImageUrl;
+        UpdatedAt = DateTime.UtcNow;
+    }
 }
 
 public sealed record BodyMeasurements(
