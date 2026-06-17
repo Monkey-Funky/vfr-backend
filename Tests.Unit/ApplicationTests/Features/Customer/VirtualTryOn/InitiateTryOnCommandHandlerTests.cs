@@ -14,6 +14,7 @@ public sealed class InitiateTryOnCommandHandlerTests
     private readonly Mock<IApplicationDbContext> _contextMock = new();
     private readonly Mock<ICurrentUserService> _currentUserServiceMock = new();
     private readonly Mock<IVirtualTryOnService> _tryOnServiceMock = new();
+    private readonly Mock<IVirtualTryOn2DService> _tryOn2DServiceMock = new();
     private readonly Mock<ICacheService> _cacheServiceMock = new();
     private readonly InitiateTryOnCommandHandler _sut;
 
@@ -26,8 +27,9 @@ public sealed class InitiateTryOnCommandHandlerTests
             _contextMock.Object,
             _currentUserServiceMock.Object,
             _tryOnServiceMock.Object,
+            _tryOn2DServiceMock.Object,
             _cacheServiceMock.Object);
-        // Cache miss for all GetAsync calls � Moq returns Task<T?> default (null)
+        // Cache miss for all GetAsync calls � Moq returns Task<T?> default (null)
         // which simulates a cache miss so the handler always exercises the DB path.
         // RemoveAsync / RemoveByPrefixAsync are stubbed to complete successfully.
         _cacheServiceMock
@@ -138,10 +140,10 @@ public sealed class InitiateTryOnCommandHandlerTests
         _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
         _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
         _contextMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-        _tryOnServiceMock.Setup(x => x.ProcessTryOnAsync(CustomerId, productId, TryOnSessionType.Overlay2D, null, It.IsAny<CancellationToken>()))
+        _tryOnServiceMock.Setup(x => x.ProcessTryOnAsync(CustomerId, productId, TryOnSessionType.Model3D, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(CompletedResult());
 
-        var result = await _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Overlay2D, null), CancellationToken.None);
+        var result = await _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Model3D, null), CancellationToken.None);
 
         result.Should().NotBeNull();
         result.Status.Should().Be(SessionStatus.Completed);
@@ -180,10 +182,10 @@ public sealed class InitiateTryOnCommandHandlerTests
         _contextMock.Setup(x => x.VirtualTryOnSessions.Add(It.IsAny<Domain.Entities.Customer.VirtualTryOnSession>()))
             .Callback<Domain.Entities.Customer.VirtualTryOnSession>(s => capturedSession = s);
         _contextMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-        _tryOnServiceMock.Setup(x => x.ProcessTryOnAsync(CustomerId, productId, TryOnSessionType.Overlay2D, null, It.IsAny<CancellationToken>()))
+        _tryOnServiceMock.Setup(x => x.ProcessTryOnAsync(CustomerId, productId, TryOnSessionType.Model3D, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(FailedResult());
 
-        var result = await _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Overlay2D, null), CancellationToken.None);
+        var result = await _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Model3D, null), CancellationToken.None);
 
         result.Status.Should().Be(SessionStatus.Failed);
         capturedSession.Should().NotBeNull();
@@ -203,7 +205,7 @@ public sealed class InitiateTryOnCommandHandlerTests
         _tryOnServiceMock.Setup(x => x.ProcessTryOnAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<TryOnSessionType>(), It.IsAny<Domain.Entities.Customer.Avatar?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("External service error"));
 
-        var act = () => _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Overlay2D, null), CancellationToken.None);
+        var act = () => _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Model3D, null), CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         _contextMock.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.AtLeast(2));
@@ -230,5 +232,78 @@ public sealed class InitiateTryOnCommandHandlerTests
         capturedSession!.CustomerId.Should().Be(CustomerId);
         capturedSession.ProductId.Should().Be(productId);
         capturedSession.SessionType.Should().Be(TryOnSessionType.ARLiveView);
+    }
+
+    // ── 2D (Overlay2D) path ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Handle_Overlay2D_WithoutAvatar_ThrowsBusinessRuleException()
+    {
+        var productId = Guid.NewGuid();
+        var product = CreateActiveProduct(productId);
+
+        _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
+        _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
+        _contextMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+        var act = () => _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Overlay2D, null), CancellationToken.None);
+
+        await act.Should().ThrowAsync<BusinessRuleException>();
+    }
+
+    [Fact]
+    public async Task Handle_Overlay2D_AvatarWithoutSourceImage_ThrowsBusinessRuleException()
+    {
+        var productId = Guid.NewGuid();
+        var avatarId = Guid.NewGuid();
+        var product = CreateActiveProduct(productId);
+        var avatar = CreateAvatar(CustomerId, avatarId); // no SourceImageUrl
+
+        _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
+        _contextMock.Setup(x => x.Avatars).ReturnsDbSet(new List<Domain.Entities.Customer.Avatar> { avatar });
+        _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
+        _contextMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+        var act = () => _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Overlay2D, avatarId), CancellationToken.None);
+
+        await act.Should().ThrowAsync<BusinessRuleException>();
+    }
+
+    [Fact]
+    public async Task Handle_Overlay2D_ValidRequest_ReturnsImage2DResult()
+    {
+        var productId = Guid.NewGuid();
+        var avatarId = Guid.NewGuid();
+
+        var product = CreateActiveProduct(productId);
+        product.AddImage("https://cdn.example.com/garment.jpg", 0);
+
+        var avatar = Domain.Entities.Customer.Avatar.Create(
+            CustomerId, 175m, 70m, sourceImageUrl: "https://cdn.example.com/person.jpg");
+        typeof(Domain.Common.BaseEntity).GetProperty(nameof(Domain.Common.BaseEntity.Id))!.SetValue(avatar, avatarId);
+
+        _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
+        _contextMock.Setup(x => x.Avatars).ReturnsDbSet(new List<Domain.Entities.Customer.Avatar> { avatar });
+        _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
+        _contextMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+        _tryOn2DServiceMock
+            .Setup(x => x.ProcessTryOnAsync(
+                It.Is<TryOn2DRequest>(r =>
+                    r.PersonImageUrl == "https://cdn.example.com/person.jpg" &&
+                    r.GarmentImageUrl == "https://cdn.example.com/garment.jpg" &&
+                    r.AvatarId == avatarId),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TryOn2DResult("https://cdn.example.com/2d-result.jpg", 0.95m, 7, "FalAi"));
+
+        var result = await _sut.Handle(
+            new InitiateTryOnCommand(productId, TryOnSessionType.Overlay2D, avatarId), CancellationToken.None);
+
+        result.Status.Should().Be(SessionStatus.Completed);
+        result.ResultType.Should().Be(TryOnResultType.Image2D);
+        result.ResultImageUrl.Should().Be("https://cdn.example.com/2d-result.jpg");
+        _tryOnServiceMock.Verify(
+            x => x.ProcessTryOnAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<TryOnSessionType>(), It.IsAny<Domain.Entities.Customer.Avatar?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }
