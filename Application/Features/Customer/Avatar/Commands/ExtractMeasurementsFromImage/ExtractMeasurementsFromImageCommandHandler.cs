@@ -44,11 +44,6 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         var customerId = _currentUserService.CustomerId
             ?? throw new UnauthorizedException("Customer identity missing.");
 
-        BodyMeasurements measurements;
-        string? avatar3dModelUrl = null;
-        double? avatarFocalLength = null;
-        string? sourceImageUrl = null;
-
         // 1. Buffer BOTH image byte arrays upfront so we can reuse them across
         //    multiple downstream consumers (ExtractAsync, Cloudinary uploads for 3D pipeline).
         //    Each consumer wraps the stream in StreamContent which disposes it on completion,
@@ -67,7 +62,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
             await ValidateImageMagicBytesAsync(validateSideStream, "side image", cancellationToken);
 
         // 2. Send both images to the AI model (uses throwaway streams from buffered bytes).
-        measurements = await _extractionService.ExtractAsync(
+        var measurements = await _extractionService.ExtractAsync(
             new MemoryStream(frontBytes, writable: false),
             request.FrontImageFile.FileName,
             request.FrontImageFile.ContentType,
@@ -77,69 +72,36 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
             request.HeightCm,
             cancellationToken);
 
-        // 3. Upload the front image to get a stable public URL. This is the person/source
-        //    image required by the 2D Overlay try-on (FASHN) AND, when available, by the
-        //    3D SAM Align step. Treated as best-effort on its own: if the upload itself
-        //    fails, the avatar still saves with measurements only (no try-on capability).
-        //    IMPORTANT: this MUST succeed independently of 3D generation below — previously
-        //    `sourceImageUrl` was only set after a successful SAM 3D Body call, which meant
-        //    a 3D failure silently broke 2D try-on too, even though 2D never needed the 3D
-        //    model at all.
-        string? uploadedSourceImageUrl = null;
+        // 3. Upload the front image to get a stable public URL.
+        //    This URL is required by 2D Overlay try-on (FASHN) and by the 3D SAM Align step.
+        //    Best-effort: if upload fails, avatar is still saved with measurements only.
+        string? sourceImageUrl = null;
         try
         {
             var uniqueFileName = $"{customerId}_{Guid.NewGuid():N}_front{Path.GetExtension(request.FrontImageFile.FileName)}";
-            uploadedSourceImageUrl = await _fileStorageService.UploadAsync(
+            sourceImageUrl = await _fileStorageService.UploadAsync(
                 new MemoryStream(frontBytes, writable: false), uniqueFileName, "avatars/3d-source", cancellationToken);
-            sourceImageUrl = uploadedSourceImageUrl;
 
             _logger.LogInformation(
                 "Uploaded front image as avatar source. CustomerId: {CustomerId}, URL: {CloudinaryUrl}",
-                customerId, uploadedSourceImageUrl);
+                customerId, sourceImageUrl);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex,
-                "Failed to upload front image to storage for CustomerId {CustomerId}. Continuing without a source image (no try-on capability for now).",
+                "Failed to upload front image to storage for CustomerId {CustomerId}. " +
+                "Continuing without a source image (no try-on capability).",
                 customerId);
-        }
-
-        // 4. Generate 3D body model via SAM 3D Body (best-effort — does not abort the flow,
-        //    and is intentionally independent of the upload above). SAM 3D Body is purpose-built
-        //    for human reconstruction: $0.02/call, 5-10s, single image. Front-facing view produces
-        //    optimal results per the official documentation. If this fails or fal.ai is
-        //    unavailable/misconfigured, the customer can still fall back to 2D Overlay try-on
-        //    as long as the upload above succeeded — see Frontend_Avatar_Integration_Guide.md
-        //    "Graceful Degradation".
-        if (uploadedSourceImageUrl is not null)
-        {
-            try
-            {
-                var bodyResult = await _falAiService.GenerateBody3dAsync(uploadedSourceImageUrl, cancellationToken);
-                avatar3dModelUrl = bodyResult.GlbUrl;
-                avatarFocalLength = bodyResult.FocalLength;
-
-                _logger.LogInformation(
-                    "SAM 3D Body generation completed. CustomerId: {CustomerId}, GlbUrl: {GlbUrl}, FocalLength: {FocalLength}",
-                    customerId, avatar3dModelUrl, bodyResult.FocalLength);
-            }
-            catch (ExternalServiceException ex)
-            {
-                _logger.LogWarning(ex,
-                    "fal.ai 3D body generation failed for CustomerId {CustomerId}. Continuing without 3D model (2D try-on still available).",
-                    customerId);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex,
-                    "Unexpected error during 3D body generation for CustomerId {CustomerId}. Continuing without 3D model (2D try-on still available).",
-                    customerId);
-            }
         }
 
         const string source = "AIEstimate";
 
-        // 5. Upsert avatar.
+        // ══════════════════════════════════════════════════════════════════
+        // PHASE 1 SAVE — Persist measurements + SourceImageUrl BEFORE the
+        // 3D generation attempt.  This guarantees that even if fal.ai times
+        // out (TaskCanceledException from Polly's internal CT) the customer's
+        // avatar is written to the DB and 2D try-on remains available.
+        // ══════════════════════════════════════════════════════════════════
         var existingAvatar = await _context.Avatars
             .FirstOrDefaultAsync(a => a.CustomerId == customerId, cancellationToken);
 
@@ -149,12 +111,8 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         {
             existingAvatar.UpdateMeasurements(measurements, source);
 
-            // Persist the source image regardless of whether 3D generation succeeded.
             if (sourceImageUrl is not null)
                 existingAvatar.SetSourceImageUrl(sourceImageUrl);
-
-            if (avatar3dModelUrl is not null)
-                existingAvatar.SetAvatar3dModelUrl(avatar3dModelUrl, avatarFocalLength);
 
             avatar = existingAvatar;
         }
@@ -173,13 +131,13 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 armLengthCm: measurements.ArmLengthCm,
                 shoeSizeEu: measurements.ShoeSizeEu,
                 bodyShape: measurements.BodyShape,
-                avatar3dModelUrl: avatar3dModelUrl,
-                avatarFocalLength: avatarFocalLength,
+                avatar3dModelUrl: null,        // 3D not yet generated
+                avatarFocalLength: null,
                 sourceImageUrl: sourceImageUrl);
             _context.Avatars.Add(avatar);
         }
 
-        // 6. Record history snapshot atomically.
+        // Record history snapshot atomically with the first save.
         var measurementsJson = Domain.Entities.Customer.Avatar.BuildMeasurementJson(measurements);
         var history = AvatarMeasurementHistory.CreateSnapshot(
             avatarId: avatar.Id,
@@ -187,7 +145,88 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
             source: source);
         _context.AvatarMeasurementHistory.Add(history);
 
+        // ── FIRST SaveChangesAsync ─────────────────────────────────────────
+        // Measurements + SourceImageUrl are now durable.  Any failure after
+        // this point does NOT roll back the customer's data.
         await _context.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Phase-1 save completed. CustomerId: {CustomerId}, AvatarId: {AvatarId}, " +
+            "SourceImageUrl saved: {HasSource}",
+            customerId, avatar.Id, sourceImageUrl is not null);
+
+        // ══════════════════════════════════════════════════════════════════
+        // PHASE 2 — 3D body-model generation (best-effort, independent).
+        //
+        // BUG FIX — TaskCanceledException from Polly timeout:
+        //   Polly cancels its own internal CancellationTokenSource when the
+        //   configured timeout fires.  The resulting TaskCanceledException
+        //   (which inherits OperationCanceledException) carries Polly's CT,
+        //   NOT the caller's `cancellationToken`.
+        //
+        //   Previous code used `when (ex is not OperationCanceledException)`,
+        //   which EXCLUDED the Polly timeout — it fell through unhandled and
+        //   prevented SaveChangesAsync from ever running, leaving
+        //   SourceImageUrl persisted on Cloudinary but NULL in the database.
+        //
+        //   Fix: catch OperationCanceledException explicitly and distinguish
+        //   a real user-cancellation (same CT) from a Polly-internal timeout
+        //   (different CT).  Only the latter is swallowed here; real user
+        //   cancellations still propagate — but Phase-1 already wrote the
+        //   avatar, so measurements + SourceImageUrl are never lost.
+        // ══════════════════════════════════════════════════════════════════
+        if (sourceImageUrl is not null)
+        {
+            string? avatar3dModelUrl = null;
+            double? avatarFocalLength = null;
+
+            try
+            {
+                var bodyResult = await _falAiService.GenerateBody3dAsync(sourceImageUrl, cancellationToken);
+                avatar3dModelUrl = bodyResult.GlbUrl;
+                avatarFocalLength = bodyResult.FocalLength;
+
+                _logger.LogInformation(
+                    "SAM 3D Body generation completed. CustomerId: {CustomerId}, " +
+                    "GlbUrl: {GlbUrl}, FocalLength: {FocalLength}",
+                    customerId, avatar3dModelUrl, bodyResult.FocalLength);
+            }
+            catch (ExternalServiceException ex)
+            {
+                _logger.LogWarning(ex,
+                    "fal.ai 3D body generation failed for CustomerId {CustomerId}. " +
+                    "2D try-on remains available via the SourceImageUrl persisted in Phase 1.",
+                    customerId);
+            }
+            catch (OperationCanceledException ex) when (ex.CancellationToken != cancellationToken)
+            {
+                // Polly internal timeout — NOT a real user cancellation.
+                // Swallow and continue: 2D try-on is still available.
+                _logger.LogWarning(ex,
+                    "fal.ai 3D body generation timed out (Polly internal CT) for CustomerId {CustomerId}. " +
+                    "Avatar already saved with SourceImageUrl in Phase 1; 2D try-on available.",
+                    customerId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Unexpected error during 3D body generation for CustomerId {CustomerId}. " +
+                    "Continuing without 3D model (2D try-on still available).",
+                    customerId);
+            }
+
+            // ── SECOND SaveChangesAsync (only when 3D succeeded) ──────────
+            if (avatar3dModelUrl is not null)
+            {
+                avatar.SetAvatar3dModelUrl(avatar3dModelUrl, avatarFocalLength);
+
+                await _context.SaveChangesAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Phase-2 save completed. CustomerId: {CustomerId}, 3D model persisted.",
+                    customerId);
+            }
+        }
 
         // Invalidate the avatar cache so GetAvatar returns the fresh data immediately.
         await _cacheService.RemoveAsync($"avatar:{customerId:N}", cancellationToken);
@@ -202,7 +241,6 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
     /// <summary>
     /// Reads the first 4 bytes of the stream to verify the JPEG or PNG file signature.
     /// Throws <see cref="BusinessRuleException"/> if the magic bytes do not match.
-    /// The caller is responsible for resetting the stream position after this method returns.
     /// </summary>
     private static async Task ValidateImageMagicBytesAsync(
         Stream stream, string imageLabel, CancellationToken ct)
@@ -229,9 +267,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 $"Only JPEG and PNG images are allowed. The uploaded {imageLabel} does not match a supported image format.");
     }
 
-    /// <summary>
-    /// Reads the entire content of a stream into a byte array.
-    /// </summary>
+    /// <summary>Reads the entire content of a stream into a byte array.</summary>
     private static async Task<byte[]> ReadAllBytesAsync(Stream stream, CancellationToken ct)
     {
         using var ms = new MemoryStream();

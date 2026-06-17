@@ -3,6 +3,7 @@ using Application.Common;
 using Application.Features.Customer.Avatar.Commands.CreateAvatar;
 using Application.Features.Customer.Avatar.Commands.DeleteAvatar;
 using Application.Features.Customer.Avatar.Commands.ExtractMeasurementsFromImage;
+using Application.Features.Customer.Avatar.Commands.RepairAvatarSourceImage;
 using Application.Features.Customer.Avatar.Commands.UpdateAvatarMeasurements;
 using Application.Features.Customer.Avatar.DTOs;
 using Application.Features.Customer.Avatar.Queries.GetAvatar;
@@ -140,9 +141,13 @@ public sealed class AvatarController : CustomerBaseApiController
     [Consumes("multipart/form-data")]
     [SwaggerOperation(
         Summary = "Extract measurements from images",
-        Description = "Uploads TWO full-body photos (front view + side view) to an AI model that extracts body measurements. " +
-                      "Creates a new avatar if none exists, or updates the existing one. " +
-                      "The images are NOT persisted — they are streamed to the AI model and discarded.")]
+        Description =
+            "Uploads TWO full-body photos (front view + side view) to an AI model that extracts body measurements. " +
+            "Creates a new avatar if none exists, or updates the existing one. " +
+            "The front image is persisted to storage as the avatar's source image " +
+            "(required for both 2D Overlay try-on and 3D SAM Align). " +
+            "Uses a two-phase save: measurements + SourceImageUrl are written to the database BEFORE " +
+            "the optional 3D model generation step, so a fal.ai timeout never silently destroys try-on capability.")]
     [ProducesResponseType(typeof(ApiResponse<AvatarDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
@@ -167,8 +172,46 @@ public sealed class AvatarController : CustomerBaseApiController
 
         var command = new ExtractMeasurementsFromImageCommand(frontImageUpload, sideImageUpload, request.HeightCm);
         var result = await Sender.Send(command, cancellationToken);
-
         return OkResponse(result, "Measurements extracted and saved successfully.");
+    }
+
+    // ==============================================================
+    // POST api/customers/{customerId}/avatar/repair-source-image
+    // ==============================================================
+    [HttpPost("repair-source-image")]
+    [Consumes("multipart/form-data")]
+    [SwaggerOperation(
+        Summary = "Repair avatar source image",
+        Description =
+            "Uploads a new front-facing photo for an existing avatar whose SourceImageUrl is null. " +
+            "This restores 2D try-on (Overlay2D) capability without re-extracting measurements. " +
+            "Use this to fix avatars created before the two-phase-save fix was deployed, " +
+            "or any avatar where fal.ai timed out during the original extract-from-image call. " +
+            "Check Has2DCapability on GET /avatar before calling — returns 422 if a source image already exists. " +
+            "Set RetryGenerate3D=true (default) to also attempt regeneration of the 3D body model.")]
+    [ProducesResponseType(typeof(ApiResponse<AvatarDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> RepairAvatarSourceImage(
+        Guid customerId,
+        [FromForm] RepairAvatarSourceImageRequest request,
+        CancellationToken cancellationToken)
+    {
+        EnsureCustomerOwnership(customerId);
+
+        var frontImageUpload = new FileUploadDto(
+            Content: request.FrontImageFile.OpenReadStream(),
+            FileName: request.FrontImageFile.FileName,
+            ContentType: request.FrontImageFile.ContentType,
+            Length: request.FrontImageFile.Length);
+
+        var command = new RepairAvatarSourceImageCommand(
+            FrontImageFile: frontImageUpload,
+            RetryGenerate3D: request.RetryGenerate3D);
+
+        var result = await Sender.Send(command, cancellationToken);
+        return OkResponse(result, "Avatar source image repaired successfully.");
     }
 }
 
@@ -194,4 +237,22 @@ public sealed class ExtractMeasurementsFromImageRequest
     /// The customer's actual height in centimeters (required for the AI model to scale estimates).
     /// </summary>
     public decimal HeightCm { get; init; }
+}
+
+/// <summary>
+/// Request model for POST /api/customers/{customerId}/avatar/repair-source-image.
+/// Bound from multipart/form-data.
+/// </summary>
+public sealed class RepairAvatarSourceImageRequest
+{
+    /// <summary>
+    /// Front-facing full-body photo. JPEG or PNG. Max 10 MB.
+    /// </summary>
+    public IFormFile FrontImageFile { get; init; } = null!;
+
+    /// <summary>
+    /// When true (default) the handler will attempt to re-generate the 3D body
+    /// model via fal.ai after the upload succeeds.
+    /// </summary>
+    public bool RetryGenerate3D { get; init; } = true;
 }
