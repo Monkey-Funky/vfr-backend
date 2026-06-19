@@ -1,5 +1,6 @@
 using Application.Interfaces.Services.Customer;
 using Domain.Entities.Customer;
+using Domain.Exceptions;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -81,47 +82,61 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
             aiApiUrl);
 
         // Polly resilience pipeline (60 s timeout + 2 retries) is configured in DI.
-        using var response = await _httpClient.PostAsync(aiApiUrl, requestContent, ct);
-
-        if (!response.IsSuccessStatusCode)
+        HttpResponseMessage response;
+        try
         {
-            var errorBody = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogError(
-                "AI model returned {StatusCode}. Response: {Body}",
-                response.StatusCode, errorBody);
-
-            throw new BusinessRuleException(
-                "AI_EXTRACTION_FAILED",
-                "The AI model could not process the uploaded images. " +
-                "Please ensure both photos are clear, full-body views and try again.");
+            response = await _httpClient.PostAsync(aiApiUrl, requestContent, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error reaching AI measurement extraction service at {Url}.", aiApiUrl);
+            throw new ExternalServiceException("BodyMeasurementExtractionAI",
+                "Could not reach the body measurement AI service. Please try again later.", ex);
         }
 
-        var responseStream = await response.Content.ReadAsStreamAsync(ct);
-
-        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var aiResponse = await JsonSerializer.DeserializeAsync<AiMeasureResponse>(responseStream, options, cancellationToken: ct);
-
-        if (aiResponse?.Data?.Measurements == null)
+        using (response)
         {
-            _logger.LogError("Failed to deserialize AI model response or data was missing.");
-            throw new InvalidOperationException("Failed to deserialize the AI model response.");
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogError(
+                    "AI model returned {StatusCode}. Response: {Body}",
+                    response.StatusCode, errorBody);
+
+                throw new BusinessRuleException(
+                    "AI_EXTRACTION_FAILED",
+                    "The AI model could not process the uploaded images. " +
+                    "Please ensure both photos are clear, full-body views and try again.");
+            }
+
+            var responseStream = await response.Content.ReadAsStreamAsync(ct);
+
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var aiResponse = await JsonSerializer.DeserializeAsync<AiMeasureResponse>(responseStream, options, cancellationToken: ct);
+
+            if (aiResponse?.Data?.Measurements == null)
+            {
+                _logger.LogError("AI measurement service returned a response that could not be parsed or contained no measurements.");
+                throw new ExternalServiceException("BodyMeasurementExtractionAI",
+                    "The body measurement AI service returned an unexpected response. Please try again.");
+            }
+
+            var aiData = aiResponse.Data.Measurements;
+
+            return new BodyMeasurements(
+                HeightCm: heightCm,
+                WeightKg: 65m,
+                ChestCm: aiData.Chest?.CircumferenceCm,
+                WaistCm: aiData.Waist?.CircumferenceCm,
+                HipsCm: aiData.Hip?.CircumferenceCm,
+                ShoulderWidthCm: aiData.Shoulder?.WidthCm,
+                InseamCm: null,
+                NeckCm: aiData.Neck?.CircumferenceCm,
+                ArmLengthCm: null,
+                ShoeSizeEu: null,
+                BodyShape: null
+            );
         }
-
-        var aiData = aiResponse.Data.Measurements;
-
-        return new BodyMeasurements(
-            HeightCm: heightCm,
-            WeightKg: 65m,
-            ChestCm: aiData.Chest?.CircumferenceCm,
-            WaistCm: aiData.Waist?.CircumferenceCm,
-            HipsCm: aiData.Hip?.CircumferenceCm,
-            ShoulderWidthCm: aiData.Shoulder?.WidthCm,
-            InseamCm: null,
-            NeckCm: aiData.Neck?.CircumferenceCm,
-            ArmLengthCm: null,
-            ShoeSizeEu: null,
-            BodyShape: null
-        );
     }
     private sealed class AiMeasureResponse
     {
