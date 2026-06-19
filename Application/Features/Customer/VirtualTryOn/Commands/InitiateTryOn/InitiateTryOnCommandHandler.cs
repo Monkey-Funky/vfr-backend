@@ -93,16 +93,19 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         }
 
         // 3. Load product image (needed for cache key and for the AI call).
-        var productImageUrl = await _context.ProductImages
+        var productImageRow = await _context.ProductImages
             .Where(i => i.ProductId == request.ProductId && !i.IsDeleted)
             .OrderBy(i => i.DisplayOrder)
-            .Select(i => i.ImageUrl)
+            .Select(i => new { i.ImageUrl })
             .FirstOrDefaultAsync(cancellationToken);
+
+        var productImageUrl = productImageRow?.ImageUrl;
+        var productImageUpdatedAt = product.UpdatedAt;
 
         // 4. AI generation deduplication cache check.
         if (activeAvatar is not null && productImageUrl is not null)
         {
-            var (cacheType, requestHash) = ComputeTryOnHash(request.SessionType, activeAvatar, request.ProductId, productImageUrl);
+            var (cacheType, requestHash) = ComputeTryOnHash(request.SessionType, activeAvatar, request.ProductId, productImageUrl, productImageUpdatedAt);
 
             var cached = await _aiCache.GetByHashAsync(requestHash, cancellationToken);
 
@@ -160,7 +163,7 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         AiGenerationCache? cacheEntry = null;
         if (activeAvatar is not null && productImageUrl is not null)
         {
-            var (cacheType, requestHash) = ComputeTryOnHash(request.SessionType, activeAvatar, request.ProductId, productImageUrl);
+            var (cacheType, requestHash) = ComputeTryOnHash(request.SessionType, activeAvatar, request.ProductId, productImageUrl, productImageUpdatedAt);
             var inputJson = JsonSerializer.Serialize(new
             {
                 type = cacheType,
@@ -239,7 +242,7 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
             // Update cache to Completed.
             if (cacheEntry is not null)
             {
-                var (cacheType, _) = ComputeTryOnHash(request.SessionType, activeAvatar!, request.ProductId, productImageUrl ?? "");
+                var (cacheType, _) = ComputeTryOnHash(request.SessionType, activeAvatar!, request.ProductId, productImageUrl ?? "", productImageUpdatedAt);
                 var resultImageUrl = cacheType == AiGenerationType.TryOn2D ? result.ResultImageUrl : null;
                 var resultModelUrl = cacheType == AiGenerationType.TryOn3D ? result.ResultImageUrl : null;
                 try { await _aiCache.MarkCompletedAsync(cacheEntry.Id, resultImageUrl, resultModelUrl, null, cancellationToken); }
@@ -261,7 +264,8 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         TryOnSessionType sessionType,
         Domain.Entities.Customer.Avatar avatar,
         Guid productId,
-        string productImageUrl)
+        string productImageUrl,
+        DateTime? productImageUpdatedAt)
     {
         if (sessionType == TryOnSessionType.Overlay2D)
         {
@@ -270,6 +274,7 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 avatarFrontImageUrl: avatar.SourceImageUrl ?? "",
                 productId: productId,
                 productImageUrl: productImageUrl,
+                productImageUpdatedAt: productImageUpdatedAt,
                 selectedSize: null,
                 selectedColor: null,
                 provider: "FalAi",
@@ -286,6 +291,7 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 sourceImageUrl: avatar.SourceImageUrl ?? "",
                 productId: productId,
                 productImageUrl: productImageUrl,
+                productImageUpdatedAt: productImageUpdatedAt,
                 selectedSize: null,
                 selectedColor: null,
                 provider: "FalAi",

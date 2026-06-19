@@ -65,6 +65,7 @@ public sealed class AiGenerationCacheService : IAiGenerationCacheService
         string sourceImageUrl,
         Guid productId,
         string productImageUrl,
+        DateTime? productImageUpdatedAt,
         string? selectedSize,
         string? selectedColor,
         string provider,
@@ -72,7 +73,11 @@ public sealed class AiGenerationCacheService : IAiGenerationCacheService
         string alignModelId,
         string pipelineVersion)
     {
-        var input = $"TryOn3D|{avatarId:N}|{avatar3dModelUrl}|{avatarFocalLength:F4}|{sourceImageUrl}|{productId:N}|{productImageUrl}|{selectedSize ?? ""}|{selectedColor ?? ""}|{provider}|{objectsModelId}|{alignModelId}|{pipelineVersion}";
+        // productImageUpdatedAt prevents stale cache when the retailer re-uploads the same product image URL.
+        var imageVersion = productImageUpdatedAt.HasValue
+            ? productImageUpdatedAt.Value.ToString("O")
+            : "noversion";
+        var input = $"TryOn3D|{avatarId:N}|{avatar3dModelUrl}|{avatarFocalLength:F4}|{sourceImageUrl}|{productId:N}|{productImageUrl}|{imageVersion}|{selectedSize ?? ""}|{selectedColor ?? ""}|{provider}|{objectsModelId}|{alignModelId}|{pipelineVersion}";
         return Sha256Hex(input);
     }
 
@@ -81,13 +86,17 @@ public sealed class AiGenerationCacheService : IAiGenerationCacheService
         string avatarFrontImageUrl,
         Guid productId,
         string productImageUrl,
+        DateTime? productImageUpdatedAt,
         string? selectedSize,
         string? selectedColor,
         string provider,
         string tryOn2DModelId,
         string pipelineVersion)
     {
-        var input = $"TryOn2D|{avatarId:N}|{avatarFrontImageUrl}|{productId:N}|{productImageUrl}|{selectedSize ?? ""}|{selectedColor ?? ""}|{provider}|{tryOn2DModelId}|{pipelineVersion}";
+        var imageVersion = productImageUpdatedAt.HasValue
+            ? productImageUpdatedAt.Value.ToString("O")
+            : "noversion";
+        var input = $"TryOn2D|{avatarId:N}|{avatarFrontImageUrl}|{productId:N}|{productImageUrl}|{imageVersion}|{selectedSize ?? ""}|{selectedColor ?? ""}|{provider}|{tryOn2DModelId}|{pipelineVersion}";
         return Sha256Hex(input);
     }
 
@@ -191,7 +200,7 @@ public sealed class AiGenerationCacheService : IAiGenerationCacheService
             .CountAsync(c =>
                 c.CustomerId == customerId &&
                 c.Type == AiGenerationType.Avatar3D &&
-                c.Status != AiGenerationStatus.Failed &&
+                c.Status == AiGenerationStatus.Completed &&
                 c.CreatedAt >= todayUtc &&
                 c.CreatedAt < tomorrowUtc, ct);
 
@@ -207,7 +216,7 @@ public sealed class AiGenerationCacheService : IAiGenerationCacheService
             .CountAsync(c =>
                 c.CustomerId == customerId &&
                 (c.Type == AiGenerationType.TryOn3D || c.Type == AiGenerationType.TryOn2D) &&
-                c.Status != AiGenerationStatus.Failed &&
+                c.Status == AiGenerationStatus.Completed &&
                 c.CreatedAt >= todayUtc &&
                 c.CreatedAt < tomorrowUtc, ct);
 

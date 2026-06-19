@@ -48,12 +48,12 @@ public sealed class InitiateTryOnCommandHandlerTests
         _aiCacheMock.SetupGet(x => x.FailedRetryWindowHours).Returns(1);
         _aiCacheMock.Setup(x => x.ComputeTryOn3DHash(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(), It.IsAny<string>(),
-                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns("testhash3d");
         _aiCacheMock.Setup(x => x.ComputeTryOn2DHash(
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+                It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns("testhash2d");
 
         _sut = new InitiateTryOnCommandHandler(
