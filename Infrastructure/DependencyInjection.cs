@@ -88,6 +88,9 @@ public static class DependencyInjection
         services.Configure<VirtualTryOn2DSettings>(options =>
             configuration.GetSection("VirtualTryOn2D").Bind(options));
 
+        services.Configure<CatVtonSettings>(options =>
+            configuration.GetSection("CatVTON").Bind(options));
+
         // ── 3. Polly resilience pipelines ─────────────────────────────────────
 
         services.AddResiliencePipeline("s3", builder =>
@@ -225,6 +228,17 @@ public static class DependencyInjection
                 new MediaTypeWithQualityHeaderValue("application/json"));
         });
 
+        // ── 3e. Named HttpClient for CatVTON (Hugging Face Spaces) ───────────────
+        //
+        // Used by CatVtonVirtualTryOn2DService. Timeout is set to 300s to accommodate
+        // HF Space cold starts (30-60s) plus inference time (~60-120s).
+        services.AddHttpClient("catvton", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(300);
+            client.DefaultRequestHeaders.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/json"));
+        });
+
         // ── 4. S3-Compatible Client (AWS S3 / Cloudflare R2) ─────────────────
         //
         // لسه محتاجين S3 client علشان IS3StorageService (reports).
@@ -281,7 +295,7 @@ public static class DependencyInjection
         services.AddScoped<IVirtualTryOnService, VirtualTryOnService>();
         services.AddScoped<IFalAiService, FalAiService>();
         services.AddScoped<IFalAiQueueClient, FalAiQueueClient>();
-        services.AddScoped<IVirtualTryOn2DService, FalAiVirtualTryOn2DService>();
+        services.AddScoped<IVirtualTryOn2DService, CatVtonVirtualTryOn2DService>();
 
         // ── 6. Repository & Unit of Work ──────────────────────────────────────
         services.AddScoped<IUnitOfWork, UnitOfWork>();
