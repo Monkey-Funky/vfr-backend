@@ -3,6 +3,7 @@ using Application.Features.Customer.VirtualTryOn.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Application.Interfaces.Services.Customer;
+using Domain.Entities.Customer;
 using Domain.Enums.Customer;
 using Domain.Enums.Product;
 using Moq.EntityFrameworkCore;
@@ -16,6 +17,7 @@ public sealed class InitiateTryOnCommandHandlerTests
     private readonly Mock<IVirtualTryOnService> _tryOnServiceMock = new();
     private readonly Mock<IVirtualTryOn2DService> _tryOn2DServiceMock = new();
     private readonly Mock<ICacheService> _cacheServiceMock = new();
+    private readonly Mock<IAiGenerationCacheService> _aiCacheMock = new();
     private readonly InitiateTryOnCommandHandler _sut;
 
     private static readonly Guid CustomerId = Guid.NewGuid();
@@ -23,12 +25,44 @@ public sealed class InitiateTryOnCommandHandlerTests
 
     public InitiateTryOnCommandHandlerTests()
     {
+        // Default: no cache entries, quota not exceeded
+        _aiCacheMock.Setup(x => x.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AiGenerationCache?)null);
+        _aiCacheMock.Setup(x => x.IsAvatarQuotaExceededAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _aiCacheMock.Setup(x => x.IsTryOnQuotaExceededAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _aiCacheMock.Setup(x => x.TryCreateProcessingAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AiGenerationCache?)null);
+        _aiCacheMock.Setup(x => x.MarkCompletedAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _aiCacheMock.Setup(x => x.MarkFailedAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _aiCacheMock.SetupGet(x => x.PipelineVersion).Returns("test-v1");
+        _aiCacheMock.SetupGet(x => x.FalAiBodyModelId).Returns("fal-ai/sam-3/3d-body");
+        _aiCacheMock.SetupGet(x => x.FalAiObjectsModelId).Returns("fal-ai/sam-3/3d-objects");
+        _aiCacheMock.SetupGet(x => x.FalAiAlignModelId).Returns("fal-ai/sam-3/3d-align");
+        _aiCacheMock.SetupGet(x => x.TryOn2DModelId).Returns("fal-ai/fashn/tryon");
+        _aiCacheMock.SetupGet(x => x.FailedRetryWindowHours).Returns(1);
+        _aiCacheMock.Setup(x => x.ComputeTryOn3DHash(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(), It.IsAny<string>(),
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns("testhash3d");
+        _aiCacheMock.Setup(x => x.ComputeTryOn2DHash(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns("testhash2d");
+
         _sut = new InitiateTryOnCommandHandler(
             _contextMock.Object,
             _currentUserServiceMock.Object,
             _tryOnServiceMock.Object,
             _tryOn2DServiceMock.Object,
-            _cacheServiceMock.Object);
+            _cacheServiceMock.Object,
+            _aiCacheMock.Object);
 
         _cacheServiceMock
             .Setup(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -134,7 +168,6 @@ public sealed class InitiateTryOnCommandHandlerTests
     public async Task Handle_InactiveProduct_ThrowsNotFoundException()
     {
         var productId = Guid.NewGuid();
-        // Create an inactive product
         var product = Domain.Entities.Retailer.Product.Create(RetailerId, "Inactive", null, null, null, 10m, "EGP", null, ProductStatus.Inactive);
         typeof(Domain.Common.BaseEntity).GetProperty(nameof(Domain.Common.BaseEntity.Id))!.SetValue(product, productId);
 
@@ -191,8 +224,6 @@ public sealed class InitiateTryOnCommandHandlerTests
     [Fact]
     public async Task Handle_Model3D_WithoutAvatar_ThrowsBusinessRuleException_BeforeSessionSave()
     {
-        // FIX (Issue 10): The 3D avatar check must happen BEFORE the session row is
-        // persisted so that predictable user-state errors don't pollute the sessions table.
         var productId = Guid.NewGuid();
         var product = CreateActiveProduct(productId);
 
@@ -211,7 +242,6 @@ public sealed class InitiateTryOnCommandHandlerTests
     [Fact]
     public async Task Handle_Model3D_AvatarWithout3DModel_ThrowsBusinessRuleException_BeforeSessionSave()
     {
-        // FIX (Issue 10): Avatar exists but has no 3D model — still a pre-persist check.
         var productId = Guid.NewGuid();
         var avatarId = Guid.NewGuid();
         var product = CreateActiveProduct(productId);
@@ -232,13 +262,10 @@ public sealed class InitiateTryOnCommandHandlerTests
     [Fact]
     public async Task Handle_Model3D_AvatarWith3DModelButNoSourceImage_ThrowsBusinessRuleException_BeforeSessionSave()
     {
-        // FIX (Issues 7 & 10): Avatar has a 3D model but no SourceImageUrl.
-        // The 3D align step REQUIRES the person's photo — we must fail before persist.
         var productId = Guid.NewGuid();
         var avatarId = Guid.NewGuid();
         var product = CreateActiveProduct(productId);
 
-        // Avatar with 3D model but no source image
         var avatar = Domain.Entities.Customer.Avatar.Create(
             CustomerId, 175m, 70m, avatar3dModelUrl: "https://fal.run/body.glb");
         typeof(Domain.Common.BaseEntity).GetProperty(nameof(Domain.Common.BaseEntity.Id))!.SetValue(avatar, avatarId);
@@ -263,9 +290,13 @@ public sealed class InitiateTryOnCommandHandlerTests
         var product = CreateActiveProduct(productId);
         var avatar = CreateAvatarWith3D(CustomerId, avatarId);
 
+        var productImage = Domain.Entities.Retailer.ProductImage.Create(productId, "https://cdn.example.com/product.jpg", 0);
+
         Domain.Entities.Customer.VirtualTryOnSession? capturedSession = null;
         _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
         _contextMock.Setup(x => x.Avatars).ReturnsDbSet(new List<Domain.Entities.Customer.Avatar> { avatar });
+        _contextMock.Setup(x => x.ProductImages).ReturnsDbSet(new List<Domain.Entities.Retailer.ProductImage> { productImage });
+
         _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
         _contextMock.Setup(x => x.VirtualTryOnSessions.Add(It.IsAny<Domain.Entities.Customer.VirtualTryOnSession>()))
             .Callback<Domain.Entities.Customer.VirtualTryOnSession>(s => capturedSession = s);
@@ -288,9 +319,13 @@ public sealed class InitiateTryOnCommandHandlerTests
         var product = CreateActiveProduct(productId);
         var avatar = CreateAvatarWith3D(CustomerId, avatarId);
 
+        var productImage = Domain.Entities.Retailer.ProductImage.Create(productId, "https://cdn.example.com/product.jpg", 0);
+
         Domain.Entities.Customer.VirtualTryOnSession? capturedSession = null;
         _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
         _contextMock.Setup(x => x.Avatars).ReturnsDbSet(new List<Domain.Entities.Customer.Avatar> { avatar });
+        _contextMock.Setup(x => x.ProductImages).ReturnsDbSet(new List<Domain.Entities.Retailer.ProductImage> { productImage });
+
         _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
         _contextMock.Setup(x => x.VirtualTryOnSessions.Add(It.IsAny<Domain.Entities.Customer.VirtualTryOnSession>()))
             .Callback<Domain.Entities.Customer.VirtualTryOnSession>(s => capturedSession = s);
@@ -313,8 +348,12 @@ public sealed class InitiateTryOnCommandHandlerTests
         var product = CreateActiveProduct(productId);
         var avatar = CreateAvatarWith3D(CustomerId, avatarId);
 
+        var productImage = Domain.Entities.Retailer.ProductImage.Create(productId, "https://cdn.example.com/product.jpg", 0);
+
         _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
         _contextMock.Setup(x => x.Avatars).ReturnsDbSet(new List<Domain.Entities.Customer.Avatar> { avatar });
+        _contextMock.Setup(x => x.ProductImages).ReturnsDbSet(new List<Domain.Entities.Retailer.ProductImage> { productImage });
+
         _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
         _contextMock.Setup(x => x.VirtualTryOnSessions.Add(It.IsAny<Domain.Entities.Customer.VirtualTryOnSession>()));
         _contextMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
@@ -335,9 +374,13 @@ public sealed class InitiateTryOnCommandHandlerTests
         var product = CreateActiveProduct(productId);
         var avatar = CreateAvatarWith3D(CustomerId, avatarId);
 
+        var productImage = Domain.Entities.Retailer.ProductImage.Create(productId, "https://cdn.example.com/product.jpg", 0);
+
         Domain.Entities.Customer.VirtualTryOnSession? capturedSession = null;
         _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
         _contextMock.Setup(x => x.Avatars).ReturnsDbSet(new List<Domain.Entities.Customer.Avatar> { avatar });
+        _contextMock.Setup(x => x.ProductImages).ReturnsDbSet(new List<Domain.Entities.Retailer.ProductImage> { productImage });
+
         _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
         _contextMock.Setup(x => x.VirtualTryOnSessions.Add(It.IsAny<Domain.Entities.Customer.VirtualTryOnSession>()))
             .Callback<Domain.Entities.Customer.VirtualTryOnSession>(s => capturedSession = s);
@@ -351,5 +394,59 @@ public sealed class InitiateTryOnCommandHandlerTests
         capturedSession!.CustomerId.Should().Be(CustomerId);
         capturedSession.ProductId.Should().Be(productId);
         capturedSession.SessionType.Should().Be(TryOnSessionType.ARLiveView);
+    }
+
+    // ── AI generation cache tests ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task Handle_CacheHitProcessing_ThrowsBusinessRuleException()
+    {
+        var productId = Guid.NewGuid();
+        var avatarId = Guid.NewGuid();
+        var product = CreateActiveProduct(productId);
+        var avatar = CreateAvatarWith3D(CustomerId, avatarId);
+        var productImage = Domain.Entities.Retailer.ProductImage.Create(productId, "https://cdn.example.com/product.jpg", 0);
+
+        var processingEntry = AiGenerationCache.CreateProcessing(CustomerId, "testhash3d", AiGenerationType.TryOn3D, "FalAi", "model", "v1", "{}");
+
+        _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
+        _contextMock.Setup(x => x.Avatars).ReturnsDbSet(new List<Domain.Entities.Customer.Avatar> { avatar });
+        _contextMock.Setup(x => x.ProductImages).ReturnsDbSet(new List<Domain.Entities.Retailer.ProductImage> { productImage });
+
+        _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
+
+        _aiCacheMock.Setup(x => x.GetByHashAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(processingEntry);
+
+        var act = () => _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Model3D, avatarId), CancellationToken.None);
+
+        await act.Should().ThrowAsync<BusinessRuleException>()
+            .Where(e => e.Code == "AI_GENERATION_IN_PROGRESS");
+    }
+
+    [Fact]
+    public async Task Handle_QuotaExceeded_ThrowsBusinessRuleException()
+    {
+        var productId = Guid.NewGuid();
+        var avatarId = Guid.NewGuid();
+        var product = CreateActiveProduct(productId);
+        var avatar = CreateAvatarWith3D(CustomerId, avatarId);
+        var productImage = Domain.Entities.Retailer.ProductImage.Create(productId, "https://cdn.example.com/product.jpg", 0);
+
+        _contextMock.Setup(x => x.Products).ReturnsDbSet(new List<Domain.Entities.Retailer.Product> { product });
+        _contextMock.Setup(x => x.Avatars).ReturnsDbSet(new List<Domain.Entities.Customer.Avatar> { avatar });
+        _contextMock.Setup(x => x.ProductImages).ReturnsDbSet(new List<Domain.Entities.Retailer.ProductImage> { productImage });
+
+        _contextMock.Setup(x => x.VirtualTryOnSessions).ReturnsDbSet(new List<Domain.Entities.Customer.VirtualTryOnSession>());
+
+        _aiCacheMock.Setup(x => x.IsTryOnQuotaExceededAsync(CustomerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var act = () => _sut.Handle(new InitiateTryOnCommand(productId, TryOnSessionType.Model3D, avatarId), CancellationToken.None);
+
+        await act.Should().ThrowAsync<BusinessRuleException>()
+            .Where(e => e.Code == "AI_GENERATION_QUOTA_EXCEEDED");
+
+        _contextMock.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 }

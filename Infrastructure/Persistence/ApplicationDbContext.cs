@@ -35,6 +35,7 @@ public sealed class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<CustomerOutfitItem> CustomerOutfitItems => Set<CustomerOutfitItem>();
     public DbSet<WardrobeCollection> WardrobeCollections => Set<WardrobeCollection>();
     public DbSet<WardrobeCollectionItem> WardrobeCollectionItems => Set<WardrobeCollectionItem>();
+    public DbSet<AiGenerationCache> AiGenerationCache => Set<AiGenerationCache>();
 
     // Cart Service
     public DbSet<Cart> Carts { get; set; }

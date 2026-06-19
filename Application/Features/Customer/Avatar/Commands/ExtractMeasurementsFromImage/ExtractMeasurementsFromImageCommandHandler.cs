@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Application.Features.Customer.Avatar.DTOs;
 using Application.Features.Customer.Avatar.Mappings;
 using Application.Interfaces.Persistence;
@@ -17,6 +18,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
     private readonly IFalAiService _falAiService;
     private readonly IFileStorageService _fileStorageService;
     private readonly ICacheService _cacheService;
+    private readonly IAiGenerationCacheService _aiCache;
     private readonly ILogger<ExtractMeasurementsFromImageCommandHandler> _logger;
 
     public ExtractMeasurementsFromImageCommandHandler(
@@ -26,6 +28,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         IFalAiService falAiService,
         IFileStorageService fileStorageService,
         ICacheService cacheService,
+        IAiGenerationCacheService aiCache,
         ILogger<ExtractMeasurementsFromImageCommandHandler> logger)
     {
         _context = context;
@@ -34,6 +37,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         _falAiService = falAiService;
         _fileStorageService = fileStorageService;
         _cacheService = cacheService;
+        _aiCache = aiCache;
         _logger = logger;
     }
 
@@ -61,7 +65,76 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         await using (var validateSideStream = new MemoryStream(sideBytes, writable: false))
             await ValidateImageMagicBytesAsync(validateSideStream, "side image", cancellationToken);
 
-        // 2. Send both images to the AI model (uses throwaway streams from buffered bytes).
+        // 2. Compute image hashes for cache key (before any AI calls).
+        var frontImageHash = _aiCache.HashBytes(frontBytes);
+        var sideImageHash = _aiCache.HashBytes(sideBytes);
+
+        var avatarRequestHash = _aiCache.ComputeAvatarHash(
+            frontImageHash: frontImageHash,
+            sideImageHash: sideImageHash,
+            heightCm: request.HeightCm,
+            provider: "FalAi",
+            bodyModelId: _aiCache.FalAiBodyModelId,
+            measurementModelId: "BodyMeasurementExtraction",
+            pipelineVersion: _aiCache.PipelineVersion);
+
+        _logger.LogInformation(
+            "Avatar generation request. CustomerId: {CustomerId}, Hash: {HashPrefix}...",
+            customerId, avatarRequestHash[..8]);
+
+        // 3. Check the AI generation deduplication cache before calling fal.ai.
+        //    This prevents paying for the same generation twice.
+        var existingCacheEntry = await _aiCache.GetByHashAsync(avatarRequestHash, cancellationToken);
+
+        if (existingCacheEntry is not null)
+        {
+            if (existingCacheEntry.Status == AiGenerationStatus.Processing)
+            {
+                _logger.LogInformation(
+                    "Avatar generation already in progress for hash {HashPrefix}...", avatarRequestHash[..8]);
+                throw new BusinessRuleException(
+                    "AI_GENERATION_IN_PROGRESS",
+                    "The same avatar generation is already in progress. Please wait and try again shortly.");
+            }
+
+            if (existingCacheEntry.Status == AiGenerationStatus.Completed)
+            {
+                _logger.LogInformation(
+                    "Cache hit for avatar generation. Hash: {HashPrefix}..., Reusing result.", avatarRequestHash[..8]);
+
+                return await ApplyCachedAvatarResultAsync(
+                    customerId, existingCacheEntry, request.HeightCm, cancellationToken);
+            }
+
+            if (existingCacheEntry.Status == AiGenerationStatus.Failed)
+            {
+                var retryWindowExpired = existingCacheEntry.FailedAt.HasValue &&
+                    existingCacheEntry.FailedAt.Value < DateTime.UtcNow.AddHours(-_aiCache.FailedRetryWindowHours);
+
+                if (!retryWindowExpired)
+                {
+                    _logger.LogInformation(
+                        "Previous avatar generation failed for hash {HashPrefix}... and retry window has not expired.",
+                        avatarRequestHash[..8]);
+                    throw new BusinessRuleException(
+                        "AI_GENERATION_PREVIOUSLY_FAILED",
+                        "A previous attempt to generate this avatar failed. Please try again later.");
+                }
+
+                _logger.LogInformation(
+                    "Retrying failed avatar generation for hash {HashPrefix}...", avatarRequestHash[..8]);
+            }
+        }
+
+        // 4. Check daily paid generation quota.
+        if (await _aiCache.IsAvatarQuotaExceededAsync(customerId, cancellationToken))
+        {
+            throw new BusinessRuleException(
+                "AI_GENERATION_QUOTA_EXCEEDED",
+                "Daily AI generation limit reached. Please try again tomorrow. Cached results remain available.");
+        }
+
+        // 5. Send both images to the AI model (uses throwaway streams from buffered bytes).
         var measurements = await _extractionService.ExtractAsync(
             new MemoryStream(frontBytes, writable: false),
             request.FrontImageFile.FileName,
@@ -72,7 +145,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
             request.HeightCm,
             cancellationToken);
 
-        // 3. Upload the front image to get a stable public URL.
+        // 6. Upload the front image to get a stable public URL.
         //    This URL is required by 2D Overlay try-on (FASHN) and by the 3D SAM Align step.
         //    Best-effort: if upload fails, avatar is still saved with measurements only.
         string? sourceImageUrl = null;
@@ -131,7 +204,7 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 armLengthCm: measurements.ArmLengthCm,
                 shoeSizeEu: measurements.ShoeSizeEu,
                 bodyShape: measurements.BodyShape,
-                avatar3dModelUrl: null,        // 3D not yet generated
+                avatar3dModelUrl: null,
                 avatarFocalLength: null,
                 sourceImageUrl: sourceImageUrl);
             _context.Avatars.Add(avatar);
@@ -146,8 +219,6 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         _context.AvatarMeasurementHistory.Add(history);
 
         // ── FIRST SaveChangesAsync ─────────────────────────────────────────
-        // Measurements + SourceImageUrl are now durable.  Any failure after
-        // this point does NOT roll back the customer's data.
         await _context.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
@@ -157,26 +228,43 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
 
         // ══════════════════════════════════════════════════════════════════
         // PHASE 2 — 3D body-model generation (best-effort, independent).
-        //
-        // BUG FIX — TaskCanceledException from Polly timeout:
-        //   Polly cancels its own internal CancellationTokenSource when the
-        //   configured timeout fires.  The resulting TaskCanceledException
-        //   (which inherits OperationCanceledException) carries Polly's CT,
-        //   NOT the caller's `cancellationToken`.
-        //
-        //   Previous code used `when (ex is not OperationCanceledException)`,
-        //   which EXCLUDED the Polly timeout — it fell through unhandled and
-        //   prevented SaveChangesAsync from ever running, leaving
-        //   SourceImageUrl persisted on Cloudinary but NULL in the database.
-        //
-        //   Fix: catch OperationCanceledException explicitly and distinguish
-        //   a real user-cancellation (same CT) from a Polly-internal timeout
-        //   (different CT).  Only the latter is swallowed here; real user
-        //   cancellations still propagate — but Phase-1 already wrote the
-        //   avatar, so measurements + SourceImageUrl are never lost.
         // ══════════════════════════════════════════════════════════════════
         if (sourceImageUrl is not null)
         {
+            // Insert cache row as Processing BEFORE calling fal.ai.
+            var inputJson = JsonSerializer.Serialize(new
+            {
+                frontImageHash,
+                sideImageHash,
+                heightCm = request.HeightCm,
+                provider = "FalAi",
+                bodyModelId = _aiCache.FalAiBodyModelId,
+                pipelineVersion = _aiCache.PipelineVersion
+            });
+
+            AiGenerationCache? cacheEntry = null;
+            try
+            {
+                cacheEntry = await _aiCache.TryCreateProcessingAsync(
+                    customerId: customerId,
+                    requestHash: avatarRequestHash,
+                    type: AiGenerationType.Avatar3D,
+                    provider: "FalAi",
+                    modelId: _aiCache.FalAiBodyModelId,
+                    pipelineVersion: _aiCache.PipelineVersion,
+                    inputJson: inputJson,
+                    ct: cancellationToken);
+
+                // If null: race condition — another request inserted the same hash.
+                cacheEntry ??= await _aiCache.GetByHashAsync(avatarRequestHash, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to create AI generation cache entry for CustomerId {CustomerId}. Proceeding without cache.",
+                    customerId);
+            }
+
             string? avatar3dModelUrl = null;
             double? avatarFocalLength = null;
 
@@ -190,6 +278,18 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                     "SAM 3D Body generation completed. CustomerId: {CustomerId}, " +
                     "GlbUrl: {GlbUrl}, FocalLength: {FocalLength}",
                     customerId, avatar3dModelUrl, bodyResult.FocalLength);
+
+                // Update cache to Completed.
+                if (cacheEntry is not null)
+                {
+                    var resultJson = JsonSerializer.Serialize(new
+                    {
+                        glbUrl = avatar3dModelUrl,
+                        focalLength = avatarFocalLength,
+                        sourceImageUrl
+                    });
+                    await _aiCache.MarkCompletedAsync(cacheEntry.Id, resultImageUrl: sourceImageUrl, resultModelUrl: avatar3dModelUrl, resultJson, cancellationToken);
+                }
             }
             catch (ExternalServiceException ex)
             {
@@ -197,15 +297,19 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                     "fal.ai 3D body generation failed for CustomerId {CustomerId}. " +
                     "2D try-on remains available via the SourceImageUrl persisted in Phase 1.",
                     customerId);
+
+                if (cacheEntry is not null)
+                    await SafeMarkFailedAsync(cacheEntry.Id, "ExternalServiceError", ex.Message, cancellationToken);
             }
             catch (OperationCanceledException ex) when (ex.CancellationToken != cancellationToken)
             {
-                // Polly internal timeout — NOT a real user cancellation.
-                // Swallow and continue: 2D try-on is still available.
                 _logger.LogWarning(ex,
                     "fal.ai 3D body generation timed out (Polly internal CT) for CustomerId {CustomerId}. " +
                     "Avatar already saved with SourceImageUrl in Phase 1; 2D try-on available.",
                     customerId);
+
+                if (cacheEntry is not null)
+                    await SafeMarkFailedAsync(cacheEntry.Id, "Timeout", "fal.ai 3D body generation timed out.", cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -213,6 +317,9 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                     "Unexpected error during 3D body generation for CustomerId {CustomerId}. " +
                     "Continuing without 3D model (2D try-on still available).",
                     customerId);
+
+                if (cacheEntry is not null)
+                    await SafeMarkFailedAsync(cacheEntry.Id, "UnexpectedError", "Unexpected error during 3D body generation.", cancellationToken);
             }
 
             // ── SECOND SaveChangesAsync (only when 3D succeeded) ──────────
@@ -234,14 +341,85 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         return avatar.ToDto();
     }
 
+    // ── Apply cached 3D result ────────────────────────────────────────────────
+
+    private async Task<AvatarDto> ApplyCachedAvatarResultAsync(
+        Guid customerId,
+        AiGenerationCache cached,
+        decimal heightCm,
+        CancellationToken ct)
+    {
+        // Deserialize the cached result to get 3D model URLs + focal length.
+        string? cachedGlbUrl = cached.ResultModelUrl;
+        string? cachedSourceImageUrl = cached.ResultImageUrl;
+        double? cachedFocalLength = null;
+
+        if (cached.ResultJson is not null)
+        {
+            try
+            {
+                var resultDoc = JsonSerializer.Deserialize<JsonElement>(cached.ResultJson);
+                if (resultDoc.TryGetProperty("focalLength", out var fl) && fl.ValueKind != JsonValueKind.Null)
+                    cachedFocalLength = fl.GetDouble();
+            }
+            catch
+            {
+                // non-critical — fallback to null
+            }
+        }
+
+        // Upsert avatar using the cached 3D result.
+        var avatar = await _context.Avatars
+            .FirstOrDefaultAsync(a => a.CustomerId == customerId, ct);
+
+        if (avatar is null)
+        {
+            // We can't restore full measurements from the cache (we don't store them there),
+            // but we can at least restore the source image and 3D model.
+            _logger.LogWarning(
+                "Cache hit for avatar but no existing avatar record for CustomerId {CustomerId}. " +
+                "Cannot fully restore cached result. Returning cache hit without avatar creation.",
+                customerId);
+
+            // In this edge case, fall through to a normal generation.
+            // This is rare: it would only happen if the cache entry exists but the avatar was deleted.
+            throw new BusinessRuleException(
+                "AI_GENERATION_CACHE_INCONSISTENCY",
+                "A cached avatar generation result was found but your avatar record no longer exists. Please try again.");
+        }
+
+        if (cachedSourceImageUrl is not null)
+            avatar.SetSourceImageUrl(cachedSourceImageUrl);
+
+        if (cachedGlbUrl is not null)
+            avatar.SetAvatar3dModelUrl(cachedGlbUrl, cachedFocalLength);
+
+        await _context.SaveChangesAsync(ct);
+        await _cacheService.RemoveAsync($"avatar:{customerId:N}", ct);
+
+        _logger.LogInformation(
+            "Cached avatar 3D result applied for CustomerId {CustomerId}. GlbUrl: {GlbUrl}",
+            customerId, cachedGlbUrl);
+
+        return avatar.ToDto();
+    }
+
+    private async Task SafeMarkFailedAsync(Guid id, string errorCode, string message, CancellationToken ct)
+    {
+        try
+        {
+            await _aiCache.MarkFailedAsync(id, errorCode, message, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to mark AI generation cache entry {Id} as failed.", id);
+        }
+    }
+
     // ── Magic byte constants ────────────────────────────────────────────────
     private static readonly byte[] JpegMagic = [0xFF, 0xD8, 0xFF];
     private static readonly byte[] PngMagic = [0x89, 0x50, 0x4E, 0x47];
 
-    /// <summary>
-    /// Reads the first 4 bytes of the stream to verify the JPEG or PNG file signature.
-    /// Throws <see cref="BusinessRuleException"/> if the magic bytes do not match.
-    /// </summary>
     private static async Task ValidateImageMagicBytesAsync(
         Stream stream, string imageLabel, CancellationToken ct)
     {
@@ -267,7 +445,6 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 $"Only JPEG and PNG images are allowed. The uploaded {imageLabel} does not match a supported image format.");
     }
 
-    /// <summary>Reads the entire content of a stream into a byte array.</summary>
     private static async Task<byte[]> ReadAllBytesAsync(Stream stream, CancellationToken ct)
     {
         using var ms = new MemoryStream();

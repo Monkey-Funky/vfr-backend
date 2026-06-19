@@ -23,3 +23,13 @@ Thumbs.db
 # Secrets
 *.pfx
 *.key
+
+# Environment files — only .env.example is safe to commit
+.env
+.env.*
+!.env.example
+
+# Local appsettings overrides
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json

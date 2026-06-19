@@ -407,6 +407,56 @@ catch (Exception ex)
 
 
 
+// ── 11b. STARTUP SECRETS VALIDATION ─────────────────────────────────────────
+//
+// Fail fast in production if required secrets are missing.
+// This prevents silent failures where the app starts but paid integrations are broken.
+{
+    var env = app.Environment;
+    var cfg = app.Configuration;
+
+    if (env.IsProduction())
+    {
+        var missing = new List<string>();
+
+        void Require(string key, string envVarName)
+        {
+            if (string.IsNullOrWhiteSpace(cfg[key]))
+                missing.Add($"  - {key} (env: {envVarName})");
+        }
+
+        Require("FalAi:ApiKey", "FalAi__ApiKey");
+        Require("ConnectionStrings:DefaultConnection", "ConnectionStrings__DefaultConnection");
+        Require("JwtSettings:PrivateKeyPem", "JwtSettings__PrivateKeyPem");
+        Require("JwtSettings:StepTokenSecret", "JwtSettings__StepTokenSecret");
+        Require("Cloudinary:ApiKey", "Cloudinary__ApiKey");
+        Require("Cloudinary:ApiSecret", "Cloudinary__ApiSecret");
+        Require("Stripe:SecretKey", "Stripe__SecretKey");
+        Require("Email:Password", "Email__Password");
+
+        if (missing.Count > 0)
+        {
+            var message = "STARTUP FAILED — required production secrets are not configured:\n" +
+                          string.Join("\n", missing) + "\n" +
+                          "Set these as environment variables on Render or in GitHub Actions secrets.";
+            Log.Fatal(message);
+            throw new InvalidOperationException(message);
+        }
+
+        Log.Information("Startup: All required production secrets are configured.");
+    }
+    else
+    {
+        // In development/staging: warn about any obviously missing secrets but don't fail.
+        if (string.IsNullOrWhiteSpace(cfg["FalAi:ApiKey"]))
+            Log.Warning("Startup: FalAi:ApiKey is not configured. fal.ai calls will fail. " +
+                        "Run: dotnet user-secrets set \"FalAi:ApiKey\" \"your-key\" --project API");
+
+        if (string.IsNullOrWhiteSpace(cfg["Cloudinary:ApiKey"]))
+            Log.Warning("Startup: Cloudinary:ApiKey is not configured. Image uploads will fail.");
+    }
+}
+
 // ── 12. MIDDLEWARE PIPELINE ──────────────────────────────────────────────────
 
 // Forwarded headers MUST be first — before any middleware that reads

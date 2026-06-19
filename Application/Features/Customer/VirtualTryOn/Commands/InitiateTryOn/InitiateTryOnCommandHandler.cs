@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Application.Features.Customer.VirtualTryOn.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
@@ -16,19 +17,22 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
     private readonly IVirtualTryOnService _virtualTryOnService;
     private readonly IVirtualTryOn2DService _virtualTryOn2DService;
     private readonly ICacheService _cacheService;
+    private readonly IAiGenerationCacheService _aiCache;
 
     public InitiateTryOnCommandHandler(
         IApplicationDbContext context,
         ICurrentUserService currentUserService,
         IVirtualTryOnService virtualTryOnService,
         IVirtualTryOn2DService virtualTryOn2DService,
-        ICacheService cacheService)
+        ICacheService cacheService,
+        IAiGenerationCacheService aiCache)
     {
         _context = context;
         _currentUserService = currentUserService;
         _virtualTryOnService = virtualTryOnService;
         _virtualTryOn2DService = virtualTryOn2DService;
         _cacheService = cacheService;
+        _aiCache = aiCache;
     }
 
     public async Task<TryOnResultDto> Handle(InitiateTryOnCommand request, CancellationToken cancellationToken)
@@ -37,8 +41,6 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
             ?? throw new UnauthorizedException("Customer identity missing.");
 
         // 1. Validate product exists and is active.
-        // FIX (Issue 12): Use ProductStatus.Active constant instead of the hardcoded
-        // string literal "Active" to avoid silent breakage if the constant is renamed.
         var product = await _context.Products
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == request.ProductId, cancellationToken);
@@ -59,17 +61,6 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         }
 
         // 2b. Pre-persist business-rule validation for all session types.
-        //
-        // FIX (Issues 7 & 10): Previously only Overlay2D had pre-persist validation.
-        // The 3D checks lived inside VirtualTryOnService.ProcessTryOnAsync, AFTER the
-        // session row was already saved — so a customer whose avatar had no 3D model
-        // or no source image would produce a spurious "Failed" session row in the DB for
-        // a completely predictable user-state issue, polluting analytics dashboards.
-        //
-        // Now ALL predictable business-rule violations are raised before SaveChangesAsync
-        // so that no session row is ever written for these cases.
-        //
-        // The service retains its own guard as a defence-in-depth safety net.
         if (request.SessionType == TryOnSessionType.Overlay2D)
         {
             if (!request.AvatarId.HasValue || activeAvatar is null)
@@ -85,7 +76,6 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         else if (request.SessionType == TryOnSessionType.Model3D
               || request.SessionType == TryOnSessionType.ARLiveView)
         {
-            // FIX (Issue 10): 3D avatar checks moved here, BEFORE session persistence.
             if (!request.AvatarId.HasValue || activeAvatar is null)
                 throw new BusinessRuleException(
                     "TryOn3DAvatarRequired",
@@ -96,23 +86,66 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                     "TryOn3DAvatarRequired",
                     "Customer does not have a 3D avatar model. Please re-create the avatar from a photo.");
 
-            // FIX (Issue 7): Require SourceImageUrl for the 3D path too.
-            // VirtualTryOnService was previously substituting the product image as the
-            // align reference when SourceImageUrl was null — producing visually wrong
-            // "successful" results (product photo used instead of person photo for
-            // perspective-correct alignment). Fail loudly instead.
             if (string.IsNullOrWhiteSpace(activeAvatar.SourceImageUrl))
                 throw new BusinessRuleException(
                     "TryOn3DSourceImageMissing",
                     "This avatar has no source image. Please re-create the avatar from a photo.");
         }
 
-        // 3. Persist the pending session before calling the external service.
-        //
-        // At this point all predictable validation errors have already been surfaced
-        // (steps 2 / 2b). The only remaining failure modes are transient external
-        // service errors — those are captured in the catch block below so the session
-        // is recorded as Failed rather than left in a perpetual Pending state.
+        // 3. Load product image (needed for cache key and for the AI call).
+        var productImageUrl = await _context.ProductImages
+            .Where(i => i.ProductId == request.ProductId && !i.IsDeleted)
+            .OrderBy(i => i.DisplayOrder)
+            .Select(i => i.ImageUrl)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // 4. AI generation deduplication cache check.
+        if (activeAvatar is not null && productImageUrl is not null)
+        {
+            var (cacheType, requestHash) = ComputeTryOnHash(request.SessionType, activeAvatar, request.ProductId, productImageUrl);
+
+            var cached = await _aiCache.GetByHashAsync(requestHash, cancellationToken);
+
+            if (cached is not null)
+            {
+                if (cached.Status == AiGenerationStatus.Processing)
+                {
+                    throw new BusinessRuleException(
+                        "AI_GENERATION_IN_PROGRESS",
+                        "The same try-on generation is already in progress. Please wait and try again shortly.");
+                }
+
+                if (cached.Status == AiGenerationStatus.Completed &&
+                    (cached.ResultImageUrl is not null || cached.ResultModelUrl is not null))
+                {
+                    return await BuildCachedTryOnResultAsync(
+                        customerId, request, product, activeAvatar, cached, cancellationToken);
+                }
+
+                if (cached.Status == AiGenerationStatus.Failed)
+                {
+                    var retryWindowExpired = cached.FailedAt.HasValue &&
+                        cached.FailedAt.Value < DateTime.UtcNow.AddHours(-_aiCache.FailedRetryWindowHours);
+
+                    if (!retryWindowExpired)
+                    {
+                        throw new BusinessRuleException(
+                            "AI_GENERATION_PREVIOUSLY_FAILED",
+                            "A previous attempt at this try-on failed. Please try again later.");
+                    }
+                }
+            }
+        }
+
+        // 5. Check daily paid quota.
+        if (await _aiCache.IsTryOnQuotaExceededAsync(customerId, cancellationToken))
+        {
+            throw new BusinessRuleException(
+                "AI_GENERATION_QUOTA_EXCEEDED",
+                "Daily AI generation limit reached. Cached results remain available.");
+        }
+
+        // 6. Persist the pending session before calling the external service.
         var session = VirtualTryOnSession.Create(
             customerId: customerId,
             productId: request.ProductId,
@@ -123,15 +156,46 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         _context.VirtualTryOnSessions.Add(session);
         await _context.SaveChangesAsync(cancellationToken);
 
-        // 4. Call the external try-on service; mark the session failed on any exception.
-        //    Overlay2D uses the flat 2D image pipeline; Model3D/ARLiveView keep the
-        //    existing 3D SAM pipeline unchanged.
+        // 7. Create cache entry (Processing) if we have all the inputs.
+        AiGenerationCache? cacheEntry = null;
+        if (activeAvatar is not null && productImageUrl is not null)
+        {
+            var (cacheType, requestHash) = ComputeTryOnHash(request.SessionType, activeAvatar, request.ProductId, productImageUrl);
+            var inputJson = JsonSerializer.Serialize(new
+            {
+                type = cacheType,
+                avatarId = activeAvatar.Id,
+                productId = request.ProductId,
+                productImageUrl,
+                pipelineVersion = _aiCache.PipelineVersion
+            });
+
+            try
+            {
+                cacheEntry = await _aiCache.TryCreateProcessingAsync(
+                    customerId: customerId,
+                    requestHash: requestHash,
+                    type: cacheType,
+                    provider: "FalAi",
+                    modelId: cacheType == AiGenerationType.TryOn2D ? _aiCache.TryOn2DModelId : _aiCache.FalAiObjectsModelId,
+                    pipelineVersion: _aiCache.PipelineVersion,
+                    inputJson: inputJson,
+                    ct: cancellationToken);
+
+                cacheEntry ??= await _aiCache.GetByHashAsync(requestHash, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Non-fatal: proceed without cache tracking
+                _ = ex;
+            }
+        }
+
+        // 8. Call the external try-on service; mark the session failed on any exception.
         TryOnResultDto result;
         try
         {
             result = request.SessionType == TryOnSessionType.Overlay2D
-                // activeAvatar is guaranteed non-null here: step 2b would have thrown
-                // for Overlay2D if AvatarId was absent or the avatar was not found.
                 ? await ProcessOverlay2DAsync(request, customerId, activeAvatar!, cancellationToken)
                 : await _virtualTryOnService.ProcessTryOnAsync(
                     customerId,
@@ -140,17 +204,29 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                     activeAvatar,
                     cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
             session.MarkAsFailed();
             await _context.SaveChangesAsync(cancellationToken);
+
+            if (cacheEntry is not null)
+            {
+                try { await _aiCache.MarkFailedAsync(cacheEntry.Id, ex.GetType().Name, ex.Message, cancellationToken); }
+                catch { /* non-fatal */ }
+            }
+
             throw;
         }
 
-        // 5. Update session status based on service result.
+        // 9. Update session status.
         if (result.Status == SessionStatus.Failed)
         {
             session.MarkAsFailed();
+            if (cacheEntry is not null)
+            {
+                try { await _aiCache.MarkFailedAsync(cacheEntry.Id, "ServiceFailed", "Try-on service returned Failed status.", cancellationToken); }
+                catch { /* non-fatal */ }
+            }
         }
         else if (result.Status == SessionStatus.Completed && result.ResultImageUrl is not null)
         {
@@ -159,40 +235,111 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 result.RecommendedSize,
                 result.ConfidenceScore,
                 result.DurationSeconds ?? 0);
+
+            // Update cache to Completed.
+            if (cacheEntry is not null)
+            {
+                var (cacheType, _) = ComputeTryOnHash(request.SessionType, activeAvatar!, request.ProductId, productImageUrl ?? "");
+                var resultImageUrl = cacheType == AiGenerationType.TryOn2D ? result.ResultImageUrl : null;
+                var resultModelUrl = cacheType == AiGenerationType.TryOn3D ? result.ResultImageUrl : null;
+                try { await _aiCache.MarkCompletedAsync(cacheEntry.Id, resultImageUrl, resultModelUrl, null, cancellationToken); }
+                catch { /* non-fatal */ }
+            }
         }
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        // Invalidate the paginated try-on session list for this customer so the new
-        // session appears immediately on the next fetch (all pages, all products).
+        // Invalidate the paginated try-on session list for this customer.
         await _cacheService.RemoveByPrefixAsync($"tryon:{customerId:N}:", cancellationToken);
 
         return result;
     }
 
-    /// <summary>
-    /// Runs the 2D (Overlay2D) try-on pipeline: sends the customer's stored front
-    /// photo as the person image and the product's primary image as the garment image
-    /// to the fal.ai FASHN model, receiving a composited 2D result image.
-    ///
-    /// <para>
-    /// Unlike the 3D path this does NOT require a generated 3D avatar model — only
-    /// an avatar record with a usable source image (<c>avatar.SourceImageUrl</c>).
-    /// </para>
-    ///
-    /// <para><b>Pre-conditions enforced by the caller (step 2b):</b></para>
-    /// <list type="bullet">
-    ///   <item><paramref name="avatar"/> is non-null.</item>
-    ///   <item><c>avatar.SourceImageUrl</c> is non-null / non-whitespace.</item>
-    /// </list>
-    /// </summary>
+    // ── Cache helpers ─────────────────────────────────────────────────────────
+
+    private (string cacheType, string requestHash) ComputeTryOnHash(
+        TryOnSessionType sessionType,
+        Domain.Entities.Customer.Avatar avatar,
+        Guid productId,
+        string productImageUrl)
+    {
+        if (sessionType == TryOnSessionType.Overlay2D)
+        {
+            var hash = _aiCache.ComputeTryOn2DHash(
+                avatarId: avatar.Id,
+                avatarFrontImageUrl: avatar.SourceImageUrl ?? "",
+                productId: productId,
+                productImageUrl: productImageUrl,
+                selectedSize: null,
+                selectedColor: null,
+                provider: "FalAi",
+                tryOn2DModelId: _aiCache.TryOn2DModelId,
+                pipelineVersion: _aiCache.PipelineVersion);
+            return (AiGenerationType.TryOn2D, hash);
+        }
+        else
+        {
+            var hash = _aiCache.ComputeTryOn3DHash(
+                avatarId: avatar.Id,
+                avatar3dModelUrl: avatar.Avatar3dModelUrl ?? "",
+                avatarFocalLength: avatar.AvatarFocalLength ?? 1000.0,
+                sourceImageUrl: avatar.SourceImageUrl ?? "",
+                productId: productId,
+                productImageUrl: productImageUrl,
+                selectedSize: null,
+                selectedColor: null,
+                provider: "FalAi",
+                objectsModelId: _aiCache.FalAiObjectsModelId,
+                alignModelId: _aiCache.FalAiAlignModelId,
+                pipelineVersion: _aiCache.PipelineVersion);
+            return (AiGenerationType.TryOn3D, hash);
+        }
+    }
+
+    private async Task<TryOnResultDto> BuildCachedTryOnResultAsync(
+        Guid customerId,
+        InitiateTryOnCommand request,
+        Domain.Entities.Retailer.Product product,
+        Domain.Entities.Customer.Avatar activeAvatar,
+        AiGenerationCache cached,
+        CancellationToken ct)
+    {
+        // Still create a VirtualTryOnSession record so the user's history is complete.
+        var cachedResultUrl = cached.ResultImageUrl ?? cached.ResultModelUrl!;
+
+        var session = VirtualTryOnSession.Create(
+            customerId: customerId,
+            productId: request.ProductId,
+            retailerId: product.RetailerId,
+            sessionType: request.SessionType,
+            avatarId: request.AvatarId);
+
+        _context.VirtualTryOnSessions.Add(session);
+        session.MarkAsCompleted(cachedResultUrl, recommendedSize: null, confidenceScore: 0.98m, durationSeconds: 0);
+        await _context.SaveChangesAsync(ct);
+        await _cacheService.RemoveByPrefixAsync($"tryon:{customerId:N}:", ct);
+
+        var resultType = request.SessionType == TryOnSessionType.Overlay2D
+            ? TryOnResultType.Image2D
+            : TryOnResultType.Model3D;
+
+        return new TryOnResultDto(
+            Status: SessionStatus.Completed,
+            ResultImageUrl: cachedResultUrl,
+            RecommendedSize: null,
+            ConfidenceScore: 0.98m,
+            DurationSeconds: 0,
+            ResultType: resultType);
+    }
+
+    // ── 2D try-on pipeline ────────────────────────────────────────────────────
+
     private async Task<TryOnResultDto> ProcessOverlay2DAsync(
         InitiateTryOnCommand request,
         Guid customerId,
-        Domain.Entities.Customer.Avatar avatar,       // guaranteed non-null by step 2b
+        Domain.Entities.Customer.Avatar avatar,
         CancellationToken cancellationToken)
     {
-        // Garment image: the product's primary image (first non-deleted by display order).
         var garmentImageUrl = await _context.Products
             .Where(p => p.Id == request.ProductId)
             .SelectMany(p => p.Images)
@@ -211,7 +358,7 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 CustomerId: customerId,
                 ProductId: request.ProductId,
                 AvatarId: avatar.Id,
-                PersonImageUrl: avatar.SourceImageUrl!,   // non-null: validated by step 2b
+                PersonImageUrl: avatar.SourceImageUrl!,
                 GarmentImageUrl: garmentImageUrl,
                 Category: null,
                 SelectedSize: null,

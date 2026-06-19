@@ -30,6 +30,7 @@ public interface IApplicationDbContext
     DbSet<CustomerOutfitItem> CustomerOutfitItems { get; }
     DbSet<WardrobeCollection> WardrobeCollections { get; }
     DbSet<WardrobeCollectionItem> WardrobeCollectionItems { get; }
+    DbSet<AiGenerationCache> AiGenerationCache { get; }
 
     // ── Customer Ordering ────────────────────────────────
     DbSet<Cart> Carts { get; }

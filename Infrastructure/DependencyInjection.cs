@@ -88,6 +88,9 @@ public static class DependencyInjection
         services.Configure<VirtualTryOn2DSettings>(options =>
             configuration.GetSection("VirtualTryOn2D").Bind(options));
 
+        services.Configure<AiGenerationSettings>(options =>
+            configuration.GetSection("AiGeneration").Bind(options));
+
         // ── 3. Polly resilience pipelines ─────────────────────────────────────
 
         services.AddResiliencePipeline("s3", builder =>
@@ -282,6 +285,7 @@ public static class DependencyInjection
         services.AddScoped<IFalAiService, FalAiService>();
         services.AddScoped<IFalAiQueueClient, FalAiQueueClient>();
         services.AddScoped<IVirtualTryOn2DService, FalAiVirtualTryOn2DService>();
+        services.AddScoped<IAiGenerationCacheService, AiGenerationCacheService>();
 
         // ── 6. Repository & Unit of Work ──────────────────────────────────────
         services.AddScoped<IUnitOfWork, UnitOfWork>();
