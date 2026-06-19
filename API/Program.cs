@@ -62,6 +62,9 @@ builder.Services.AddInfrastructure(builder.Configuration);
 // CurrentUserService lives in API layer — registered here
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
+// Admin filters
+builder.Services.AddScoped<API.Filters.AdminKeyAuthFilter>();
+
 // ── 4. JWT RS256 AUTHENTICATION ──────────────────────────────────────────────
 //
 // PRODUCTION FLOW:
