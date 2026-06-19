@@ -10,17 +10,15 @@ namespace Infrastructure.Services.Customer;
 
 /// <summary>
 /// CatVTON-backed implementation of <see cref="IVirtualTryOn2DService"/>.
-/// Calls the free Hugging Face Spaces Gradio REST API to perform 2D virtual try-on.
+/// Calls the free Hugging Face Spaces Gradio REST API (no API key, no credit card).
 ///
 /// Flow:
-///   1. Validate image URLs are publicly reachable (preflight HEAD check).
-///   2. POST to /gradio_api/call/submit_function → receive event_id.
-///   3. GET  /gradio_api/call/submit_function/{event_id} → SSE stream → result image URL.
+///   1. Validate image URLs are publicly reachable.
+///   2. POST /gradio_api/call/submit_function → event_id  (retry on Space cold-start 503).
+///   3. GET  /gradio_api/call/submit_function/{event_id}  → single SSE stream → result URL.
 ///   4. Download the temporary HF result image.
-///   5. Upload it to Cloudinary via <see cref="IFileStorageService"/> for a permanent URL.
-///   6. Return <see cref="TryOn2DResult"/> with the Cloudinary URL.
-///
-/// No API key or credit card required — uses the public CatVTON Space.
+///   5. Upload to Cloudinary via IFileStorageService for a permanent URL.
+///   6. Return TryOn2DResult with the permanent Cloudinary URL.
 /// </summary>
 public sealed class CatVtonVirtualTryOn2DService : IVirtualTryOn2DService
 {
@@ -46,6 +44,10 @@ public sealed class CatVtonVirtualTryOn2DService : IVirtualTryOn2DService
         _logger = logger;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════
+    //  Main entry point
+    // ══════════════════════════════════════════════════════════════════════════════════
+
     public async Task<TryOn2DResult> ProcessTryOnAsync(TryOn2DRequest request, CancellationToken cancellationToken)
     {
         if (!_settings.Enabled)
@@ -57,40 +59,41 @@ public sealed class CatVtonVirtualTryOn2DService : IVirtualTryOn2DService
         if (string.IsNullOrWhiteSpace(request.GarmentImageUrl))
             throw new BusinessRuleException("TryOn2DMissingGarment", "A garment image is required for 2D try-on.");
 
-        // ── Preflight: verify both images are publicly reachable ─────────────────────
+        // ── Preflight: verify images are publicly reachable ───────────────────────────
+        // Skip strict validation for Cloudinary URLs (they always return 200 on HEAD).
+        // Only hard-fail on completely unreachable hosts.
         await ValidateImageUrlAsync(request.PersonImageUrl, "person", cancellationToken);
         await ValidateImageUrlAsync(request.GarmentImageUrl, "garment", cancellationToken);
 
         var startTime = DateTime.UtcNow;
 
         _logger.LogInformation(
-            "Starting 2D try-on via CatVTON. SpaceUrl: {SpaceUrl}, " +
-            "CustomerId: {CustomerId}, ProductId: {ProductId}, " +
-            "Person: {Person}, Garment: {Garment}, ClothType: {ClothType}",
-            _settings.SpaceUrl, request.CustomerId, request.ProductId,
+            "[CatVTON] Starting 2D try-on. CustomerId={CustomerId}, ProductId={ProductId}, " +
+            "Person={Person}, Garment={Garment}, ClothType={ClothType}",
+            request.CustomerId, request.ProductId,
             request.PersonImageUrl, request.GarmentImageUrl, _settings.ClothType);
 
-        // ── Step 1: Submit the try-on request to CatVTON Gradio API ──────────────────
-        var eventId = await SubmitTryOnRequestAsync(
+        // ── Step 1: Submit ────────────────────────────────────────────────────────────
+        // Retry up to MaxSubmitRetries times to handle HF Space cold starts (503).
+        var eventId = await SubmitWithRetryAsync(
             request.PersonImageUrl, request.GarmentImageUrl, cancellationToken);
 
-        _logger.LogInformation("CatVTON job submitted. EventId: {EventId}", eventId);
+        _logger.LogInformation("[CatVTON] Job submitted. EventId={EventId}", eventId);
 
-        // ── Step 2: Poll SSE stream for the result ───────────────────────────────────
-        var tempResultUrl = await PollForResultAsync(eventId, cancellationToken);
+        // ── Step 2: Read SSE stream (one connection, kept open until complete) ────────
+        var tempResultUrl = await ReadSseResultAsync(eventId, cancellationToken);
 
-        _logger.LogInformation(
-            "CatVTON processing completed. TempResultUrl: {TempResultUrl}", tempResultUrl);
+        _logger.LogInformation("[CatVTON] Processing done. TempUrl={TempUrl}", tempResultUrl);
 
-        // ── Step 3: Download temp image and upload to Cloudinary for a permanent URL ─
+        // ── Step 3: Persist to Cloudinary ─────────────────────────────────────────────
         var permanentUrl = await PersistResultImageAsync(
             tempResultUrl, request.CustomerId, request.ProductId, cancellationToken);
 
         var durationSeconds = (int)(DateTime.UtcNow - startTime).TotalSeconds;
 
         _logger.LogInformation(
-            "2D try-on completed in {Duration}s for CustomerId {CustomerId}. ResultImageUrl: {ResultImageUrl}",
-            durationSeconds, request.CustomerId, permanentUrl);
+            "[CatVTON] Completed in {Duration}s. PermanentUrl={Url}",
+            durationSeconds, permanentUrl);
 
         return new TryOn2DResult(
             ResultImageUrl: permanentUrl,
@@ -100,338 +103,337 @@ public sealed class CatVtonVirtualTryOn2DService : IVirtualTryOn2DService
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
-    //  Step 1: Submit — POST to Gradio queue
+    //  Step 1: Submit with retry (handles HF Space cold-start 503s)
     // ══════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Submits the try-on request to the CatVTON Gradio API.
-    /// Returns the event_id used to poll for results.
-    /// </summary>
-    private async Task<string> SubmitTryOnRequestAsync(
+    private async Task<string> SubmitWithRetryAsync(
         string personImageUrl, string garmentImageUrl, CancellationToken ct)
     {
-        var baseUrl = _settings.SpaceUrl.TrimEnd('/');
+        var baseUrl   = _settings.SpaceUrl.TrimEnd('/');
         var submitUrl = $"{baseUrl}{_settings.ApiEndpoint}";
 
-        // Build the Gradio request payload.
-        // person_image is an ImageEditor component: { background: FileData, layers: [], composite: null }
-        // cloth_image is a simple Image component: FileData
+        // Build Gradio payload.
+        // person_image → ImageEditor: { background: FileData, layers:[], composite:null }
+        // cloth_image  → Image:       FileData with url
         var payload = new GradioSubmitPayload
         {
             Data = new object[]
             {
-                // person_image (ImageEditor format)
                 new GradioImageEditorInput
                 {
                     Background = new GradioFileData
                     {
-                        Url = personImageUrl,
-                        OrigName = "person.jpg",
-                        Meta = new GradioMeta { Type = "gradio.FileData" }
+                        Url      = personImageUrl,
+                        OrigName = ExtractFileName(personImageUrl, "person.jpg"),
+                        Meta     = new GradioMeta()
                     },
-                    Layers = Array.Empty<object>(),
+                    Layers    = Array.Empty<object>(),
                     Composite = null
                 },
-                // cloth_image (Image format)
                 new GradioFileData
                 {
-                    Url = garmentImageUrl,
-                    OrigName = "garment.jpg",
-                    Meta = new GradioMeta { Type = "gradio.FileData" }
+                    Url      = garmentImageUrl,
+                    OrigName = ExtractFileName(garmentImageUrl, "garment.jpg"),
+                    Meta     = new GradioMeta()
                 },
-                // cloth_type
                 _settings.ClothType,
-                // num_inference_steps
-                _settings.NumInferenceSteps,
-                // guidance_scale
+                (double)_settings.NumInferenceSteps,
                 _settings.GuidanceScale,
-                // seed
-                _settings.Seed,
-                // show_type — "result only" to get a clean image without the input/mask side-by-side
-                "result only"
+                (double)_settings.Seed,
+                "result only"           // show_type: only the result, no side-by-side
             }
         };
 
-        try
-        {
-            using var client = _httpClientFactory.CreateClient("catvton");
-            var jsonPayload = JsonSerializer.Serialize(payload, JsonOptions);
+        var jsonPayload = JsonSerializer.Serialize(payload, JsonOptions);
+        _logger.LogDebug("[CatVTON] Submit payload: {Payload}", jsonPayload);
 
-            _logger.LogDebug("CatVTON submit payload: {Payload}", jsonPayload);
+        // Retry up to MaxSubmitRetries (default 5) with increasing delays.
+        // Free HF Spaces return 503 while waking up (~30-60s cold start).
+        const int maxRetries   = 6;
+        int[]     delaysMs     = [3000, 8000, 15000, 20000, 25000, 30000];
 
-            using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-            using var response = await client.PostAsync(submitUrl, content, ct);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync(ct);
-                _logger.LogError(
-                    "CatVTON submit failed with {StatusCode}. Body: {Body}",
-                    (int)response.StatusCode, errorBody);
-                throw new ExternalServiceException("CatVTON",
-                    $"CatVTON submit returned HTTP {(int)response.StatusCode}: {errorBody}");
-            }
-
-            var responseJson = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogDebug("CatVTON submit response: {Response}", responseJson);
-
-            using var doc = JsonDocument.Parse(responseJson);
-            var eventId = doc.RootElement.GetProperty("event_id").GetString();
-
-            if (string.IsNullOrWhiteSpace(eventId))
-                throw new ExternalServiceException("CatVTON",
-                    "CatVTON submit response did not contain an event_id.");
-
-            return eventId;
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "CatVTON submit network failure");
-            throw new ExternalServiceException("CatVTON",
-                $"Could not reach CatVTON HF Space: {ex.Message}", ex);
-        }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════════════
-    //  Step 2: Poll — GET SSE stream for result
-    // ══════════════════════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Polls the Gradio SSE endpoint until the result is ready or timeout is reached.
-    /// Parses the SSE stream to extract the result image URL.
-    /// </summary>
-    private async Task<string> PollForResultAsync(string eventId, CancellationToken ct)
-    {
-        var baseUrl = _settings.SpaceUrl.TrimEnd('/');
-        var pollUrl = $"{baseUrl}{_settings.ApiEndpoint}/{eventId}";
-        var deadline = DateTime.UtcNow.AddSeconds(_settings.TimeoutSeconds);
-
-        // The Gradio SSE endpoint returns a stream of events.
-        // We need to read the stream and parse the "complete" event.
-        while (DateTime.UtcNow < deadline)
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
             ct.ThrowIfCancellationRequested();
 
             try
             {
-                using var client = _httpClientFactory.CreateClient("catvton");
-                using var request = new HttpRequestMessage(HttpMethod.Get, pollUrl);
-                using var response = await client.SendAsync(
-                    request, HttpCompletionOption.ResponseHeadersRead, ct);
+                using var client  = _httpClientFactory.CreateClient("catvton");
+                using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+                using var response = await client.PostAsync(submitUrl, content, ct);
 
-                if (!response.IsSuccessStatusCode)
+                // 200 → extract event_id
+                if (response.IsSuccessStatusCode)
                 {
-                    var errorBody = await response.Content.ReadAsStringAsync(ct);
+                    var json    = await response.Content.ReadAsStringAsync(ct);
+                    _logger.LogDebug("[CatVTON] Submit response: {Json}", json);
+
+                    using var doc     = JsonDocument.Parse(json);
+                    var       eventId = doc.RootElement.GetProperty("event_id").GetString();
+
+                    if (!string.IsNullOrWhiteSpace(eventId))
+                        return eventId;
+
+                    throw new ExternalServiceException("CatVTON",
+                        "CatVTON submit response did not contain an event_id.");
+                }
+
+                // 503 / 502 → Space is starting up. Wait and retry.
+                var statusCode = (int)response.StatusCode;
+                if (statusCode is 503 or 502 or 429)
+                {
+                    var body  = await response.Content.ReadAsStringAsync(ct);
+                    var delay = attempt < delaysMs.Length ? delaysMs[attempt] : 30000;
+
                     _logger.LogWarning(
-                        "CatVTON poll returned {StatusCode}. Body: {Body}. Retrying...",
-                        (int)response.StatusCode, errorBody);
-                    await Task.Delay(_settings.PollIntervalMs, ct);
+                        "[CatVTON] Space returned {Status} (attempt {Attempt}/{Max}). " +
+                        "Waiting {Delay}ms for cold start. Body: {Body}",
+                        statusCode, attempt + 1, maxRetries, delay, body);
+
+                    await Task.Delay(delay, ct);
                     continue;
                 }
 
-                // Read the SSE stream line by line
-                using var stream = await response.Content.ReadAsStreamAsync(ct);
-                using var reader = new StreamReader(stream);
-
-                string? currentEvent = null;
-                while (!reader.EndOfStream)
-                {
-                    var line = await reader.ReadLineAsync(ct);
-                    if (line == null) break;
-
-                    _logger.LogDebug("CatVTON SSE line: {Line}", line);
-
-                    if (line.StartsWith("event: "))
-                    {
-                        currentEvent = line.Substring("event: ".Length).Trim();
-                    }
-                    else if (line.StartsWith("data: "))
-                    {
-                        var data = line.Substring("data: ".Length).Trim();
-
-                        if (currentEvent == "error")
-                        {
-                            _logger.LogError("CatVTON job failed. Error data: {Data}", data);
-                            throw new ExternalServiceException("CatVTON",
-                                $"CatVTON processing failed: {data}");
-                        }
-
-                        if (currentEvent == "complete")
-                        {
-                            return ParseResultImageUrl(data);
-                        }
-                    }
-                }
-
-                // If we finished reading the stream without a "complete" event,
-                // it might be a heartbeat or the space is still processing.
-                _logger.LogDebug("CatVTON SSE stream ended without completion. Retrying...");
-                await Task.Delay(_settings.PollIntervalMs, ct);
+                // Other error (4xx etc.) → don't retry
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogError("[CatVTON] Submit failed {Status}: {Body}", statusCode, errorBody);
+                throw new ExternalServiceException("CatVTON",
+                    $"CatVTON submit returned HTTP {statusCode}: {errorBody}");
             }
             catch (HttpRequestException ex)
             {
+                var delay = attempt < delaysMs.Length ? delaysMs[attempt] : 30000;
                 _logger.LogWarning(ex,
-                    "CatVTON poll network error. Retrying in {Interval}ms.",
-                    _settings.PollIntervalMs);
-                await Task.Delay(_settings.PollIntervalMs, ct);
+                    "[CatVTON] Network error on submit (attempt {Attempt}/{Max}). Retrying in {Delay}ms.",
+                    attempt + 1, maxRetries, delay);
+
+                if (attempt == maxRetries - 1)
+                    throw new ExternalServiceException("CatVTON",
+                        $"Could not reach CatVTON HF Space after {maxRetries} attempts: {ex.Message}", ex);
+
+                await Task.Delay(delay, ct);
             }
         }
 
         throw new ExternalServiceException("CatVTON",
-            $"CatVTON job timed out after {_settings.TimeoutSeconds}s waiting for results.");
-    }
-
-    /// <summary>
-    /// Parses the SSE "complete" event data to extract the result image URL.
-    /// The data is a JSON array, e.g.: [{"url": "https://...", "path": "...", ...}]
-    /// </summary>
-    private string ParseResultImageUrl(string sseData)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(sseData);
-            var root = doc.RootElement;
-
-            // The response is an array of outputs. The first element is the result image.
-            JsonElement firstOutput;
-            if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0)
-            {
-                firstOutput = root[0];
-            }
-            else
-            {
-                throw new ExternalServiceException("CatVTON",
-                    $"CatVTON returned unexpected response format: {sseData}");
-            }
-
-            // The output can be a direct object with url/path, or nested in a data array
-            string? resultUrl = null;
-
-            if (firstOutput.ValueKind == JsonValueKind.Object)
-            {
-                // Try to get the URL directly
-                if (firstOutput.TryGetProperty("url", out var urlProp) &&
-                    urlProp.ValueKind == JsonValueKind.String)
-                {
-                    resultUrl = urlProp.GetString();
-                }
-
-                // If no url, try to construct from path
-                if (string.IsNullOrWhiteSpace(resultUrl) &&
-                    firstOutput.TryGetProperty("path", out var pathProp) &&
-                    pathProp.ValueKind == JsonValueKind.String)
-                {
-                    var path = pathProp.GetString();
-                    if (!string.IsNullOrWhiteSpace(path))
-                    {
-                        resultUrl = $"{_settings.SpaceUrl.TrimEnd('/')}/gradio_api/file={path}";
-                    }
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(resultUrl))
-            {
-                _logger.LogError("CatVTON result has no usable URL. Raw data: {Data}", sseData);
-                throw new ExternalServiceException("CatVTON",
-                    "CatVTON processed the request but returned no result image URL.");
-            }
-
-            return resultUrl;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to parse CatVTON SSE result data: {Data}", sseData);
-            throw new ExternalServiceException("CatVTON",
-                $"Failed to parse CatVTON response: {ex.Message}", ex);
-        }
+            $"CatVTON Space did not become available after {maxRetries} submit attempts.");
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
-    //  Step 3: Persist — Download from HF temp URL, upload to Cloudinary
+    //  Step 2: Read SSE result — ONE connection, held open until complete/error/timeout
+    //
+    //  KEY FIX: The previous version re-opened connections in a loop — wrong.
+    //  Gradio keeps the SSE connection alive and streams events until done.
+    //  We open ONE connection and read it line-by-line until we see "complete" or "error".
     // ══════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Downloads the result image from the temporary HF Spaces URL and uploads it
-    /// to Cloudinary via the existing <see cref="IFileStorageService"/> for a permanent URL.
-    /// HF Spaces temporary URLs expire after a few hours.
-    /// </summary>
-    private async Task<string> PersistResultImageAsync(
-        string tempUrl, Guid customerId, Guid productId, CancellationToken ct)
+    private async Task<string> ReadSseResultAsync(string eventId, CancellationToken ct)
     {
+        var baseUrl = _settings.SpaceUrl.TrimEnd('/');
+        var pollUrl = $"{baseUrl}{_settings.ApiEndpoint}/{eventId}";
+
+        // Use a dedicated CancellationTokenSource so we can enforce our own timeout
+        // independently from the caller's token.
+        using var timeoutCts  = new CancellationTokenSource(TimeSpan.FromSeconds(_settings.TimeoutSeconds));
+        using var linkedCts   = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        var linkedCt          = linkedCts.Token;
+
+        _logger.LogInformation("[CatVTON] Opening SSE stream. Url={Url}", pollUrl);
+
         try
         {
-            using var client = _httpClientFactory.CreateClient("catvton");
-            using var response = await client.GetAsync(tempUrl, ct);
+            using var client  = _httpClientFactory.CreateClient("catvton");
+            using var request = new HttpRequestMessage(HttpMethod.Get, pollUrl);
+            // Tell the server we accept text/event-stream
+            request.Headers.Accept.Clear();
+            request.Headers.Accept.ParseAdd("text/event-stream");
+
+            using var response = await client.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, linkedCt);
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogError(
-                    "Failed to download CatVTON result image. Status: {StatusCode}, URL: {Url}",
-                    (int)response.StatusCode, tempUrl);
+                var body = await response.Content.ReadAsStringAsync(linkedCt);
                 throw new ExternalServiceException("CatVTON",
-                    $"Failed to download result image from CatVTON (HTTP {(int)response.StatusCode}).");
+                    $"CatVTON SSE endpoint returned HTTP {(int)response.StatusCode}: {body}");
             }
 
-            // Read the image into a memory stream to avoid disposal issues
-            var imageBytes = await response.Content.ReadAsByteArrayAsync(ct);
-            using var memoryStream = new MemoryStream(imageBytes);
+            await using var stream = await response.Content.ReadAsStreamAsync(linkedCt);
+            using var reader       = new StreamReader(stream);
 
-            // Upload to Cloudinary via the existing file storage service.
-            // UploadAsync(stream, fileName, folder) — folder is the logical prefix.
-            var uniqueName = $"{Guid.NewGuid():N}.png";
-            var folder = $"tryon-2d/{customerId:N}/{productId:N}";
+            string? currentEvent = null;
 
-            var permanentUrl = await _fileStorageService.UploadAsync(
-                memoryStream, uniqueName, folder, ct);
+            while (!reader.EndOfStream)
+            {
+                linkedCt.ThrowIfCancellationRequested();
+
+                var line = await reader.ReadLineAsync(linkedCt);
+                if (line is null) continue;
+
+                _logger.LogDebug("[CatVTON] SSE: {Line}", line);
+
+                if (line.StartsWith("event:"))
+                {
+                    currentEvent = line["event:".Length..].Trim();
+                    continue;
+                }
+
+                if (!line.StartsWith("data:")) continue;
+
+                var data = line["data:".Length..].Trim();
+
+                switch (currentEvent)
+                {
+                    case "error":
+                        _logger.LogError("[CatVTON] Job error event. Data={Data}", data);
+                        throw new ExternalServiceException("CatVTON",
+                            $"CatVTON processing failed: {data}");
+
+                    case "complete":
+                        _logger.LogInformation("[CatVTON] Received 'complete' event.");
+                        return ParseResultImageUrl(data);
+
+                    case "heartbeat":
+                        _logger.LogDebug("[CatVTON] Heartbeat received.");
+                        break;
+
+                    default:
+                        // process_starts, process_generating, log, etc. — just log and continue
+                        _logger.LogDebug("[CatVTON] Event={Event} Data={Data}", currentEvent, data);
+                        break;
+                }
+            }
+
+            throw new ExternalServiceException("CatVTON",
+                "CatVTON SSE stream ended without a 'complete' event.");
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            throw new ExternalServiceException("CatVTON",
+                $"CatVTON job timed out after {_settings.TimeoutSeconds}s.");
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    //  Parse SSE "complete" data → extract result image URL
+    // ══════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Parses the SSE complete event data.
+    /// Gradio returns an array of outputs: [FileData, ...]
+    /// FileData shape: { "path": "...", "url": "https://...", ... }
+    /// </summary>
+    private string ParseResultImageUrl(string sseData)
+    {
+        _logger.LogDebug("[CatVTON] Parsing complete data: {Data}", sseData);
+
+        try
+        {
+            using var doc  = JsonDocument.Parse(sseData);
+            var       root = doc.RootElement;
+
+            // The output is an array; the first element is the result image FileData.
+            if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0)
+                throw new ExternalServiceException("CatVTON",
+                    $"Unexpected CatVTON response format (not an array): {sseData}");
+
+            var firstOutput = root[0];
+
+            // Try url field first (absolute URL)
+            if (firstOutput.TryGetProperty("url", out var urlProp) &&
+                urlProp.ValueKind == JsonValueKind.String)
+            {
+                var url = urlProp.GetString();
+                if (!string.IsNullOrWhiteSpace(url))
+                {
+                    _logger.LogInformation("[CatVTON] Result URL (from url field): {Url}", url);
+                    return url;
+                }
+            }
+
+            // Fall back to path field → construct file URL
+            if (firstOutput.TryGetProperty("path", out var pathProp) &&
+                pathProp.ValueKind == JsonValueKind.String)
+            {
+                var path = pathProp.GetString();
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    var fileUrl = $"{_settings.SpaceUrl.TrimEnd('/')}/gradio_api/file={path}";
+                    _logger.LogInformation("[CatVTON] Result URL (from path field): {Url}", fileUrl);
+                    return fileUrl;
+                }
+            }
+
+            _logger.LogError("[CatVTON] No URL in complete data: {Data}", sseData);
+            throw new ExternalServiceException("CatVTON",
+                "CatVTON returned a result but no usable image URL was found.");
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "[CatVTON] JSON parse error. RawData={Data}", sseData);
+            throw new ExternalServiceException("CatVTON",
+                $"Failed to parse CatVTON response JSON: {ex.Message}", ex);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    //  Step 3: Persist — download temp HF image → upload to Cloudinary
+    // ══════════════════════════════════════════════════════════════════════════════════
+
+    private async Task<string> PersistResultImageAsync(
+        string tempUrl, Guid customerId, Guid productId, CancellationToken ct)
+    {
+        _logger.LogInformation("[CatVTON] Downloading result image from {Url}", tempUrl);
+
+        try
+        {
+            using var client   = _httpClientFactory.CreateClient("catvton");
+            var imageBytes     = await client.GetByteArrayAsync(tempUrl, ct);
+            using var stream   = new MemoryStream(imageBytes);
+
+            var fileName = $"{Guid.NewGuid():N}.jpg";
+            var folder   = $"tryon-2d/{customerId:N}/{productId:N}";
+
+            var permanentUrl = await _fileStorageService.UploadAsync(stream, fileName, folder, ct);
 
             if (string.IsNullOrWhiteSpace(permanentUrl))
-            {
                 throw new ExternalServiceException("CatVTON",
-                    "Failed to upload CatVTON result to permanent storage.");
-            }
+                    "Cloudinary returned an empty URL after upload.");
 
             _logger.LogInformation(
-                "CatVTON result persisted to Cloudinary. TempUrl: {TempUrl}, PermanentUrl: {PermanentUrl}",
-                tempUrl, permanentUrl);
+                "[CatVTON] Persisted to Cloudinary. PermanentUrl={Url}", permanentUrl);
 
             return permanentUrl;
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "Network error downloading CatVTON result from {Url}", tempUrl);
+            _logger.LogError(ex, "[CatVTON] Failed to download result from {Url}", tempUrl);
             throw new ExternalServiceException("CatVTON",
                 $"Could not download CatVTON result image: {ex.Message}", ex);
         }
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
-    //  Preflight — Image URL Validation
+    //  Preflight — image URL validation
     // ══════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Issues a HEAD request to verify the image URL is publicly accessible.
-    /// </summary>
     private async Task ValidateImageUrlAsync(string imageUrl, string label, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(imageUrl))
-            throw new BusinessRuleException("TryOn2DEmptyUrl",
-                $"The {label} image URL is empty.");
-
         if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
             throw new BusinessRuleException("TryOn2DInvalidUrl",
                 $"The {label} image URL is not a valid absolute URL: {imageUrl}");
 
         try
         {
-            using var client = _httpClientFactory.CreateClient("catvton");
+            using var client      = _httpClientFactory.CreateClient("catvton");
             using var headRequest = new HttpRequestMessage(HttpMethod.Head, imageUrl);
-            using var response = await client.SendAsync(
+            using var response    = await client.SendAsync(
                 headRequest, HttpCompletionOption.ResponseHeadersRead, ct);
 
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
-                    "Preflight check failed for {Label} image ({StatusCode}): {Url}",
+                    "[CatVTON] Preflight failed for {Label} ({Status}): {Url}",
                     label, (int)response.StatusCode, imageUrl);
 
                 throw new ExternalServiceException("CatVTON",
@@ -441,11 +443,28 @@ public sealed class CatVtonVirtualTryOn2DService : IVirtualTryOn2DService
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex,
-                "Preflight network error for {Label} image: {Url}", label, imageUrl);
-
+            _logger.LogWarning(ex, "[CatVTON] Preflight network error for {Label}: {Url}", label, imageUrl);
             throw new ExternalServiceException("CatVTON",
-                $"The {label} image URL could not be reached: {imageUrl}. {ex.Message}");
+                $"The {label} image URL could not be reached: {ex.Message}");
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    //  Helpers
+    // ══════════════════════════════════════════════════════════════════════════════════
+
+    private static string ExtractFileName(string url, string fallback)
+    {
+        try
+        {
+            var uri      = new Uri(url);
+            var segments = uri.Segments;
+            var last     = segments.LastOrDefault()?.TrimEnd('/');
+            return string.IsNullOrWhiteSpace(last) ? fallback : last;
+        }
+        catch
+        {
+            return fallback;
         }
     }
 
@@ -453,17 +472,12 @@ public sealed class CatVtonVirtualTryOn2DService : IVirtualTryOn2DService
     //  Gradio API DTOs
     // ══════════════════════════════════════════════════════════════════════════════════
 
-    /// <summary>Top-level Gradio submit request: { "data": [...] }</summary>
     private sealed class GradioSubmitPayload
     {
         [JsonPropertyName("data")]
         public object[] Data { get; set; } = Array.Empty<object>();
     }
 
-    /// <summary>
-    /// Gradio ImageEditor input format (used for person_image).
-    /// The ImageEditor component expects: { background: FileData, layers: [], composite: null }
-    /// </summary>
     private sealed class GradioImageEditorInput
     {
         [JsonPropertyName("background")]
@@ -473,13 +487,10 @@ public sealed class CatVtonVirtualTryOn2DService : IVirtualTryOn2DService
         public object[] Layers { get; set; } = Array.Empty<object>();
 
         [JsonPropertyName("composite")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public object? Composite { get; set; }
     }
 
-    /// <summary>
-    /// Gradio FileData format. For input, either path or url must be provided.
-    /// We always use url since we have publicly-accessible Cloudinary URLs.
-    /// </summary>
     private sealed class GradioFileData
     {
         [JsonPropertyName("url")]
@@ -488,17 +499,13 @@ public sealed class CatVtonVirtualTryOn2DService : IVirtualTryOn2DService
         [JsonPropertyName("orig_name")]
         public string? OrigName { get; set; }
 
-        [JsonPropertyName("path")]
-        public string? Path { get; set; }
-
         [JsonPropertyName("meta")]
-        public GradioMeta Meta { get; set; } = new() { Type = "gradio.FileData" };
+        public GradioMeta Meta { get; set; } = new();
 
         [JsonPropertyName("is_stream")]
         public bool IsStream { get; set; } = false;
     }
 
-    /// <summary>Gradio meta tag required for FileData objects.</summary>
     private sealed class GradioMeta
     {
         [JsonPropertyName("_type")]
