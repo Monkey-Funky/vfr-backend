@@ -431,7 +431,7 @@ catch (Exception ex)
         Require("JwtSettings:StepTokenSecret", "JwtSettings__StepTokenSecret");
         Require("Cloudinary:ApiKey", "Cloudinary__ApiKey");
         Require("Cloudinary:ApiSecret", "Cloudinary__ApiSecret");
-        Require("Stripe:SecretKey", "Stripe__SecretKey");
+        Require("StripeSettings:SecretKey", "StripeSettings__SecretKey");
         Require("Email:Password", "Email__Password");
 
         if (missing.Count > 0)
