@@ -566,6 +566,111 @@ namespace Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Domain.Entities.Customer.AiGenerationCache", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("customer_id");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("request_hash");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("type");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ModelId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("model_id");
+
+                    b.Property<string>("PipelineVersion")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("pipeline_version");
+
+                    b.Property<string>("InputJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("input_json");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("text")
+                        .HasColumnName("result_json");
+
+                    b.Property<string>("ResultImageUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("result_image_url");
+
+                    b.Property<string>("ResultModelUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("result_model_url");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("error_code");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text")
+                        .HasColumnName("error_message");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTime?>("FailedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("failed_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_ai_generation_cache");
+
+                    b.HasIndex("RequestHash")
+                        .IsUnique()
+                        .HasDatabaseName("uq_ai_generation_cache_request_hash");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("idx_ai_generation_cache_status");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("idx_ai_generation_cache_created_at");
+
+                    b.HasIndex("CustomerId", "Type", "CreatedAt")
+                        .HasDatabaseName("idx_ai_generation_cache_customer_type_created");
+
+                    b.ToTable("ai_generation_cache", (string)null);
+                });
+
             modelBuilder.Entity("Domain.Entities.Customer.Cart", b =>
                 {
                     b.Property<Guid>("Id")
