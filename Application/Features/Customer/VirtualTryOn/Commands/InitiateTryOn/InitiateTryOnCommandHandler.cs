@@ -221,7 +221,21 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
             throw;
         }
 
+        // 8b. Normalise 3D result: older service implementations put the model URL in
+        //     ResultImageUrl because the field did not exist yet. Move it to ResultModelUrl.
+        if (request.SessionType != TryOnSessionType.Overlay2D
+            && result.ResultImageUrl is not null
+            && result.ResultModelUrl is null)
+        {
+            result = result with { ResultModelUrl = result.ResultImageUrl, ResultImageUrl = null };
+        }
+
+        // 8c. Stamp the persisted session ID so the frontend can reference it directly.
+        result = result with { IsCached = false, SessionId = session.Id };
+
         // 9. Update session status.
+        var completedUrl = result.ResultImageUrl ?? result.ResultModelUrl;
+
         if (result.Status == SessionStatus.Failed)
         {
             session.MarkAsFailed();
@@ -231,20 +245,20 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
                 catch { /* non-fatal */ }
             }
         }
-        else if (result.Status == SessionStatus.Completed && result.ResultImageUrl is not null)
+        else if (result.Status == SessionStatus.Completed && completedUrl is not null)
         {
             session.MarkAsCompleted(
-                result.ResultImageUrl,
+                completedUrl,
                 result.RecommendedSize,
                 result.ConfidenceScore,
                 result.DurationSeconds ?? 0);
 
-            // Update cache to Completed.
+            // Update cache to Completed with the correct URL column per session type.
             if (cacheEntry is not null)
             {
                 var (cacheType, _) = ComputeTryOnHash(request.SessionType, activeAvatar!, request.ProductId, productImageUrl ?? "", productImageUpdatedAt);
                 var resultImageUrl = cacheType == AiGenerationType.TryOn2D ? result.ResultImageUrl : null;
-                var resultModelUrl = cacheType == AiGenerationType.TryOn3D ? result.ResultImageUrl : null;
+                var resultModelUrl = cacheType == AiGenerationType.TryOn3D ? result.ResultModelUrl : null;
                 try { await _aiCache.MarkCompletedAsync(cacheEntry.Id, resultImageUrl, resultModelUrl, null, cancellationToken); }
                 catch { /* non-fatal */ }
             }
@@ -311,7 +325,12 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
         CancellationToken ct)
     {
         // Still create a VirtualTryOnSession record so the user's history is complete.
-        var cachedResultUrl = cached.ResultImageUrl ?? cached.ResultModelUrl!;
+        var is3D = request.SessionType != TryOnSessionType.Overlay2D;
+
+        // The cache stores 2D results in ResultImageUrl and 3D results in ResultModelUrl.
+        var cachedImageUrl  = is3D ? null : cached.ResultImageUrl;
+        var cachedModelUrl  = is3D ? (cached.ResultModelUrl ?? cached.ResultImageUrl) : null;
+        var sessionStoreUrl = cachedImageUrl ?? cachedModelUrl!;
 
         var session = VirtualTryOnSession.Create(
             customerId: customerId,
@@ -321,21 +340,20 @@ public sealed class InitiateTryOnCommandHandler : IRequestHandler<InitiateTryOnC
             avatarId: request.AvatarId);
 
         _context.VirtualTryOnSessions.Add(session);
-        session.MarkAsCompleted(cachedResultUrl, recommendedSize: null, confidenceScore: 0.98m, durationSeconds: 0);
+        session.MarkAsCompleted(sessionStoreUrl, recommendedSize: null, confidenceScore: 0.98m, durationSeconds: 0);
         await _context.SaveChangesAsync(ct);
         await _cacheService.RemoveByPrefixAsync($"tryon:{customerId:N}:", ct);
 
-        var resultType = request.SessionType == TryOnSessionType.Overlay2D
-            ? TryOnResultType.Image2D
-            : TryOnResultType.Model3D;
-
         return new TryOnResultDto(
             Status: SessionStatus.Completed,
-            ResultImageUrl: cachedResultUrl,
+            ResultImageUrl: cachedImageUrl,
             RecommendedSize: null,
             ConfidenceScore: 0.98m,
             DurationSeconds: 0,
-            ResultType: resultType);
+            ResultType: is3D ? TryOnResultType.Model3D : TryOnResultType.Image2D,
+            ResultModelUrl: cachedModelUrl,
+            IsCached: true,
+            SessionId: session.Id);
     }
 
     // ── 2D try-on pipeline ────────────────────────────────────────────────────
