@@ -9,7 +9,7 @@ namespace Infrastructure.Services.Customer;
 
 /// <summary>
 /// fal.ai-backed implementation of <see cref="IVirtualTryOn2DService"/>.
-/// Runs a single-shot 2D image try-on (model: fal-ai/fashn/tryon) over the
+/// Runs a single-shot 2D image try-on (model: fal-ai/leffa/virtual-tryon) over the
 /// shared fal.ai queue: a person image + a garment image in, a composited 2D image out.
 /// Completely independent of the 3D SAM pipeline.
 ///
@@ -58,35 +58,38 @@ public sealed class FalAiVirtualTryOn2DService : IVirtualTryOn2DService
 
         var startTime = DateTime.UtcNow;
 
-        // FASHN accepts "auto" to detect the garment placement when no category is given.
-        var category = string.IsNullOrWhiteSpace(request.Category) ? "auto" : request.Category!;
+        // Leffa uses garment_type instead of category.
+        // Map "auto" (FASHN default) to "upper_body" as a sensible Leffa default.
+        var garmentType = string.IsNullOrWhiteSpace(request.Category) || request.Category == "auto"
+            ? "upper_body"
+            : request.Category!;
 
         _logger.LogInformation(
             "Starting 2D try-on. Provider: {Provider}, Model: {ModelId}, " +
             "CustomerId: {CustomerId}, ProductId: {ProductId}, " +
-            "Person: {Person}, Garment: {Garment}, Category: {Category}",
+            "Person: {Person}, Garment: {Garment}, GarmentType: {GarmentType}",
             _settings.Provider, _settings.ModelId,
             request.CustomerId, request.ProductId,
-            request.PersonImageUrl, request.GarmentImageUrl, category);
+            request.PersonImageUrl, request.GarmentImageUrl, garmentType);
 
-        var requestBody = new FashnTryOnRequest(
-            ModelImage: request.PersonImageUrl,
-            GarmentImage: request.GarmentImageUrl,
-            Category: category);
+        var requestBody = new LeffaTryOnRequest(
+            HumanImageUrl: request.PersonImageUrl,
+            GarmentImageUrl: request.GarmentImageUrl,
+            GarmentType: garmentType);
 
         // ── Execute via the "tryon-2d" Polly pipeline (timeout + circuit-breaker) ────
         var pipeline = _pipelineProvider.GetPipeline("tryon-2d");
 
         var result = await pipeline.ExecuteAsync(async ct =>
-            await _queueClient.SubmitAndPollAsync<FashnTryOnRequest, FashnTryOnResponse>(
+            await _queueClient.SubmitAndPollAsync<LeffaTryOnRequest, LeffaTryOnResponse>(
                 _settings.ModelId, requestBody, ct, _settings.TimeoutSeconds),
             cancellationToken);
 
-        var resultImageUrl = result.Images?.FirstOrDefault()?.Url;
+        var resultImageUrl = result.Image?.Url;
         if (string.IsNullOrWhiteSpace(resultImageUrl))
         {
             _logger.LogError(
-                "fal.ai FASHN returned no result image for CustomerId {CustomerId}, ProductId {ProductId}.",
+                "fal.ai Leffa returned no result image for CustomerId {CustomerId}, ProductId {ProductId}.",
                 request.CustomerId, request.ProductId);
             throw new ExternalServiceException("VirtualTryOn2D",
                 "The 2D try-on provider processed the request but did not return a result image.");
@@ -150,18 +153,18 @@ public sealed class FalAiVirtualTryOn2DService : IVirtualTryOn2DService
         }
     }
 
-    // ── fal.ai FASHN try-on contract ─────────────────────────────────────────────────
-    // Input:  { model_image, garment_image, category }
-    // Output: { images: [ { url, ... } ] }
+    // ── fal.ai Leffa virtual try-on contract ─────────────────────────────────────────
+    // Input:  { human_image_url, garment_image_url, garment_type }
+    // Output: { image: { url, height, width, content_type } }
 
-    private sealed record FashnTryOnRequest(
-        [property: JsonPropertyName("model_image")] string ModelImage,
-        [property: JsonPropertyName("garment_image")] string GarmentImage,
-        [property: JsonPropertyName("category")] string Category);
+    private sealed record LeffaTryOnRequest(
+        [property: JsonPropertyName("human_image_url")] string HumanImageUrl,
+        [property: JsonPropertyName("garment_image_url")] string GarmentImageUrl,
+        [property: JsonPropertyName("garment_type")] string GarmentType);
 
-    private sealed record FashnTryOnResponse(
-        [property: JsonPropertyName("images")] List<FalImage>? Images);
+    private sealed record LeffaTryOnResponse(
+        [property: JsonPropertyName("image")] LeffaImage? Image);
 
-    private sealed record FalImage(
+    private sealed record LeffaImage(
         [property: JsonPropertyName("url")] string? Url);
 }
