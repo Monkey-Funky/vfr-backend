@@ -313,6 +313,16 @@ builder.Services.AddSwaggerGen(c =>
         BearerFormat = "JWT"
     });
 
+    // Admin-key scheme — used only by /api/admin/* endpoints (AdminKeyAuthFilter).
+    // Enter the value of AdminKey from Render environment variables.
+    c.AddSecurityDefinition("AdminKey", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Description = "Admin key for internal endpoints. Enter the value of the AdminKey environment variable.",
+        Name = "X-Admin-Key",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey
+    });
+
     c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
     {
         {
