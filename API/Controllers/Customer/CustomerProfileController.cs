@@ -76,12 +76,15 @@ public sealed class CustomerProfileController : CustomerBaseApiController
     [HttpPost("delete-account")]
     [SwaggerOperation(
         "Delete Account",
-        "Marks the customer account for deletion and revokes all sessions.")]
+        "Verifies the customer's password then marks the account for deletion and revokes all sessions.")]
     [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> DeleteAccount(CancellationToken cancellationToken)
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> DeleteAccount(
+        [FromBody] DeleteCustomerAccountCommand command,
+        CancellationToken cancellationToken)
     {
-        var result = await Sender.Send(new DeleteCustomerAccountCommand(), cancellationToken);
+        var result = await Sender.Send(command, cancellationToken);
         return OkResponse(result);
     }
 }
