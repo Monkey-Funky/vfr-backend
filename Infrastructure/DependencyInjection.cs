@@ -40,15 +40,6 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         // ── 1. EF Core + PostgreSQL ───────────────────────────────────────────
-        //
-        // UseSnakeCaseNamingConvention() is chained here on DbContextOptionsBuilder.
-        // This is the ONLY correct location — it must NOT be called on ModelBuilder
-        // inside OnModelCreating (that causes a compile error).
-        // Requires NuGet: EFCore.NamingConventions
-        // Use pooled DbContext factory for significantly improved throughput.
-        // AddDbContextPool reuses DbContext instances across requests instead of
-        // allocating/disposing on every request — reduces GC pressure and
-        // connection establishment overhead by 3-5× under concurrent load.
         services.AddDbContextPool<ApplicationDbContext>(options =>
             options
                 .UseNpgsql(
@@ -59,7 +50,7 @@ public static class DependencyInjection
                             maxRetryCount: 5,
                             maxRetryDelay: TimeSpan.FromSeconds(30),
                             errorCodesToAdd: null))
-                .UseSnakeCaseNamingConvention());   // ← correct: on DbContextOptionsBuilder
+                .UseSnakeCaseNamingConvention());
 
         services.AddScoped<IApplicationDbContext>(sp =>
             sp.GetRequiredService<ApplicationDbContext>());
@@ -71,11 +62,9 @@ public static class DependencyInjection
         services.Configure<EmailSettings>(options =>
             configuration.GetSection("Email").Bind(options));
 
-        // S3Settings — لسه محتاجينه علشان IS3StorageService (reports)
         services.Configure<S3Settings>(options =>
             configuration.GetSection("S3").Bind(options));
 
-        // Cloudinary Settings — الجديد للصور
         services.Configure<CloudinarySettings>(options =>
             configuration.GetSection("Cloudinary").Bind(options));
 
@@ -122,37 +111,35 @@ public static class DependencyInjection
             });
         });
 
+        // 3D try-on pipeline (sam-3/3d-objects → sam-3/3d-align).
+        // sam-3/3d-objects can take up to ~600s for complex garments;
+        // sam-3/3d-align is typically 10-20s.
+        // Polly timeout = 950s covers 700s objects + 120s align + 130s buffer.
+        // No retry: fal.ai calls are non-idempotent ($0.02 each).
         services.AddResiliencePipeline("tryon", builder =>
         {
-            // NOTE: No Retry here — fal.ai calls are expensive ($0.02 each) and
-            // non-idempotent. Retrying the full pipeline (objects + align) on failure
-            // doubles costs and hits the timeout. Errors surface as 503 to the caller.
             builder
-                .AddTimeout(TimeSpan.FromSeconds(300))  // FIX (Issue 5): worst case = 2x MaxPollSeconds(120s)=240s; 300s gives 60s headroom
+                .AddTimeout(TimeSpan.FromSeconds(950))
                 .AddCircuitBreaker(new CircuitBreakerStrategyOptions
                 {
                     FailureRatio = 1.0,
-                    MinimumThroughput = 3,               // open only after 3 consecutive failures
+                    MinimumThroughput = 3,
                     SamplingDuration = TimeSpan.FromSeconds(60),
                     BreakDuration = TimeSpan.FromSeconds(30)
                 });
         });
 
-        // ── 3a. 2D try-on resilience pipeline (FASHN model) ───────────────────
-        //
-        // Separate from "tryon" (3D) so that a spike of 3D failures does not
-        // trip the 2D circuit breaker and vice-versa. Same non-retry rationale:
-        // FASHN calls are non-idempotent ($0.02 each) — a single authoritative
-        // attempt is correct. Timeout is shorter than 3D because FASHN is one
-        // fal.ai call vs the 3D pipeline's two sequential calls.
+        // 2D try-on pipeline (FASHN single call).
+        // VirtualTryOn2DSettings.TimeoutSeconds = 180s (poll budget);
+        // Polly timeout = 250s gives 70s headroom above the poll budget.
         services.AddResiliencePipeline("tryon-2d", builder =>
         {
             builder
-                .AddTimeout(TimeSpan.FromSeconds(120))  // single fal.ai call; 120s is generous
+                .AddTimeout(TimeSpan.FromSeconds(250))
                 .AddCircuitBreaker(new CircuitBreakerStrategyOptions
                 {
                     FailureRatio = 1.0,
-                    MinimumThroughput = 3,               // open only after 3 consecutive failures
+                    MinimumThroughput = 3,
                     SamplingDuration = TimeSpan.FromSeconds(60),
                     BreakDuration = TimeSpan.FromSeconds(30)
                 });
@@ -200,12 +187,11 @@ public static class DependencyInjection
                 });
             });
 
-        // Register the AI Extraction service with a longer timeout (AI processing can take 10-30s)
         services.AddHttpClient<IBodyMeasurementExtractionService, BodyMeasurementExtractionService>()
             .AddResilienceHandler("ai-extraction-api", builder =>
             {
                 builder
-                    .AddTimeout(TimeSpan.FromSeconds(60)) // Longer timeout for image processing
+                    .AddTimeout(TimeSpan.FromSeconds(60))
                     .AddRetry(new Microsoft.Extensions.Http.Resilience.HttpRetryStrategyOptions
                     {
                         MaxRetryAttempts = 2,
@@ -214,24 +200,19 @@ public static class DependencyInjection
                     });
             });
 
-        // ── 3d. Named HttpClient for fal.ai SAM 3D API ──────────────────────────
-        //
-        // Shared by FalAiQueueClient (3D SAM pipeline) and FalAiVirtualTryOn2DService
-        // (2D FASHN pipeline). Timeout is set to 180s to accommodate the longest
-        // possible fal.ai polling cycle (two sequential SAM 3D calls). Both pipelines
-        // rely on Polly ("tryon" / "tryon-2d") for their own timeout enforcement;
-        // the HttpClient timeout is a safety net for network-level hangs.
+        // Named HttpClient shared by FalAiQueueClient (3D SAM) and
+        // FalAiVirtualTryOn2DService (2D FASHN).
+        // Timeout = 1000s: must exceed the longest possible polling session
+        // (sam-3/3d-objects ObjectsApiPollSeconds = 700s) with generous headroom.
+        // Polly pipelines enforce the real timeout; this is a connection-level safety net.
         services.AddHttpClient("fal-ai", (sp, client) =>
         {
-            client.Timeout = TimeSpan.FromSeconds(180);
+            client.Timeout = TimeSpan.FromSeconds(1000);
             client.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
         });
 
         // ── 4. S3-Compatible Client (AWS S3 / Cloudflare R2) ─────────────────
-        //
-        // لسه محتاجين S3 client علشان IS3StorageService (reports).
-        // الـ client ده بيستخدمه S3StorageService بس — مش الصور.
         services.AddSingleton<IAmazonS3>(sp =>
         {
             var s3Config = configuration.GetSection("S3");
@@ -259,8 +240,6 @@ public static class DependencyInjection
         });
 
         // ── 4b. Cloudinary Client ────────────────────────────────────────────
-        //
-        // ده الـ client الجديد للصور (brand logos, products, categories, etc.)
         services.AddSingleton<Cloudinary>(sp =>
         {
             var cloudinaryConfig = configuration.GetSection("Cloudinary");
@@ -276,7 +255,6 @@ public static class DependencyInjection
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IEmailService, EmailService>();
 
-        // ✅ Cloudinary
         services.AddScoped<IFileStorageService, CloudinaryFileStorageService>();
 
         services.AddScoped<IGoogleAuthService, GoogleAuthService>();
@@ -309,10 +287,8 @@ public static class DependencyInjection
 
         services.AddSingleton<ICacheService, CacheService>();
 
-
         // ── 8. Utilities ──────────────────────────────────────────────────────
         services.AddSingleton<IDateTime, DateTimeService>();
-
 
         // ── Stripe Configuration ───────────────────────────────────────────────
         services.Configure<StripeSettings>(
@@ -322,10 +298,8 @@ public static class DependencyInjection
         services.AddScoped<IPaymentGatewayService, StripePaymentGatewayService>();
         services.AddSingleton<IEncryptionService, AesEncryptionService>();
 
-
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<ISubscriptionService, SubscriptionService>();
-
 
         services.AddScoped<IOutfitSuggestionService, MockOutfitSuggestionService>();
         services.AddHttpClient<IComplementaryStyleService, ComplementaryStyleService>();
@@ -341,11 +315,9 @@ public static class DependencyInjection
         services.AddSignalR();
         services.AddScoped<INotificationHub, NotificationHubService>();
 
-
-        // ── Analytics / Dashboard (P-041) ────────────────────────────────────────────
+        // ── Analytics / Dashboard ────────────────────────────────────────────────────
         services.AddScoped<IDashboardRepository, DashboardRepository>();
 
-        // IS3StorageService — لسه شغال للـ reports (مش الصور)
         services.AddScoped<IS3StorageService, S3StorageService>();
 
         services.AddSingleton<IReportQueue, ReportQueue>();
@@ -357,7 +329,6 @@ public static class DependencyInjection
 
         services.AddScoped<IPlanLimitService, PlanLimitService>();
 
-        // Payment for Customer
         services.AddScoped<IStripeService, StripeService>();
 
         return services;

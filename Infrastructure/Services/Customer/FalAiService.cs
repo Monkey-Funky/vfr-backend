@@ -11,8 +11,8 @@ namespace Infrastructure.Services.Customer;
 ///
 /// SAM 3D is purpose-built for human + object 3D reconstruction from single images.
 /// - Body: $0.02, 5-10s — accurate human body geometry with skeletal keypoints
-/// - Objects: $0.02, 5-10s — photorealistic object meshes via Gaussian splatting
-/// - Align: $0.02, 5-10s — perspective-correct scene composition
+/// - Objects: $0.02, 15-600s — photorealistic object meshes via Gaussian splatting
+/// - Align: $0.02, 5-20s — perspective-correct scene composition
 ///
 /// The async queue plumbing (Submit → Poll → Fetch) lives in <see cref="IFalAiQueueClient"/>.
 /// </summary>
@@ -48,9 +48,6 @@ public sealed class FalAiService : IFalAiService
     {
         _logger.LogInformation("Generating 3D body mesh via SAM 3D Body. Image: {ImageUrl}", imageUrl);
 
-        // SAM 3D Body produces a body mesh GLB with skeletal keypoints and camera metadata.
-        // Cost: $0.02 per call. The output is purpose-built for use with sam-3/3d-align.
-        // We disable MHR params (not needed for alignment) to get a leaner response.
         var requestBody = new Sam3dBodyRequest
         {
             ImageUrl = imageUrl,
@@ -62,14 +59,11 @@ public sealed class FalAiService : IFalAiService
         var result = await _queueClient.SubmitAndPollAsync<Sam3dBodyRequest, Sam3dBodyResponse>(
             _settings.BodyApiId, requestBody, ct);
 
-        // SAM 3D Body returns model_glb as either a File object or a direct URL string.
         var glbUrl = result.ModelGlb?.Url
             ?? result.ModelGlbUrl
             ?? throw new ExternalServiceException("FalAi", "SAM 3D Body did not return a model_glb URL.");
 
-        // Extract focal_length from metadata.people[0].focal_length.
-        // This is critical for accurate alignment in the 3d-align step.
-        double focalLength = 1000.0; // safe fallback
+        double focalLength = 1000.0;
         if (result.Metadata?.People is { Count: > 0 })
         {
             var personFocal = result.Metadata.People[0].FocalLength;
@@ -103,23 +97,21 @@ public sealed class FalAiService : IFalAiService
             "Generating 3D object via SAM 3D Objects. Image: {ImageUrl}, Prompt: {Prompt}",
             imageUrl, prompt);
 
-        // Verify the product image is publicly accessible before handing it to fal.ai.
-        // fal.ai will silently fail (FAILED status after 5-30s wait) if the URL is 404.
         await ValidateImageUrlAsync(imageUrl, "product", ct);
 
         var requestBody = new ObjectsRequest(imageUrl, prompt, 42);
+
+        // sam-3/3d-objects is the slowest step in the pipeline — complex garments
+        // (e.g. blazers) have been observed taking up to 537s on fal.ai.
+        // Use ObjectsApiPollSeconds (default 700s) instead of MaxPollSeconds (300s).
         var result = await _queueClient.SubmitAndPollAsync<ObjectsRequest, ObjectsResponse>(
-            _settings.ObjectsApiId, requestBody, ct);
+            _settings.ObjectsApiId, requestBody, ct, _settings.ObjectsApiPollSeconds);
 
-
-        // SAM 3D Objects response: model_glb can be a File object OR a direct URL string.
-        // Try ModelGlb (object) first, then ModelGlbUrl (string), then individual_glbs[0].
         string? glbUrl = result.ModelGlb?.Url ?? result.ModelGlbUrl;
 
         if (string.IsNullOrWhiteSpace(glbUrl) && result.IndividualGlbs is { Count: > 0 })
         {
             var firstEntry = result.IndividualGlbs[0];
-            // FIX (Issue 11): handle both plain-string URL and File-object shapes.
             if (firstEntry.ValueKind == JsonValueKind.String)
                 glbUrl = firstEntry.GetString();
             else if (firstEntry.ValueKind == JsonValueKind.Object
@@ -161,11 +153,6 @@ public sealed class FalAiService : IFalAiService
     //  Preflight — Image URL Validation
     // ══════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Verifies an image URL is publicly reachable before handing it to fal.ai.
-    /// fal.ai silently fails (FAILED status after a long wait) when it cannot fetch
-    /// the URL, so we surface a clear error up front instead of waiting it out.
-    /// </summary>
     private async Task ValidateImageUrlAsync(string imageUrl, string label, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(imageUrl))
@@ -203,19 +190,10 @@ public sealed class FalAiService : IFalAiService
         [JsonPropertyName("include_3d_keypoints")]
         public bool Include3dKeypoints { get; init; } = true;
 
-        /// <summary>
-        /// false = leaner metadata (skip MHR params we don't need for alignment).
-        /// </summary>
         [JsonPropertyName("include_mhr_params")]
         public bool IncludeMhrParams { get; init; } = false;
     }
 
-    /// <summary>
-    /// SAM 3D Body response. model_glb can be either:
-    /// - A File object with url/content_type/file_name/file_size properties
-    /// - A direct URL string
-    /// We handle both cases with ModelGlb (object) and ModelGlbUrl (string).
-    /// </summary>
     private sealed class Sam3dBodyResponse
     {
         [JsonPropertyName("model_glb")]
@@ -224,7 +202,6 @@ public sealed class FalAiService : IFalAiService
         [JsonPropertyName("metadata")]
         public Sam3dBodyMetadata? Metadata { get; init; }
 
-        /// <summary>Parsed File object if model_glb is an object.</summary>
         [JsonIgnore]
         public FileResponse? ModelGlb
         {
@@ -232,14 +209,11 @@ public sealed class FalAiService : IFalAiService
             {
                 if (ModelGlbRaw is not { } raw) return null;
                 if (raw.ValueKind == JsonValueKind.Object)
-                {
                     return JsonSerializer.Deserialize<FileResponse>(raw.GetRawText(), JsonOptions);
-                }
                 return null;
             }
         }
 
-        /// <summary>Direct URL string if model_glb is a string.</summary>
         [JsonIgnore]
         public string? ModelGlbUrl
         {
@@ -247,9 +221,7 @@ public sealed class FalAiService : IFalAiService
             {
                 if (ModelGlbRaw is not { } raw) return null;
                 if (raw.ValueKind == JsonValueKind.String)
-                {
                     return raw.GetString();
-                }
                 return null;
             }
         }
@@ -273,17 +245,12 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("prompt")] string Prompt,
         [property: JsonPropertyName("seed")] int Seed);
 
-    /// <summary>
-    /// SAM 3D Objects response. model_glb can be a File object OR a direct URL string.
-    /// individual_glbs entries can also be either format.
-    /// </summary>
     private sealed class ObjectsResponse
     {
         [JsonPropertyName("model_glb")]
         public JsonElement? ModelGlbRaw { get; init; }
 
         [JsonPropertyName("individual_glbs")]
-        // FIX (Issue 11): Use JsonElement to handle both object {"url":"..."} and plain string URL shapes.
         public List<JsonElement>? IndividualGlbs { get; init; }
 
         [JsonIgnore]
@@ -311,7 +278,6 @@ public sealed class FalAiService : IFalAiService
         }
     }
 
-
     // ══════════════════════════════════════════════════════════════════════
     //  DTOs — SAM 3D Align
     // ══════════════════════════════════════════════════════════════════════
@@ -322,9 +288,6 @@ public sealed class FalAiService : IFalAiService
         [property: JsonPropertyName("object_mesh_url")] string ObjectMeshUrl,
         [property: JsonPropertyName("focal_length")] double FocalLength);
 
-    /// <summary>
-    /// SAM 3D Align response. scene_glb can be a File object OR a direct URL string.
-    /// </summary>
     private sealed class AlignResponse
     {
         [JsonPropertyName("scene_glb")]
