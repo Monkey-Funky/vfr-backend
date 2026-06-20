@@ -38,10 +38,25 @@ public sealed class DeleteCustomerAccountCommandHandler
         if (customer is null || customer.IsDeleted)
             throw new NotFoundException(nameof(CustomerAccount), customerId);
 
-        // Idempotency: already marked for deletion — nothing to do.
+        // Verify the password before allowing deletion.
+        if (customer.PasswordHash is null)
+        {
+            throw new BusinessRuleException(
+                "NO_PASSWORD",
+                "Cannot delete an account that uses social login only. Please disconnect your social account from the provider instead.");
+        }
+
+        bool isPasswordValid = BCrypt.Net.BCrypt.Verify(command.Password, customer.PasswordHash);
+        if (!isPasswordValid)
+        {
+            throw new BusinessRuleException(
+                "INVALID_PASSWORD",
+                "The password provided is incorrect. Account deletion was not performed.");
+        }
+
+        // Idempotency: already marked for deletion â€” nothing to do.
         if (customer.Status == CustomerStatus.PendingDeletion)
         {
-            // Ensure the cache is also clear in case it was not invalidated earlier.
             await _cacheService.RemoveAsync($"cust_profile:{customerId:N}", cancellationToken);
             return Result<bool>.Success(true, "Your account is already marked for deletion.");
         }
@@ -53,9 +68,8 @@ public sealed class DeleteCustomerAccountCommandHandler
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Customer {CustomerId} requested account deletion. Status set to PendingDeletion.", customerId);
+            "Customer {CustomerId} confirmed account deletion with correct password.", customerId);
 
-        // Invalidate the cached profile so no stale data is served after deletion.
         await _cacheService.RemoveAsync($"cust_profile:{customerId:N}", cancellationToken);
 
         return Result<bool>.Success(
