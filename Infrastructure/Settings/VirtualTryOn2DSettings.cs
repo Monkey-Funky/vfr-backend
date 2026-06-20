@@ -14,8 +14,8 @@ public sealed class VirtualTryOn2DSettings
     /// <summary>Provider name, surfaced in <c>TryOn2DResult.Provider</c>. Currently only "FalAi".</summary>
     public string Provider { get; init; } = "FalAi";
 
-    /// <summary>fal.ai model/app id for the 2D try-on (FASHN). Defaults to fal-ai/fashn/tryon.</summary>
-    public string ModelId { get; init; } = "fal-ai/fashn/tryon";
+    /// <summary>fal.ai model/app id for the 2D try-on (FASHN). Defaults to fal-ai/fashn/tryon/v1.5.</summary>
+    public string ModelId { get; init; } = "fal-ai/fashn/tryon/v1.5";
 
     /// <summary>Max seconds to wait for the queued 2D job to complete before timing out.</summary>
     public int TimeoutSeconds { get; init; } = 180;
