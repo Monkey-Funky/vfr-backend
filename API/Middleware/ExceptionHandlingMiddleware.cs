@@ -4,13 +4,16 @@ public sealed class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
+    private readonly IWebHostEnvironment _environment;
 
     public ExceptionHandlingMiddleware(
         RequestDelegate next,
-        ILogger<ExceptionHandlingMiddleware> logger)
+        ILogger<ExceptionHandlingMiddleware> logger,
+        IWebHostEnvironment environment)
     {
         _next = next;
         _logger = logger;
+        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -43,10 +46,12 @@ public sealed class ExceptionHandlingMiddleware
             }));
     }
 
-    private static (int StatusCode, ApiErrorResponse Response) MapException(
+    private (int StatusCode, ApiErrorResponse Response) MapException(
         Exception exception,
         string traceId)
     {
+        var isProduction = _environment.IsProduction();
+
         return exception switch
         {
             ValidationException ex => (
@@ -86,11 +91,7 @@ public sealed class ExceptionHandlingMiddleware
                     TraceId = traceId
                 }),
 
-            // 401 � authentication failures (invalid credentials / expired or malformed tokens).
-            // AuthenticationException is the domain-layer equivalent of HTTP 401:
-            //   "I don't know who you are."
-            // It is intentionally separate from UnauthorizedException (403):
-            //   "I know who you are, but you can't do that."
+            // 401 — authentication failures (invalid credentials / expired or malformed tokens).
             AuthenticationException ex => (
                 (int)HttpStatusCode.Unauthorized,
                 new ApiErrorResponse
@@ -100,7 +101,7 @@ public sealed class ExceptionHandlingMiddleware
                     TraceId = traceId
                 }),
 
-            // 403 � IDOR / access-control violations on resources the caller may not access.
+            // 403 — IDOR / access-control violations.
             UnauthorizedException ex => (
                 (int)HttpStatusCode.Forbidden,
                 new ApiErrorResponse
@@ -110,12 +111,14 @@ public sealed class ExceptionHandlingMiddleware
                     TraceId = traceId
                 }),
 
+            // 502 — fal.ai or other external service errors.
+            // ex.Message already contains the HTTP status + response body from the service.
             ExternalServiceException ex => (
                 (int)HttpStatusCode.BadGateway,
                 new ApiErrorResponse
                 {
                     Code = "EXTERNAL_SERVICE_ERROR",
-                    Message = $"External service '{ex.ServiceName}' is unavailable. Please try again.",
+                    Message = ex.Message,
                     TraceId = traceId
                 }),
 
@@ -128,6 +131,7 @@ public sealed class ExceptionHandlingMiddleware
                     TraceId = traceId
                 }),
 
+            // Unique-constraint violation (e.g. duplicate email).
             Microsoft.EntityFrameworkCore.DbUpdateException dbEx
                 when dbEx.InnerException is Npgsql.PostgresException { SqlState: "23505" } => (
                 (int)HttpStatusCode.Conflict,
@@ -135,6 +139,31 @@ public sealed class ExceptionHandlingMiddleware
                 {
                     Code = "CONFLICT",
                     Message = "A resource with the same unique constraint already exists.",
+                    TraceId = traceId
+                }),
+
+            // Other DB errors — surface SqlState + detail outside production so the root cause
+            // is visible without having to pull server logs.
+            Microsoft.EntityFrameworkCore.DbUpdateException dbEx => (
+                (int)HttpStatusCode.InternalServerError,
+                new ApiErrorResponse
+                {
+                    Code = "DATABASE_ERROR",
+                    Message = isProduction
+                        ? "A database error occurred. Please try again."
+                        : $"[DbUpdateException] {dbEx.InnerException?.Message ?? dbEx.Message}",
+                    TraceId = traceId
+                }),
+
+            // Raw Postgres exception not wrapped in DbUpdateException.
+            Npgsql.PostgresException pgEx => (
+                (int)HttpStatusCode.InternalServerError,
+                new ApiErrorResponse
+                {
+                    Code = "DATABASE_ERROR",
+                    Message = isProduction
+                        ? "A database error occurred. Please try again."
+                        : $"[PostgreSQL {pgEx.SqlState}] {pgEx.MessageText}",
                     TraceId = traceId
                 }),
 
@@ -156,12 +185,21 @@ public sealed class ExceptionHandlingMiddleware
                     TraceId = traceId
                 }),
 
+            // Catch-all: in non-production expose the exception type and message so the
+            // root cause is visible without pulling server logs.
             _ => (
                 (int)HttpStatusCode.InternalServerError,
                 new ApiErrorResponse
                 {
                     Code = "INTERNAL_ERROR",
-                    Message = "An unexpected error occurred.",
+                    Message = isProduction
+                        ? "An unexpected error occurred."
+                        : $"[{exception.GetType().Name}] {exception.Message}",
+                    Details = isProduction
+                        ? []
+                        : [exception.InnerException is { } inner
+                            ? $"Inner: [{inner.GetType().Name}] {inner.Message}"
+                            : exception.StackTrace?.Split('\n').FirstOrDefault()?.Trim() ?? ""],
                     TraceId = traceId
                 })
         };
