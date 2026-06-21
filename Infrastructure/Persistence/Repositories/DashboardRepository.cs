@@ -49,15 +49,20 @@ public sealed class DashboardRepository : IDashboardRepository
         DateTime todayStart = DateTime.UtcNow.Date;
         DateTime todayEnd = todayStart.AddDays(1);
 
-        // ── Parallelise all 8 independent DB queries via Task.WhenAll ─────────
-        // Previously these ran sequentially — total latency was the SUM of all 8
-        // round-trips. Now it equals the MAX of any single round-trip (~4-8× faster).
-        //
-        // Each task uses a separate async pipeline; EF Core and Npgsql are both
-        // thread-safe for concurrent reads on separate DbCommand instances within
-        // a single DbContext (no concurrent tracked writes here — all AsNoTracking).
+        // ── Run all independent DB queries sequentially on the shared DbContext ──
+        // NOTE: These were previously fired concurrently via Task.WhenAll while all
+        // sharing the SAME _context (DbContext) instance. EF Core's DbContext is NOT
+        // thread-safe / does not support concurrent operations on a single instance —
+        // running multiple queries against it at once throws:
+        //   "InvalidOperationException: A second operation started on this context
+        //    before a previous operation completed."
+        // This was the root cause of the 500 INTERNAL_ERROR on GET .../dashboard/kpis.
+        // True parallelism would require a separate DbContext per query (e.g. via
+        // IDbContextFactory), which is a bigger change than this bug fix needs —
+        // these are cheap count/sum queries, so running them sequentially is fast
+        // and, most importantly, correct.
 
-        var snapshotTask = _context.DashboardSnapshots
+        var snapshotAgg = await _context.DashboardSnapshots
             .AsNoTracking()
             .Where(s =>
                 s.RetailerId == retailerId &&
@@ -74,16 +79,16 @@ public sealed class DashboardRepository : IDashboardRepository
             })
             .FirstOrDefaultAsync(cancellationToken);
 
-        var liveRevenueTask = _context.Orders
+        decimal liveRevenue = await _context.Orders
             .AsNoTracking()
             .Where(o =>
                 o.RetailerId == retailerId &&
                 o.Status == "Delivered" &&
                 o.CreatedAt >= todayStart &&
                 o.CreatedAt < todayEnd)
-            .SumAsync(o => (decimal?)o.TotalAmount, cancellationToken);
+            .SumAsync(o => (decimal?)o.TotalAmount, cancellationToken) ?? 0m;
 
-        var liveTryOnsTask = _context.TryOnSessions
+        int liveTryOns = await _context.TryOnSessions
             .AsNoTracking()
             .Where(s =>
                 s.RetailerId == retailerId &&
@@ -91,12 +96,12 @@ public sealed class DashboardRepository : IDashboardRepository
                 s.CreatedAt < todayEnd)
             .CountAsync(cancellationToken);
 
-        var activeProductsTask = _context.Products
+        int activeProducts = await _context.Products
             .AsNoTracking()
             .Where(p => p.RetailerId == retailerId && p.Status == "Active")
             .CountAsync(cancellationToken);
 
-        var totalReturnsTask = _context.ReturnReasons
+        int totalReturns = await _context.ReturnReasons
             .AsNoTracking()
             .Where(r =>
                 r.RetailerId == retailerId &&
@@ -104,7 +109,7 @@ public sealed class DashboardRepository : IDashboardRepository
                 r.ReturnedAt < toDt)
             .CountAsync(cancellationToken);
 
-        var newOrdersTask = _context.Orders
+        int newOrders = await _context.Orders
             .AsNoTracking()
             .Where(o =>
                 o.RetailerId == retailerId &&
@@ -113,32 +118,13 @@ public sealed class DashboardRepository : IDashboardRepository
                 o.CreatedAt < toDt)
             .CountAsync(cancellationToken);
 
-        var totalSessionsTask = _context.TryOnSessions
+        int totalSessions = await _context.TryOnSessions
             .AsNoTracking()
             .Where(s =>
                 s.RetailerId == retailerId &&
                 s.CreatedAt >= fromDt &&
                 s.CreatedAt < toDt)
             .CountAsync(cancellationToken);
-
-        // Await all 7 independent tasks simultaneously
-        await Task.WhenAll(
-            snapshotTask,
-            liveRevenueTask,
-            liveTryOnsTask,
-            activeProductsTask,
-            totalReturnsTask,
-            newOrdersTask,
-            totalSessionsTask
-        );
-
-        var snapshotAgg = await snapshotTask;
-        decimal liveRevenue = await liveRevenueTask ?? 0m;
-        int liveTryOns = await liveTryOnsTask;
-        int activeProducts = await activeProductsTask;
-        int totalReturns = await totalReturnsTask;
-        int newOrders = await newOrdersTask;
-        int totalSessions = await totalSessionsTask;
 
         // convertedSessions depends on totalSessions — only query if needed
         int convertedSessions = 0;
