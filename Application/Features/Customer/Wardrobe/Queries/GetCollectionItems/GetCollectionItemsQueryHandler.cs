@@ -49,15 +49,22 @@ internal sealed class GetCollectionItemsQueryHandler
         if (!collectionExists)
             throw new NotFoundException("WardrobeCollection", request.CollectionId);
 
-        // Paginate the product IDs via the join.
+        // Join WardrobeCollectionItems -> CustomerFavorites (IgnoreQueryFilters to include
+        // soft-deleted favorites) -> Products so that items remain visible even after the
+        // user removes a product from their favorites.
         var query = _context.WardrobeCollectionItems
             .AsNoTracking()
             .Where(i => i.CollectionId == request.CollectionId)
             .Join(
-                _context.CustomerFavorites.AsNoTracking(),
+                _context.CustomerFavorites.IgnoreQueryFilters().AsNoTracking(),
                 i => i.FavoriteId,
                 f => f.Id,
                 (i, f) => new { i.CreatedAt, f.ProductId })
+            .Join(
+                _context.Products.AsNoTracking(),
+                x => x.ProductId,
+                p => p.Id,
+                (x, p) => new { x.CreatedAt, x.ProductId })
             .OrderByDescending(x => x.CreatedAt);
 
         var totalCount = await query.CountAsync(cancellationToken);
