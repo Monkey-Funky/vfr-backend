@@ -1641,7 +1641,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       299.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/53_thwvst.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_53_thwvst.jpg",
 
             Stock:       60
 
@@ -1663,7 +1663,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       69.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/54_prnrjm.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_54_prnrjm.jpg",
 
             Stock:       45
 
@@ -1685,7 +1685,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       59.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/55_e9xlqu.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_55_e9xlqu.jpg",
 
             Stock:       80
 
@@ -1707,7 +1707,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       149.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/56_wtsghs.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_56_wtsghs.jpg",
 
             Stock:       35
 
@@ -1729,7 +1729,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       199.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/57_xhr1hc.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_57_xhr1hc.jpg",
 
             Stock:       55
 
@@ -1751,7 +1751,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       179.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/59_jhdp5i.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_59_jhdp5i.jpg",
 
             Stock:       40
 
@@ -1773,7 +1773,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       79.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/60_wm0poy.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_60_wm0poy.jpg",
 
             Stock:       90
 
@@ -1795,7 +1795,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       89.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/61_idurxt.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_61_idurxt.jpg",
 
             Stock:       20
 
@@ -1817,7 +1817,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       44.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/62_yy1bl4.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_62_yy1bl4.jpg",
 
             Stock:       70
 
@@ -1839,7 +1839,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       54.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/63_ngnkca.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_63_ngnkca.jpg",
 
             Stock:       15
 
@@ -1861,7 +1861,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       64.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/64_wlcmak.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_64_wlcmak.jpg",
 
             Stock:       25
 
@@ -1883,7 +1883,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       169.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/65_tocqmf.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_65_tocqmf.jpg",
 
             Stock:       50
 
@@ -1905,7 +1905,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       129.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/66_d3xdez.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_66_d3xdez.jpg",
 
             Stock:       100
 
@@ -1927,7 +1927,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       74.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/67_z46ccx.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_67_z46ccx.jpg",
 
             Stock:       75
 
@@ -1949,7 +1949,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       99.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/68_sohdgh.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_68_sohdgh.jpg",
 
             Stock:       30
 
@@ -1971,7 +1971,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       49.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/69_i4mn2w.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_69_i4mn2w.jpg",
 
             Stock:       60
 
@@ -1993,7 +1993,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       159.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/71_jo8tpk.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_71_jo8tpk.jpg",
 
             Stock:       45
 
@@ -2015,7 +2015,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       69.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/72_uallfr.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_72_uallfr.jpg",
 
             Stock:       80
 
@@ -2037,7 +2037,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       59.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/73_sqnfen.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_73_sqnfen.jpg",
 
             Stock:       35
 
@@ -2059,7 +2059,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       229.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/74_ysjc65.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_74_ysjc65.jpg",
 
             Stock:       55
 
@@ -2081,7 +2081,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       189.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/75_cbbnkn.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_75_cbbnkn.jpg",
 
             Stock:       40
 
@@ -2103,7 +2103,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       159.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/76_pvo2gb.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_76_pvo2gb.jpg",
 
             Stock:       90
 
@@ -2125,7 +2125,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       109.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/77_kfcs46.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_77_kfcs46.jpg",
 
             Stock:       20
 
@@ -2147,7 +2147,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       139.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/78_y3ppkj.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_78_y3ppkj.jpg",
 
             Stock:       70
 
@@ -2169,7 +2169,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       69.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/79_iqxuyk.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_79_iqxuyk.jpg",
 
             Stock:       15
 
@@ -2191,7 +2191,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       159.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/80_dxguwk.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_80_dxguwk.jpg",
 
             Stock:       25
 
@@ -2213,7 +2213,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       89.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/81_lsr1cu.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_81_lsr1cu.jpg",
 
             Stock:       50
 
@@ -2235,7 +2235,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       119.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/82_pr1yg1.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_82_pr1yg1.jpg",
 
             Stock:       100
 
@@ -2257,7 +2257,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       79.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/83_kkwuiq.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_83_kkwuiq.jpg",
 
             Stock:       75
 
@@ -2279,7 +2279,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       89.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/84_z32zcq.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_84_z32zcq.jpg",
 
             Stock:       30
 
@@ -2301,7 +2301,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       239.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/85_oplnxe.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_85_oplnxe.jpg",
 
             Stock:       60
 
@@ -2323,7 +2323,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       44.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/86_pedsf7.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_86_pedsf7.jpg",
 
             Stock:       45
 
@@ -2345,7 +2345,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       54.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/87_nrteml.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_87_nrteml.jpg",
 
             Stock:       80
 
@@ -2367,7 +2367,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       189.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/88_oy1eyf.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_88_oy1eyf.jpg",
 
             Stock:       35
 
@@ -2389,7 +2389,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       64.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/89_ohydg6.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_89_ohydg6.jpg",
 
             Stock:       55
 
@@ -2411,7 +2411,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       74.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/90_do3qaq.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_90_do3qaq.jpg",
 
             Stock:       40
 
@@ -2433,7 +2433,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       99.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/91_wuko6p.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_91_wuko6p.jpg",
 
             Stock:       90
 
@@ -2455,7 +2455,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       49.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/92_yx9jgj.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_92_yx9jgj.jpg",
 
             Stock:       20
 
@@ -2477,7 +2477,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       69.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/93_daaebs.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_93_daaebs.jpg",
 
             Stock:       70
 
@@ -2499,7 +2499,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       59.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/94_knl9bs.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_94_knl9bs.jpg",
 
             Stock:       15
 
@@ -2521,7 +2521,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       79.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/95_wxxslm.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_95_wxxslm.jpg",
 
             Stock:       25
 
@@ -2543,7 +2543,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       89.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/96_tovwol.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_96_tovwol.jpg",
 
             Stock:       50
 
@@ -2565,7 +2565,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       209.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/97_ad0bjp.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_97_ad0bjp.jpg",
 
             Stock:       100
 
@@ -2587,7 +2587,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       139.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/98_antmfl.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_98_antmfl.jpg",
 
             Stock:       75
 
@@ -2609,7 +2609,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       219.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/99_dw9q49.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_99_dw9q49.jpg",
 
             Stock:       30
 
@@ -2631,7 +2631,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       149.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/100_yrtcgo.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_100_yrtcgo.jpg",
 
             Stock:       60
 
@@ -2653,7 +2653,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       79.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/101_az0zfs.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_101_az0zfs.jpg",
 
             Stock:       45
 
@@ -2675,7 +2675,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       249.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/102_q9hzfp.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_102_q9hzfp.jpg",
 
             Stock:       80
 
@@ -2697,7 +2697,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       219.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/103_iuiank.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_103_iuiank.jpg",
 
             Stock:       35
 
@@ -2719,7 +2719,7 @@ internal sealed class ExcelDataSeeder : ISeeder
 
             Price:       179.99m,
 
-            ImageUrl:    "https://res.cloudinary.com/ddjzbouvr/image/upload/v1777056667/104_n3lmnz.jpg",
+            ImageUrl:    "https://res.cloudinary.com/dbh8kltdl/image/upload/download_104_n3lmnz.jpg",
 
             Stock:       55
 
