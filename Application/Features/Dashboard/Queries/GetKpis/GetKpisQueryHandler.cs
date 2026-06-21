@@ -9,6 +9,17 @@ namespace Application.Features.Dashboard.Queries.GetKpis;
 /// Fetches dashboard KPIs via IDashboardRepository.
 /// Cache-stampede prevention: per-key SemaphoreSlim stored in a static ConcurrentDictionary.
 /// Cache TTL: 5 minutes.
+///
+/// BUGFIX (unbounded memory growth): the cache key includes the exact From/To dates,
+/// so every distinct date range any retailer has ever requested used to leave a
+/// permanent SemaphoreSlim entry in the static dictionary — it was added via
+/// GetOrAdd but never removed, so the dictionary grew for the lifetime of the
+/// process. The finally block now does a best-effort removal of the semaphore once
+/// nobody else is waiting on it, so keys for one-off/rarely-reused date ranges don't
+/// accumulate forever. This is intentionally best-effort (not perfectly race-free):
+/// in the rare case a new waiter arrives in the tiny window between the count check
+/// and the removal, it simply creates a fresh semaphore for that key, which only
+/// costs an extra cache-stampede check — it never causes incorrect KPI data.
 /// </summary>
 
 public sealed class GetKpisQueryHandler : IRequestHandler<GetKpisQuery, KpiDto>
@@ -63,6 +74,13 @@ public sealed class GetKpisQueryHandler : IRequestHandler<GetKpisQuery, KpiDto>
         finally
         {
             gate.Release();
+
+            // Best-effort cleanup to stop the dictionary growing forever: only
+            // remove the entry if nobody else is currently queued behind it.
+            if (gate.CurrentCount == 1)
+            {
+                _locks.TryRemove(cacheKey, out _);
+            }
         }
     }
 }

@@ -49,6 +49,13 @@ public sealed class DashboardRepository : IDashboardRepository
         DateTime todayStart = DateTime.UtcNow.Date;
         DateTime todayEnd = todayStart.AddDays(1);
 
+        // "Today" only has DashboardSnapshotJob data once the job runs at the
+        // following midnight, so today's contribution must always come from a
+        // live query — but ONLY when today actually falls inside [from, to].
+        // Requesting a past range that ends before today must NOT pull in
+        // today's live numbers (that was bug: live data was added unconditionally).
+        bool rangeIncludesToday = from <= today && to >= today;
+
         // ── Run all independent DB queries sequentially on the shared DbContext ──
         // NOTE: These were previously fired concurrently via Task.WhenAll while all
         // sharing the SAME _context (DbContext) instance. EF Core's DbContext is NOT
@@ -62,11 +69,16 @@ public sealed class DashboardRepository : IDashboardRepository
         // these are cheap count/sum queries, so running them sequentially is fast
         // and, most importantly, correct.
 
+        // BUGFIX: the snapshot aggregation must also be bounded by `to` — it was
+        // previously missing the upper bound entirely, so a request for a past
+        // range (e.g. last month) silently summed every snapshot from `from` all
+        // the way up to yesterday, ignoring `to` and over-counting the result.
         var snapshotAgg = await _context.DashboardSnapshots
             .AsNoTracking()
             .Where(s =>
                 s.RetailerId == retailerId &&
                 s.SnapshotDate >= from &&
+                s.SnapshotDate <= to &&
                 s.SnapshotDate < today)
             .GroupBy(_ => 1)
             .Select(g => new
@@ -79,22 +91,44 @@ public sealed class DashboardRepository : IDashboardRepository
             })
             .FirstOrDefaultAsync(cancellationToken);
 
-        decimal liveRevenue = await _context.Orders
-            .AsNoTracking()
-            .Where(o =>
-                o.RetailerId == retailerId &&
-                o.Status == "Delivered" &&
-                o.CreatedAt >= todayStart &&
-                o.CreatedAt < todayEnd)
-            .SumAsync(o => (decimal?)o.TotalAmount, cancellationToken) ?? 0m;
+        // BUGFIX: live numbers for "today" (revenue, order count, try-ons) must
+        // only be queried — and added — when today is actually within the
+        // requested [from, to] range. Previously these ran unconditionally,
+        // so historical-only ranges incorrectly absorbed today's activity.
+        decimal liveRevenue = 0m;
+        int liveOrders = 0;
+        int liveTryOns = 0;
 
-        int liveTryOns = await _context.TryOnSessions
-            .AsNoTracking()
-            .Where(s =>
-                s.RetailerId == retailerId &&
-                s.CreatedAt >= todayStart &&
-                s.CreatedAt < todayEnd)
-            .CountAsync(cancellationToken);
+        if (rangeIncludesToday)
+        {
+            liveRevenue = await _context.Orders
+                .AsNoTracking()
+                .Where(o =>
+                    o.RetailerId == retailerId &&
+                    o.Status == "Delivered" &&
+                    o.CreatedAt >= todayStart &&
+                    o.CreatedAt < todayEnd)
+                .SumAsync(o => (decimal?)o.TotalAmount, cancellationToken) ?? 0m;
+
+            // BUGFIX: TotalOrders previously had no "today" contribution at all —
+            // unlike Revenue and TryOns, it summed ONLY the snapshot value, so any
+            // range including today silently under-counted today's orders.
+            liveOrders = await _context.Orders
+                .AsNoTracking()
+                .Where(o =>
+                    o.RetailerId == retailerId &&
+                    o.CreatedAt >= todayStart &&
+                    o.CreatedAt < todayEnd)
+                .CountAsync(cancellationToken);
+
+            liveTryOns = await _context.TryOnSessions
+                .AsNoTracking()
+                .Where(s =>
+                    s.RetailerId == retailerId &&
+                    s.CreatedAt >= todayStart &&
+                    s.CreatedAt < todayEnd)
+                .CountAsync(cancellationToken);
+        }
 
         int activeProducts = await _context.Products
             .AsNoTracking()
@@ -145,7 +179,7 @@ public sealed class DashboardRepository : IDashboardRepository
             : Math.Round((decimal)convertedSessions / totalSessions, 4);
 
         return new KpiDto(
-            TotalOrders: snapshotAgg?.Orders ?? 0,
+            TotalOrders: (snapshotAgg?.Orders ?? 0) + liveOrders,
             TotalRevenue: (snapshotAgg?.Revenue ?? 0m) + liveRevenue,
             TotalProfit: snapshotAgg?.Profit ?? 0m,
             TotalTryOns: (snapshotAgg?.TryOns ?? 0) + liveTryOns,
