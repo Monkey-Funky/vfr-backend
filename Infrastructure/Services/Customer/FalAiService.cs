@@ -50,7 +50,6 @@ public sealed class FalAiService : IFalAiService
         var requestBody = new RodinRequest
         {
             InputImageUrls = [imageUrl],
-            Condition = "person",
             Quality = "high"
         };
 
