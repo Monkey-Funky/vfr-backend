@@ -232,7 +232,7 @@ public sealed class ExtractMeasurementsFromImageRequest
     /// <summary>
     /// Side-view full-body photo. JPEG or PNG. Max 10 MB. Optional.
     /// </summary>
-    public IFormFile? SideImageFile { get; init; };
+    public IFormFile? SideImageFile { get; init; }
 
     /// <summary>
     /// The customer's actual height in centimeters (required for the AI model to scale estimates).
