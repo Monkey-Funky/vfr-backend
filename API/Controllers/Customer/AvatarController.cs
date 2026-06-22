@@ -142,10 +142,10 @@ public sealed class AvatarController : CustomerBaseApiController
     [SwaggerOperation(
         Summary = "Extract measurements from images",
         Description =
-            "Uploads TWO full-body photos (front view + side view) to an AI model that extracts body measurements. " +
+            "Uploads a front-view full-body photo (side view is optional) to an AI model that extracts body measurements. " +
             "Creates a new avatar if none exists, or updates the existing one. " +
             "The front image is persisted to storage as the avatar's source image " +
-            "(required for both 2D Overlay try-on and 3D SAM Align). " +
+            "(required for both 2D Overlay try-on and 3D generation). " +
             "Uses a two-phase save: measurements + SourceImageUrl are written to the database BEFORE " +
             "the optional 3D model generation step, so a fal.ai timeout never silently destroys try-on capability.")]
     [ProducesResponseType(typeof(ApiResponse<AvatarDto>), StatusCodes.Status200OK)]
@@ -164,11 +164,13 @@ public sealed class AvatarController : CustomerBaseApiController
             ContentType: request.FrontImageFile.ContentType,
             Length: request.FrontImageFile.Length);
 
-        var sideImageUpload = new FileUploadDto(
-            Content: request.SideImageFile.OpenReadStream(),
-            FileName: request.SideImageFile.FileName,
-            ContentType: request.SideImageFile.ContentType,
-            Length: request.SideImageFile.Length);
+        FileUploadDto? sideImageUpload = request.SideImageFile is not null
+            ? new FileUploadDto(
+                Content: request.SideImageFile.OpenReadStream(),
+                FileName: request.SideImageFile.FileName,
+                ContentType: request.SideImageFile.ContentType,
+                Length: request.SideImageFile.Length)
+            : null;
 
         var command = new ExtractMeasurementsFromImageCommand(frontImageUpload, sideImageUpload, request.HeightCm);
         var result = await Sender.Send(command, cancellationToken);
@@ -228,10 +230,9 @@ public sealed class ExtractMeasurementsFromImageRequest
     public IFormFile FrontImageFile { get; init; } = null!;
 
     /// <summary>
-    /// Side-view full-body photo. JPEG or PNG. Max 10 MB.
-    /// The customer should stand 90° to the side with arms slightly away from the body.
+    /// Side-view full-body photo. JPEG or PNG. Max 10 MB. Optional.
     /// </summary>
-    public IFormFile SideImageFile { get; init; } = null!;
+    public IFormFile? SideImageFile { get; init; };
 
     /// <summary>
     /// The customer's actual height in centimeters (required for the AI model to scale estimates).

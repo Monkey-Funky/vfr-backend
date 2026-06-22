@@ -33,9 +33,9 @@ public interface IBodyMeasurementExtractionService
         Stream frontImageStream,
         string frontFileName,
         string frontContentType,
-        Stream sideImageStream,
-        string sideFileName,
-        string sideContentType,
+        Stream? sideImageStream,
+        string? sideFileName,
+        string? sideContentType,
         decimal heightCm,
         CancellationToken ct = default);
 }

@@ -53,21 +53,28 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
         //    Each consumer wraps the stream in StreamContent which disposes it on completion,
         //    so we give each one a fresh, disposable MemoryStream from the same byte[].
         await using var originalFrontStream = request.FrontImageFile.Content;
-        await using var originalSideStream = request.SideImageFile.Content;
-
         var frontBytes = await ReadAllBytesAsync(originalFrontStream, cancellationToken);
-        var sideBytes = await ReadAllBytesAsync(originalSideStream, cancellationToken);
 
-        // Validate magic bytes for both images before forwarding to AI.
+        byte[]? sideBytes = null;
+        if (request.SideImageFile is not null)
+        {
+            await using var originalSideStream = request.SideImageFile.Content;
+            sideBytes = await ReadAllBytesAsync(originalSideStream, cancellationToken);
+        }
+
+        // Validate magic bytes before forwarding to AI.
         await using (var validateStream = new MemoryStream(frontBytes, writable: false))
             await ValidateImageMagicBytesAsync(validateStream, "front image", cancellationToken);
 
-        await using (var validateSideStream = new MemoryStream(sideBytes, writable: false))
+        if (sideBytes is not null)
+        {
+            await using var validateSideStream = new MemoryStream(sideBytes, writable: false);
             await ValidateImageMagicBytesAsync(validateSideStream, "side image", cancellationToken);
+        }
 
         // 2. Compute image hashes for cache key (before any AI calls).
         var frontImageHash = _aiCache.HashBytes(frontBytes);
-        var sideImageHash = _aiCache.HashBytes(sideBytes);
+        var sideImageHash = sideBytes is not null ? _aiCache.HashBytes(sideBytes) : string.Empty;
 
         var avatarRequestHash = _aiCache.ComputeAvatarHash(
             frontImageHash: frontImageHash,
@@ -134,14 +141,14 @@ internal sealed class ExtractMeasurementsFromImageCommandHandler
                 "Daily AI generation limit reached. Please try again tomorrow. Cached results remain available.");
         }
 
-        // 5. Send both images to the AI model (uses throwaway streams from buffered bytes).
+        // 5. Send images to the AI model (side image is optional).
         var measurements = await _extractionService.ExtractAsync(
             new MemoryStream(frontBytes, writable: false),
             request.FrontImageFile.FileName,
             request.FrontImageFile.ContentType,
-            new MemoryStream(sideBytes, writable: false),
-            request.SideImageFile.FileName,
-            request.SideImageFile.ContentType,
+            sideBytes is not null ? new MemoryStream(sideBytes, writable: false) : null,
+            request.SideImageFile?.FileName,
+            request.SideImageFile?.ContentType,
             request.HeightCm,
             cancellationToken);
 

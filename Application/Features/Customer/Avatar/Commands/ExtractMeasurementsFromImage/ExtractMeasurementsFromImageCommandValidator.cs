@@ -22,10 +22,7 @@ public sealed class ExtractMeasurementsFromImageCommandValidator
             .WithMessage($"Front image file must not exceed {MaxImageSizeBytes / (1024 * 1024)} MB.")
             .When(x => x.FrontImageFile is not null);
 
-        RuleFor(x => x.SideImageFile)
-            .NotNull().WithMessage("Side image file is required.");
-
-        RuleFor(x => x.SideImageFile.Length)
+        RuleFor(x => x.SideImageFile!.Length)
             .GreaterThan(0).WithMessage("Side image file must not be empty.")
             .LessThanOrEqualTo(MaxImageSizeBytes)
             .WithMessage($"Side image file must not exceed {MaxImageSizeBytes / (1024 * 1024)} MB.")
