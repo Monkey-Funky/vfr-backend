@@ -57,8 +57,8 @@ public sealed class FalAiService : IFalAiService
         var result = await _queueClient.SubmitAndPollAsync<RodinRequest, RodinResponse>(
             _settings.BodyApiId, requestBody, ct);
 
-        var glbUrl = result.Model?.Mesh?.Url
-            ?? throw new ExternalServiceException("FalAi", "Hyper3D Rodin did not return a model mesh URL.");
+        var glbUrl = result.ModelMesh?.Url
+            ?? throw new ExternalServiceException("FalAi", "Hyper3D Rodin did not return a model_mesh URL.");
 
         _logger.LogInformation("Hyper3D Rodin generation completed. GLB: {GlbUrl}", glbUrl);
         return new FalBodyResult(glbUrl, 1000.0);
@@ -162,8 +162,11 @@ public sealed class FalAiService : IFalAiService
         [JsonPropertyName("input_image_urls")]
         public List<string> InputImageUrls { get; init; } = [];
 
-        [JsonPropertyName("condition")]
-        public string Condition { get; init; } = "person";
+        [JsonPropertyName("condition_mode")]
+        public string ConditionMode { get; init; } = "concat";
+
+        [JsonPropertyName("geometry_file_format")]
+        public string GeometryFileFormat { get; init; } = "glb";
 
         [JsonPropertyName("quality")]
         public string Quality { get; init; } = "high";
@@ -171,14 +174,8 @@ public sealed class FalAiService : IFalAiService
 
     private sealed class RodinResponse
     {
-        [JsonPropertyName("model")]
-        public RodinModel? Model { get; init; }
-    }
-
-    private sealed class RodinModel
-    {
-        [JsonPropertyName("mesh")]
-        public FileResponse? Mesh { get; init; }
+        [JsonPropertyName("model_mesh")]
+        public FileResponse? ModelMesh { get; init; }
     }
 
     // ══════════════════════════════════════════════════════════════════════
