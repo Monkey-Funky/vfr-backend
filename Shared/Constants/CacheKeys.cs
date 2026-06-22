@@ -62,6 +62,10 @@ public static class CacheKeys
     public static string CustomerFavoritesList(Guid customerId)
         => $"cust_favorites:{customerId:N}";
 
+    // Customer favorites check (bulk) — prefix used for invalidation
+    public static string CustomerFavoritesCheckPrefix(Guid customerId)
+        => $"check_favorites:{customerId:N}";
+
     // Customer addresses
     public static string CustomerAddresses(Guid customerId)
         => $"cust_addresses:{customerId:N}";

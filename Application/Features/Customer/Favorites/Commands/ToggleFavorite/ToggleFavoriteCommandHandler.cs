@@ -83,15 +83,17 @@ internal sealed class ToggleFavoriteCommandHandler : IRequestHandler<ToggleFavor
         {
             await _context.SaveChangesAsync(cancellationToken);
 
-            // Invalidate favorites cache for this customer (all pages)
+            // Invalidate favorites list cache (all pages) and bulk-check cache
             await _cacheService.RemoveByPrefixAsync(
                 CacheKeys.CustomerFavoritesList(customerId), cancellationToken);
+            await _cacheService.RemoveByPrefixAsync(
+                CacheKeys.CustomerFavoritesCheckPrefix(customerId), cancellationToken);
 
             return (true, isFavoriteNow);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
         {
-            // Idempotency: rapid toggle race condition — duplicate already favorited.
+            // Idempotency: rapid toggle race condition ï¿½ duplicate already favorited.
             return (true, true);
         }
     }
