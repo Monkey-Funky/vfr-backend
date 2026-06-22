@@ -20,6 +20,8 @@ namespace Infrastructure.Persistence.Seeders;
 ///  12. try_on_sessions            – 60 VFR sessions across 90 days
 ///  13. vfr_engagement_metrics     – 30 daily aggregate metrics
 ///  14. dashboard_snapshots        – 30 days of nightly KPI snapshots
+///  15. fit_accuracies             – 40 VFR size-prediction accuracy records (75 % accuracy)
+///  16. return_reasons             – 15 customer return-reason records across 90 days
 ///
 /// DESIGN RULES (same as SubscriptionPlanSeeder):
 ///   • Idempotent  — all inserts use ON CONFLICT (id) DO NOTHING.
@@ -105,6 +107,14 @@ internal sealed class TransactionalDataSeeder : ISeeder
     private static Guid Snap(int n) =>
         new($"d8000000-0000-0000-0000-{n:D12}");
 
+    // ── Fit Accuracy Records ───────────────────────────────────────────────────
+    private static Guid FitAcc(int n) =>
+        new($"fa000000-0000-0000-0000-{n:D12}");
+
+    // ── Return Reason Records ──────────────────────────────────────────────────
+    private static Guid Ret(int n) =>
+        new($"fb000000-0000-0000-0000-{n:D12}");
+
     // ── Inventory record IDs (eeeeeeee pattern from ExcelDataSeeder) ──────────
     private static Guid Inv(int n) =>
         new($"eeeeeeee-eeee-eeee-eeee-eeee{n:D8}");
@@ -130,18 +140,46 @@ internal sealed class TransactionalDataSeeder : ISeeder
 
     public async Task SeedAsync(CancellationToken ct = default)
     {
-        // Fast-path: if subscription already exists assume transactional data is present.
-        bool alreadySeeded = await _db.Database
+        // BUGFIX: the old check only verified that the subscription record exists.
+        // This caused analytics tables (dashboard_snapshots, try_on_sessions,
+        // fit_accuracies, return_reasons) to be PERMANENTLY SKIPPED if the
+        // subscription was first seeded in a deployment that pre-dated those tables.
+        // The fix checks ALL critical analytics tables so any missing data is
+        // backfilled on the next application startup — without re-inserting rows
+        // that already exist (every method uses ON CONFLICT (id) DO NOTHING).
+
+        bool subscriptionExists = await _db.Database
             .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM subscriptions WHERE id = {SubscriptionId}")
             .AnyAsync(ct);
 
-        if (alreadySeeded)
-        {
-            _log.LogDebug("TransactionalDataSeeder: data already present — running offers upsert to ensure images are current.");
+        // Only run the remaining checks when the subscription is present to avoid
+        // five extra queries on a completely fresh DB (they'd all be false anyway).
+        bool snapshotsExist = subscriptionExists && await _db.Database
+            .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM dashboard_snapshots WHERE retailer_id = {RetailerId} LIMIT 1")
+            .AnyAsync(ct);
 
-            // Even when already seeded, re-run offers upsert so cover_image_url is always kept
-            // up to date (ON CONFLICT DO UPDATE). This fixes cases where offers were originally
-            // inserted without images due to an earlier ON CONFLICT DO NOTHING guard.
+        bool tryOnSessionsExist = subscriptionExists && await _db.Database
+            .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM try_on_sessions WHERE retailer_id = {RetailerId} LIMIT 1")
+            .AnyAsync(ct);
+
+        bool fitAccuraciesExist = subscriptionExists && await _db.Database
+            .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM fit_accuracies WHERE retailer_id = {RetailerId} LIMIT 1")
+            .AnyAsync(ct);
+
+        bool returnReasonsExist = subscriptionExists && await _db.Database
+            .SqlQuery<int>($"SELECT 1 AS \"Value\" FROM return_reasons WHERE retailer_id = {RetailerId} LIMIT 1")
+            .AnyAsync(ct);
+
+        bool allSeeded = subscriptionExists && snapshotsExist && tryOnSessionsExist
+                         && fitAccuraciesExist && returnReasonsExist;
+
+        if (allSeeded)
+        {
+            _log.LogDebug("TransactionalDataSeeder: all analytics data present — running offers upsert only.");
+
+            // Even when fully seeded, re-run offers upsert so cover_image_url is always
+            // kept up to date (ON CONFLICT DO UPDATE). This fixes cases where offers were
+            // originally inserted without images due to an earlier ON CONFLICT DO NOTHING.
             await using var offerTx = await _db.Database.BeginTransactionAsync(ct);
             try
             {
@@ -176,6 +214,8 @@ internal sealed class TransactionalDataSeeder : ISeeder
             await SeedTryOnSessionsAsync(ct);
             await SeedVfrEngagementMetricsAsync(ct);
             await SeedDashboardSnapshotsAsync(ct);
+            await SeedFitAccuraciesAsync(ct);
+            await SeedReturnReasonsAsync(ct);
 
             await tx.CommitAsync(ct);
             _log.LogInformation("TransactionalDataSeeder: all data seeded successfully.");
@@ -955,7 +995,152 @@ internal sealed class TransactionalDataSeeder : ISeeder
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // Private helpers
+    // 15. fit_accuracies  (40 records — 75 % accurate — spread over 90 days)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Seeds 40 VFR size-prediction accuracy records.
+    /// 30 accurate (75 %) and 10 inaccurate (25 %) — realistic for a well-tuned AI engine.
+    /// Records 1–18 are linked to the purchased try-on sessions (Tryon 1–18).
+    /// Records 19–40 are unlinked (session_id = null) to cover browse-only fits.
+    ///
+    /// ROOT-CAUSE NOTE: this table was previously never seeded, so
+    /// GET .../dashboard/fit-accuracy and .../dashboard/size-distribution
+    /// always returned zeros/empty regardless of date range.
+    /// </summary>
+    private async Task SeedFitAccuraciesAsync(CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+
+        // Format: (idx, prodN, predicted, actual, wasAccurate, tryonN_or_null, daysAgo)
+        // Sizes use standard clothing labels; wasAccurate = (predicted == actual).
+        var records = new (int Idx, int ProdN, string Predicted, string Actual, bool Accurate, int? TryonN, int DaysAgo)[]
+        {
+            // ── Purchased sessions (18 records, 15 accurate / 3 inaccurate) ──────
+            ( 1,  1,  "M",  "M",  true,   1,  3),
+            ( 2,  13, "L",  "L",  true,   2,  4),
+            ( 3,  26, "S",  "S",  true,   3,  6),
+            ( 4,  37, "M",  "L",  false,  4,  8),   // ← inaccurate
+            ( 5,  42, "L",  "L",  true,   5,  10),
+            ( 6,  50, "XL", "XL", true,   6,  12),
+            ( 7,  56, "M",  "M",  true,   7,  15),
+            ( 8,  65, "L",  "L",  true,   8,  18),
+            ( 9,  75, "S",  "M",  false,  9,  21),   // ← inaccurate
+            (10,  86, "M",  "M",  true,  10,  25),
+            (11,  97, "L",  "L",  true,  11,  29),
+            (12,  14, "M",  "M",  true,  12,  33),
+            (13,  23, "S",  "S",  true,  13,  39),
+            (14,  32, "L",  "XL", false, 14,  46),   // ← inaccurate
+            (15,  47, "M",  "M",  true,  15,  53),
+            (16,  60, "XL", "XL", true,  16,  61),
+            (17,  72, "L",  "L",  true,  17,  69),
+            (18,  83, "S",  "S",  true,  18,  76),
+
+            // ── Browse-only sessions (22 records, 15 accurate / 7 inaccurate) ──
+            (19,   5, "XL", "XL", true,  null,  1),
+            (20,   8, "M",  "M",  true,  null,  2),
+            (21,  11, "L",  "L",  true,  null,  5),
+            (22,   3, "S",  "S",  true,  null,  7),
+            (23,  16, "M",  "L",  false, null,  9),   // ← inaccurate
+            (24,  20, "L",  "L",  true,  null,  11),
+            (25,  25, "XS", "S",  false, null,  14),  // ← inaccurate
+            (26,  30, "M",  "M",  true,  null,  17),
+            (27,  35, "L",  "L",  true,  null,  22),
+            (28,  38, "S",  "S",  true,  null,  26),
+            (29,  40, "XL", "XL", true,  null,  31),
+            (30,  44, "M",  "M",  true,  null,  36),
+            (31,  48, "L",  "L",  true,  null,  41),
+            (32,  52, "S",  "M",  false, null,  47),  // ← inaccurate
+            (33,  55, "M",  "M",  true,  null,  54),
+            (34,  59, "L",  "L",  true,  null,  60),
+            (35,  63, "XL", "XL", true,  null,  66),
+            (36,  67, "M",  "M",  true,  null,  71),
+            (37,  70, "S",  "S",  true,  null,  75),
+            (38,  74, "L",  "XL", false, null,  79),  // ← inaccurate
+            (39,  78, "M",  "M",  true,  null,  83),
+            (40,  82, "L",  "L",  true,  null,  87),
+        };
+
+        foreach (var r in records)
+        {
+            var prodId = Prod(r.ProdN);
+            Guid? sessionId = r.TryonN.HasValue ? (Guid?)Tryon(r.TryonN.Value) : null;
+            var recordedAt = now.AddDays(-r.DaysAgo);
+
+            await _db.Database.ExecuteSqlAsync($"""
+                INSERT INTO fit_accuracies
+                    (id, retailer_id, product_id, predicted_size, actual_size,
+                     was_accurate, session_id, recorded_at)
+                VALUES
+                    ({FitAcc(r.Idx)}, {RetailerId}, {prodId}, {r.Predicted}, {r.Actual},
+                     {r.Accurate}, {sessionId}, {recordedAt})
+                ON CONFLICT (id) DO NOTHING
+                """, ct);
+        }
+
+        _log.LogDebug("TransactionalDataSeeder: fit accuracies seeded.");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // 16. return_reasons  (15 records — spread over 90 days)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Seeds 15 customer return-reason records tied to products from delivered orders.
+    /// Distribution: WrongSize 40 %, NotAsDescribed 13 %, LateDelivery 13 %,
+    ///               DefectivItem 7 %, DamagedInShipping 7 %, ChangedMind 7 %, Other 7 %.
+    ///
+    /// Reason strings MUST match the DB CHECK constraint values:
+    ///   WrongSize | DefectivItem | NotAsDescribed | ChangedMind |
+    ///   LateDelivery | DamagedInShipping | Other
+    ///
+    /// ROOT-CAUSE NOTE: this table was previously never seeded, so
+    /// GET .../dashboard/return-reasons, .../dashboard/return-rate,
+    /// and the KPI TotalReturns field always returned 0 / empty.
+    /// </summary>
+    private async Task SeedReturnReasonsAsync(CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+
+        // Format: (idx, prodN, reasonStr, daysAgo)
+        // Products are from delivered orders (1–12, 15–19) — no order-item FK enforced.
+        var records = new (int Idx, int ProdN, string Reason, int DaysAgo)[]
+        {
+            ( 1,   1, "WrongSize",         82),  // order 1  — Asymmetrical Wrap Blazer
+            ( 2,  13, "WrongSize",         78),  // order 2  — Leather Jacket
+            ( 3,   7, "NotAsDescribed",    74),  // order 3  — Nautical Pullover
+            ( 4,  14, "DamagedInShipping", 70),  // order 4  — Brown Faux-Leather Bomber
+            ( 5,  37, "LateDelivery",      66),  // order 5  — Dark Indigo Jeans
+            ( 6,  15, "WrongSize",         60),  // order 6  — Denim Trucker Jacket
+            ( 7,   4, "ChangedMind",       55),  // order 7  — Two-Tone Knit Cardigan
+            ( 8,   5, "DefectivItem",      50),  // order 8  — Two-Piece White Blazer Set
+            ( 9,   9, "WrongSize",         45),  // order 9  — Navy Ribbed Pullover
+            (10,  17, "Other",             40),  // order 10 — Dusty Pink Leather Moto
+            (11,  56, "WrongSize",         35),  // order 11 — Chocolate Wrap Maxi Dress
+            (12,  65, "NotAsDescribed",    28),  // order 12 — Black Maxi w/ Gold Buttons
+            (13,  74, "WrongSize",         17),  // order 15 — Terracotta Pleated Maxi
+            (14,  16, "LateDelivery",      14),  // order 16 — Classic Black Denim Jacket
+            (15,  86, "WrongSize",         10),  // order 17 — Cream Oversized Turtleneck
+        };
+
+        foreach (var r in records)
+        {
+            var prodId = Prod(r.ProdN);
+            var returnedAt = now.AddDays(-r.DaysAgo);
+            Guid? orderItemId = null;   // nullable — no order-item FK required
+
+            await _db.Database.ExecuteSqlAsync($"""
+                INSERT INTO return_reasons
+                    (id, retailer_id, order_item_id, product_id, reason, returned_at)
+                VALUES
+                    ({Ret(r.Idx)}, {RetailerId}, {orderItemId}, {prodId}, {r.Reason}, {returnedAt})
+                ON CONFLICT (id) DO NOTHING
+                """, ct);
+        }
+
+        _log.LogDebug("TransactionalDataSeeder: return reasons seeded.");
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
 
     /// <summary>
