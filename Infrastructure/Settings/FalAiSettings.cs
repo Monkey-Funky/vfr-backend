@@ -8,9 +8,9 @@ public sealed class FalAiSettings
 {
     public string ApiKey { get; init; } = string.Empty;
 
-    // ── SAM 3D APIs (purpose-built for humans + objects + scenes) ──────────
-    /// <summary>SAM 3D Body — accurate human body reconstruction ($0.02, 5-10s). Output is compatible with sam-3/3d-align.</summary>
-    public string BodyApiId { get; init; } = "fal-ai/sam-3/3d-body";
+    // ── Avatar Body APIs ──────────────────────────────────────────────────
+    /// <summary>Hyper3D Rodin — 3D avatar generation from image (~$0.04/generation).</summary>
+    public string BodyApiId { get; init; } = "fal-ai/hyper3d/rodin";
     /// <summary>SAM 3D Objects — clothing/item reconstruction ($0.02, typically 15-600s depending on garment complexity).</summary>
     public string ObjectsApiId { get; init; } = "fal-ai/sam-3/3d-objects";
     /// <summary>SAM 3D Align — scene composition ($0.02, 5-20s).</summary>
