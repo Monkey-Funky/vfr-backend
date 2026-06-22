@@ -50,23 +50,20 @@ internal sealed class GetCollectionItemsQueryHandler
         if (!collectionExists)
             throw new NotFoundException("WardrobeCollection", request.CollectionId);
 
-        // Join items → favorites to get the item row UUID, addedAt timestamp, and product ID.
-        // i.Id is the WardrobeCollectionItem row UUID the client needs for DELETE /items/{id}.
-        var query = _context.WardrobeCollectionItems
+        // Query WardrobeCollectionItems directly — no JOIN through CustomerFavorites.
+        // CustomerFavorites has a global soft-delete filter; joining it would silently drop
+        // items whose associated favorite was soft-deleted, causing itemCount > 0 but empty GET /items.
+        var itemsQuery = _context.WardrobeCollectionItems
             .AsNoTracking()
             .Where(i => i.CollectionId == request.CollectionId)
-            .Join(
-                _context.CustomerFavorites.AsNoTracking(),
-                i => i.FavoriteId,
-                f => f.Id,
-                (i, f) => new { ItemId = i.Id, AddedAt = i.CreatedAt, f.ProductId })
-            .OrderByDescending(x => x.AddedAt);
+            .OrderByDescending(i => i.CreatedAt);
 
-        var totalCount = await query.CountAsync(cancellationToken);
+        var totalCount = await itemsQuery.CountAsync(cancellationToken);
 
-        var page = await query
+        var page = await itemsQuery
             .Skip((request.PageNumber - 1) * request.PageSize)
             .Take(request.PageSize)
+            .Select(i => new { ItemId = i.Id, AddedAt = i.CreatedAt, i.FavoriteId })
             .ToListAsync(cancellationToken);
 
         if (page.Count == 0)
@@ -82,7 +79,19 @@ internal sealed class GetCollectionItemsQueryHandler
             return empty;
         }
 
-        var productIds = page.Select(x => x.ProductId).Distinct().ToList();
+        var favoriteIds = page.Select(x => x.FavoriteId).Distinct().ToList();
+
+        // Use IgnoreQueryFilters so soft-deleted favorites still resolve to their ProductId.
+        var favoriteProductMap = await _context.CustomerFavorites
+            .AsNoTracking()
+            .IgnoreQueryFilters()
+            .Where(f => favoriteIds.Contains(f.Id))
+            .Select(f => new { f.Id, f.ProductId })
+            .ToListAsync(cancellationToken);
+
+        var favDict = favoriteProductMap.ToDictionary(f => f.Id, f => f.ProductId);
+
+        var productIds = favDict.Values.Distinct().ToList();
 
         // Correlated subquery for the primary image URL — same pattern as BrowseProductsQueryHandler.
         // Avoids Include + AsSplitQuery and produces a single SQL SELECT per product batch.
@@ -107,13 +116,14 @@ internal sealed class GetCollectionItemsQueryHandler
 
         // Preserve the recency order from the paginated page.
         var dtos = page
-            .Where(x => productDict.ContainsKey(x.ProductId))
+            .Where(x => favDict.ContainsKey(x.FavoriteId) && productDict.ContainsKey(favDict[x.FavoriteId]))
             .Select(x =>
             {
-                var p = productDict[x.ProductId];
+                var productId = favDict[x.FavoriteId];
+                var p = productDict[productId];
                 return new CollectionItemDto(
                     x.ItemId,
-                    x.ProductId,
+                    productId,
                     p.Name,
                     p.PrimaryImageUrl,
                     p.Price,
