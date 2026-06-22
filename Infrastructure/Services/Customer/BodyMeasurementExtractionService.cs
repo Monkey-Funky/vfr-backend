@@ -31,17 +31,16 @@ internal sealed class BodyMeasurementExtractionService : IBodyMeasurementExtract
     {
         var aiApiUrl = _configuration["AiModels:MeasurementExtractionUrl"];
 
-        // ── Fallback for Local Development / Missing Configuration ──────────────
-        // When the AI endpoint is not yet configured, return deterministic mock
-        // measurements so the rest of the flow (upsert, history) can be tested
-        // end-to-end without a live AI model.
-        if (string.IsNullOrWhiteSpace(aiApiUrl))
+        // ── Fallback: no URL configured, or side image not provided ────────────
+        // The external measurement AI requires both images. When only the front
+        // image is available (side-image-free flow), return height-scaled defaults
+        // so the rest of the pipeline (upsert, 3D generation) can proceed.
+        if (string.IsNullOrWhiteSpace(aiApiUrl) || sideImageStream is null)
         {
             _logger.LogWarning(
-                "AiModels:MeasurementExtractionUrl is not configured. " +
-                "Returning mock measurements for development.");
-
-            await Task.Delay(1500, ct);
+                sideImageStream is null
+                    ? "No side image provided — returning height-based default measurements."
+                    : "AiModels:MeasurementExtractionUrl is not configured. Returning mock measurements.");
 
             return new BodyMeasurements(
                 HeightCm: heightCm,
