@@ -1,6 +1,8 @@
 using API.Filters;
+using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Infrastructure.Settings;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Swashbuckle.AspNetCore.Annotations;
 
@@ -23,17 +25,20 @@ public sealed class AdminHealthController : ControllerBase
     private readonly FalAiSettings _falAiSettings;
     private readonly IConfiguration _configuration;
     private readonly ICacheService _cache;
+    private readonly IApplicationDbContext _db;
     private readonly ILogger<AdminHealthController> _logger;
 
     public AdminHealthController(
         IOptions<FalAiSettings> falAiSettings,
         IConfiguration configuration,
         ICacheService cache,
+        IApplicationDbContext db,
         ILogger<AdminHealthController> logger)
     {
         _falAiSettings = falAiSettings.Value;
         _configuration = configuration;
         _cache = cache;
+        _db = db;
         _logger = logger;
     }
 
@@ -103,8 +108,43 @@ public sealed class AdminHealthController : ControllerBase
         return Ok(ApiResponse<FalAiHealthDto>.SuccessResponse(dto, "fal.ai configuration check completed. No credits were consumed."));
     }
 
+    // ==============================================================
+    // GET api/admin/health/ai-generation-errors
+    // ==============================================================
+    [HttpGet("ai-generation-errors")]
+    [SwaggerOperation(
+        Summary = "Get latest AI generation failures",
+        Description = "Returns the 10 most recent failed AI generation cache entries with their error messages. Useful for diagnosing why 3D avatar generation is silently failing.")]
+    [ProducesResponseType(typeof(ApiResponse<List<AiGenerationErrorDto>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAiGenerationErrors(CancellationToken cancellationToken)
+    {
+        var errors = await _db.AiGenerationCache
+            .Where(x => x.Status == "Failed")
+            .OrderByDescending(x => x.FailedAt)
+            .Take(10)
+            .Select(x => new AiGenerationErrorDto(
+                x.Id,
+                x.ModelId,
+                x.ErrorCode,
+                x.ErrorMessage,
+                x.FailedAt,
+                x.CustomerId))
+            .ToListAsync(cancellationToken);
+
+        return Ok(ApiResponse<List<AiGenerationErrorDto>>.SuccessResponse(errors, $"Found {errors.Count} recent failures."));
+    }
+
     private sealed record LastCalledEntry(DateTime CalledAt);
 }
+
+public sealed record AiGenerationErrorDto(
+    Guid Id,
+    string? ModelId,
+    string? ErrorCode,
+    string? ErrorMessage,
+    DateTime? FailedAt,
+    Guid CustomerId
+);
 
 public sealed record FalAiHealthDto(
     bool ApiKeyConfigured,
