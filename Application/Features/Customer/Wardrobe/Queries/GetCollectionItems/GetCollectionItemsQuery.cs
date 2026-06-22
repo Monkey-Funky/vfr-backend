@@ -1,5 +1,6 @@
-using Application.Features.Customer.Catalog.DTOs;
+using Application.Features.Customer.Wardrobe.DTOs;
 
 namespace Application.Features.Customer.Wardrobe.Queries.GetCollectionItems;
 
-public sealed record GetCollectionItemsQuery(Guid CollectionId, int PageNumber = 1, int PageSize = 20) : IRequest<PagedResult<ProductCardDto>>;
+public sealed record GetCollectionItemsQuery(Guid CollectionId, int PageNumber = 1, int PageSize = 20)
+    : IRequest<PagedResult<CollectionItemDto>>;

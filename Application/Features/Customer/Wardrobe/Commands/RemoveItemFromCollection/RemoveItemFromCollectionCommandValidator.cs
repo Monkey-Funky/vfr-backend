@@ -7,7 +7,7 @@ public sealed class RemoveItemFromCollectionCommandValidator : AbstractValidator
         RuleFor(x => x.CollectionId)
             .NotEmpty().WithMessage("Collection must be specified.");
 
-        RuleFor(x => x.ProductId) // <-- Changed this
-            .NotEmpty().WithMessage("Product must be specified.");
+        RuleFor(x => x.ItemId)
+            .NotEmpty().WithMessage("Item must be specified.");
     }
 }

@@ -32,17 +32,13 @@ internal sealed class RemoveItemFromCollectionCommandHandler : IRequestHandler<R
         if (!collectionExists)
             throw new NotFoundException("WardrobeCollection", request.CollectionId);
 
-        // Find the specific collection-item link via the product ID.
+        // Look up the item directly by its row UUID + collection ID.
+        // The collection ID check guards against cross-collection IDOR attacks.
         var collectionItem = await _context.WardrobeCollectionItems
-            .Join(
-                _context.CustomerFavorites,
-                item => item.FavoriteId,
-                fav => fav.Id,
-                (item, fav) => new { Item = item, fav.ProductId })
-            .Where(x => x.Item.CollectionId == request.CollectionId && x.ProductId == request.ProductId)
-            .Select(x => x.Item)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new NotFoundException("Product in Collection", request.ProductId);
+            .FirstOrDefaultAsync(
+                i => i.Id == request.ItemId && i.CollectionId == request.CollectionId,
+                cancellationToken)
+            ?? throw new NotFoundException("WardrobeCollectionItem", request.ItemId);
 
         collectionItem.SoftDelete();
         await _context.SaveChangesAsync(cancellationToken);

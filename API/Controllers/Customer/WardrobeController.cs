@@ -1,5 +1,4 @@
 using API.Controllers.BaseControllers;
-using Application.Features.Customer.Catalog.DTOs;
 using Application.Features.Customer.Wardrobe.Commands.AddItemToCollection;
 using Application.Features.Customer.Wardrobe.Commands.CreateCollection;
 using Application.Features.Customer.Wardrobe.Commands.DeleteCollection;
@@ -117,9 +116,9 @@ public sealed class WardrobeController : CustomerBaseApiController
     [HttpGet("{collectionId:guid}/items")]
     [SwaggerOperation(
         Summary = "Get Collection Items",
-        Description = "Retrieves a paginated list of products inside a specific collection."
+        Description = "Retrieves a paginated list of items inside a specific collection. Each item's \"id\" is the row UUID needed for DELETE /items/{id}."
     )]
-    [ProducesResponseType(typeof(ApiResponse<PagedResult<ProductCardDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<CollectionItemDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status422UnprocessableEntity)]
@@ -163,12 +162,12 @@ public sealed class WardrobeController : CustomerBaseApiController
     }
 
     // ==============================================================
-    // DELETE api/customers/{customerId}/wardrobe/collections/{collectionId}/items/products/{productId}
+    // DELETE api/customers/{customerId}/wardrobe/collections/{collectionId}/items/{itemId}
     // ==============================================================
-    [HttpDelete("{collectionId:guid}/items/products/{productId:guid}")]
+    [HttpDelete("{collectionId:guid}/items/{itemId:guid}")]
     [SwaggerOperation(
         Summary = "Remove Item from Collection",
-        Description = "Removes an item from a collection without unfavoriting the product."
+        Description = "Removes an item from a collection by the item row UUID (returned as \"id\" from GET /items). Does not unfavorite the product."
     )]
     [ProducesResponseType(typeof(ApiResponse<EmptyResult>), StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
@@ -177,12 +176,12 @@ public sealed class WardrobeController : CustomerBaseApiController
     public async Task<IActionResult> RemoveItemFromCollection(
         Guid customerId,
         Guid collectionId,
-        Guid productId,
+        Guid itemId,
         CancellationToken cancellationToken)
     {
         EnsureCustomerOwnership(customerId);
 
-        var command = new RemoveItemFromCollectionCommand(collectionId, productId);
+        var command = new RemoveItemFromCollectionCommand(collectionId, itemId);
         await Sender.Send(command, cancellationToken);
         return NoContentResponse();
     }

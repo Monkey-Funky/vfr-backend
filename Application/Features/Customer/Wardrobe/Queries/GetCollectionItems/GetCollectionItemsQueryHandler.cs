@@ -1,5 +1,4 @@
-﻿using Application.Features.Customer.Catalog.DTOs;
-using Application.Features.Customer.Catalog.Mappings;
+using Application.Features.Customer.Wardrobe.DTOs;
 using Application.Interfaces.Persistence;
 using Application.Interfaces.Services;
 using Domain.Enums.Product;
@@ -8,11 +7,13 @@ using Microsoft.EntityFrameworkCore;
 namespace Application.Features.Customer.Wardrobe.Queries.GetCollectionItems;
 
 /// <summary>
-/// Returns paginated products inside a wardrobe collection.
+/// Returns paginated items inside a wardrobe collection.
+/// Each item carries its own row UUID (needed by the client for DELETE /items/{id}),
+/// the product UUID, and hydrated product fields.
 /// Cache-aside: TTL 5 minutes. Invalidated by AddItemToCollection and RemoveItemFromCollection.
 /// </summary>
 internal sealed class GetCollectionItemsQueryHandler
-    : IRequestHandler<GetCollectionItemsQuery, PagedResult<ProductCardDto>>
+    : IRequestHandler<GetCollectionItemsQuery, PagedResult<CollectionItemDto>>
 {
     private readonly IApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
@@ -28,7 +29,7 @@ internal sealed class GetCollectionItemsQueryHandler
         _cacheService = cacheService;
     }
 
-    public async Task<PagedResult<ProductCardDto>> Handle(
+    public async Task<PagedResult<CollectionItemDto>> Handle(
         GetCollectionItemsQuery request,
         CancellationToken cancellationToken)
     {
@@ -38,7 +39,7 @@ internal sealed class GetCollectionItemsQueryHandler
         string cacheKey =
             $"wardrobe_items:{customerId:N}:{request.CollectionId:N}:p{request.PageNumber}s{request.PageSize}";
 
-        var cached = await _cacheService.GetAsync<PagedResult<ProductCardDto>>(cacheKey, cancellationToken);
+        var cached = await _cacheService.GetAsync<PagedResult<CollectionItemDto>>(cacheKey, cancellationToken);
         if (cached is not null)
             return cached;
 
@@ -49,7 +50,8 @@ internal sealed class GetCollectionItemsQueryHandler
         if (!collectionExists)
             throw new NotFoundException("WardrobeCollection", request.CollectionId);
 
-        // Paginate the product IDs via the join.
+        // Join items → favorites to get the item row UUID, addedAt timestamp, and product ID.
+        // i.Id is the WardrobeCollectionItem row UUID the client needs for DELETE /items/{id}.
         var query = _context.WardrobeCollectionItems
             .AsNoTracking()
             .Where(i => i.CollectionId == request.CollectionId)
@@ -57,20 +59,19 @@ internal sealed class GetCollectionItemsQueryHandler
                 _context.CustomerFavorites.AsNoTracking(),
                 i => i.FavoriteId,
                 f => f.Id,
-                (i, f) => new { i.CreatedAt, f.ProductId })
-            .OrderByDescending(x => x.CreatedAt);
+                (i, f) => new { ItemId = i.Id, AddedAt = i.CreatedAt, f.ProductId })
+            .OrderByDescending(x => x.AddedAt);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        var productIds = await query
+        var page = await query
             .Skip((request.PageNumber - 1) * request.PageSize)
             .Take(request.PageSize)
-            .Select(x => x.ProductId)
             .ToListAsync(cancellationToken);
 
-        if (productIds.Count == 0)
+        if (page.Count == 0)
         {
-            var empty = new PagedResult<ProductCardDto>
+            var empty = new PagedResult<CollectionItemDto>
             {
                 Items = [],
                 TotalCount = totalCount,
@@ -81,41 +82,48 @@ internal sealed class GetCollectionItemsQueryHandler
             return empty;
         }
 
-        // FIX: EF Core DbContext is NOT thread-safe — Task.WhenAll on the same context instance
-        // causes "A second operation was started on this context before a previous operation completed"
-        // (InvalidOperationException → 500). Queries must be awaited sequentially.
+        var productIds = page.Select(x => x.ProductId).Distinct().ToList();
+
+        // Correlated subquery for the primary image URL — same pattern as BrowseProductsQueryHandler.
+        // Avoids Include + AsSplitQuery and produces a single SQL SELECT per product batch.
+        // The global query filter on ProductImages (is_deleted = false) is applied automatically.
         var products = await _context.Products
             .AsNoTracking()
-            .Include(p => p.Images)
             .Where(p => productIds.Contains(p.Id) && p.Status == ProductStatus.Active)
-            .AsSplitQuery()
+            .Select(p => new
+            {
+                p.Id,
+                p.Name,
+                p.Price,
+                PrimaryImageUrl = _context.ProductImages
+                    .Where(img => img.ProductId == p.Id)
+                    .OrderBy(img => img.DisplayOrder)
+                    .Select(img => img.ImageUrl)
+                    .FirstOrDefault()
+            })
             .ToListAsync(cancellationToken);
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-
-        var activeOffers = await _context.Offers
-            .AsNoTracking()
-            .Where(o => o.Status == "Active"
-                     && o.StartDate <= today
-                     && (o.EndDate == null || o.EndDate >= today)
-                     && o.ProductId.HasValue
-                     && productIds.Contains(o.ProductId.Value))
-            .ToListAsync(cancellationToken);
-
-        // Preserve the collection-order (by item CreatedAt) from productIds.
         var productDict = products.ToDictionary(p => p.Id);
 
-        var dtos = productIds
-            .Where(id => productDict.ContainsKey(id))
-            .Select(id =>
+        // Preserve the recency order from the paginated page.
+        var dtos = page
+            .Where(x => productDict.ContainsKey(x.ProductId))
+            .Select(x =>
             {
-                var p = productDict[id];
-                var offer = activeOffers.FirstOrDefault(o => o.ProductId == p.Id);
-                return p.ToProductCardDto(offer, isFavorite: true); // always favorited — it's in their collection
+                var p = productDict[x.ProductId];
+                return new CollectionItemDto(
+                    x.ItemId,
+                    x.ProductId,
+                    p.Name,
+                    p.PrimaryImageUrl,
+                    p.Price,
+                    x.AddedAt,
+                    request.CollectionId
+                );
             })
             .ToList();
 
-        var result = new PagedResult<ProductCardDto>
+        var result = new PagedResult<CollectionItemDto>
         {
             Items = dtos,
             TotalCount = totalCount,
@@ -124,7 +132,6 @@ internal sealed class GetCollectionItemsQueryHandler
         };
 
         await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(5), cancellationToken);
-
         return result;
     }
 }
