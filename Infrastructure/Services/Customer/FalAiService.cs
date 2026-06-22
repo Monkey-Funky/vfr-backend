@@ -63,7 +63,7 @@ public sealed class FalAiService : IFalAiService
         };
 
         var result = await _queueClient.SubmitAndPollAsync<RodinRequest, RodinResponse>(
-            _settings.BodyApiId, requestBody, ct);
+            _settings.BodyApiId, requestBody, ct, _settings.RodinApiPollSeconds);
 
         var glbUrl = result.ModelMesh?.Url
             ?? throw new ExternalServiceException("FalAi", "Hyper3D Rodin did not return a model_mesh URL.");

@@ -26,6 +26,12 @@ public sealed class FalAiSettings
     public int MaxPollSeconds { get; init; } = 300;
 
     /// <summary>
+    /// Dedicated poll budget for Hyper3D Rodin (quality=high can take 60-300s).
+    /// 600s gives comfortable headroom.
+    /// </summary>
+    public int RodinApiPollSeconds { get; init; } = 600;
+
+    /// <summary>
     /// Dedicated poll budget for sam-3/3d-objects.
     /// Complex garments (e.g. blazers with intricate geometry) have been observed
     /// taking up to 537s on fal.ai. 700s gives comfortable headroom.
