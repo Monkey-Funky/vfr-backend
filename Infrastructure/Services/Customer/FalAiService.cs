@@ -50,7 +50,16 @@ public sealed class FalAiService : IFalAiService
         var requestBody = new RodinRequest
         {
             InputImageUrls = [imageUrl],
-            Quality = "high"
+            Prompt = "photorealistic full-body human avatar, detailed face with clear eyes nose and mouth, " +
+                     "natural skin texture, realistic clothing with fabric detail, " +
+                     "proper human proportions, neutral pose, clean studio lighting, " +
+                     "high resolution PBR textures, production-ready 3D character",
+            Tier = "Regular",
+            Quality = "high",
+            Material = "PBR",
+            GeometryFileFormat = "glb",
+            ConditionMode = "fuse",
+            TAPose = true
         };
 
         var result = await _queueClient.SubmitAndPollAsync<RodinRequest, RodinResponse>(
@@ -161,14 +170,31 @@ public sealed class FalAiService : IFalAiService
         [JsonPropertyName("input_image_urls")]
         public List<string> InputImageUrls { get; init; } = [];
 
-        [JsonPropertyName("condition_mode")]
-        public string ConditionMode { get; init; } = "concat";
+        [JsonPropertyName("prompt")]
+        public string Prompt { get; init; } = "";
+
+        /// <summary>Regular = production quality mesh.</summary>
+        [JsonPropertyName("tier")]
+        public string Tier { get; init; } = "Regular";
+
+        /// <summary>high | medium | low | extra-low.</summary>
+        [JsonPropertyName("quality")]
+        public string Quality { get; init; } = "high";
+
+        /// <summary>PBR = physically-based rendering (realistic skin/materials).</summary>
+        [JsonPropertyName("material")]
+        public string Material { get; init; } = "PBR";
 
         [JsonPropertyName("geometry_file_format")]
         public string GeometryFileFormat { get; init; } = "glb";
 
-        [JsonPropertyName("quality")]
-        public string Quality { get; init; } = "high";
+        /// <summary>fuse = single-image reconstruction.</summary>
+        [JsonPropertyName("condition_mode")]
+        public string ConditionMode { get; init; } = "fuse";
+
+        /// <summary>T/A-pose for clean body shape and clothing fit.</summary>
+        [JsonPropertyName("TAPose")]
+        public bool TAPose { get; init; } = true;
     }
 
     private sealed class RodinResponse

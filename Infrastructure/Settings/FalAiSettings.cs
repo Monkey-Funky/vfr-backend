@@ -9,7 +9,7 @@ public sealed class FalAiSettings
     public string ApiKey { get; init; } = string.Empty;
 
     // ── Avatar Body APIs ──────────────────────────────────────────────────
-    /// <summary>Hyper3D Rodin — 3D avatar generation from image (~$0.04/generation).</summary>
+    /// <summary>Hyper3D Rodin — 3D avatar generation from image (~$0.4/generation, quality=high).</summary>
     public string BodyApiId { get; init; } = "fal-ai/hyper3d/rodin";
     /// <summary>SAM 3D Objects — clothing/item reconstruction ($0.02, typically 15-600s depending on garment complexity).</summary>
     public string ObjectsApiId { get; init; } = "fal-ai/sam-3/3d-objects";
